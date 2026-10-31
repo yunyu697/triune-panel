@@ -20,8 +20,9 @@ import (
 var indexHTML []byte
 
 // webBuildMarker 提取页面头部的 build 标记，如 "v0.8.1"。
-// 标记形如 <!-- triune-panel-web/<ver> -->，随版本发布更新。
-var webBuildMarker = regexp.MustCompile(`<!--\s*triune-panel-web/([^\s>]+)\s*-->`)
+// 标记形如 <!-- triune-panel-web/<ver> -->，随版本发布更新；
+// 允许标记后跟随其他说明文字，因此只锚定前缀不要求闭合箭头紧邻。
+var webBuildMarker = regexp.MustCompile(`<!--\s*triune-panel-web/([^\s>]+)`)
 
 func embeddedMarker() string {
 	if m := webBuildMarker.FindSubmatch(indexHTML); len(m) >= 2 {
