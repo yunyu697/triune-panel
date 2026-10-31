@@ -651,22 +651,28 @@ UNINSTALL
 $SUDO chmod 755 "$INSTALL_DIR/uninstall.sh"
 
 # ---- 每日自动备份（需 systemd；无 systemd 的环境跳过）----
-# 数据目录打包到 backups/，保留最近 7 份。面板停止不影响备份（tar 读 SQLite
-# WAL 文件以一致性快照方式拷贝，且备份在凌晨低峰执行）。
+# 走 triune-panel backup：与手动备份同一套逻辑（排除 backups/ 自身、按时间轮转、
+# 可选 age 加密），而不是裸 tar —— 裸 tar 拷运行中的 WAL 库拿不到一致快照。
 if [[ "$SERVICE_STARTED" -eq 1 ]]; then
   echo "→ 部署每日自动备份（03:30，保留最近 7 份）"
   $SUDO tee "$INSTALL_DIR/backup.sh" >/dev/null <<'BKSH'
 #!/usr/bin/env bash
 # Triune Panel 数据目录自动备份（由 systemd timer 每日触发）
+#
+# 想开启加密：把口令写进 $INSTALL_DIR/backup.pass 并 chmod 600 即可，
+# 本脚本检测到该文件非空就自动加 --passphrase-file。
+# 注意口令丢失 = 备份永久打不开，请另存一份到密码管理器。
 set -euo pipefail
 INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
+BIN="$INSTALL_DIR/triune-panel"
+PASS_FILE="${TRIUNE_BACKUP_PASS_FILE:-$INSTALL_DIR/backup.pass}"
 KEEP=7
-BK_DIR="$INSTALL_DIR/backups"
-mkdir -p "$BK_DIR"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-tar czf "$BK_DIR/triune-data-$STAMP.tar.gz" -C "$INSTALL_DIR" data 2>/dev/null || true
-# 清理超出保留数量的旧备份
-ls -1t "$BK_DIR"/triune-data-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+
+ARGS=(backup --data "$INSTALL_DIR/data" --out "$INSTALL_DIR/backups" --keep "$KEEP")
+if [[ -s "$PASS_FILE" ]]; then
+  ARGS+=(--passphrase-file "$PASS_FILE")
+fi
+exec "$BIN" "${ARGS[@]}"
 BKSH
   $SUDO chmod 755 "$INSTALL_DIR/backup.sh"
 
@@ -695,6 +701,7 @@ BKTMR
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable --now triune-panel-backup.timer 2>/dev/null || true
   echo "  ✔ 备份目录: $INSTALL_DIR/backups（手动备份: sudo bash $INSTALL_DIR/backup.sh）"
+  echo "    加密备份: 写入 $INSTALL_DIR/backup.pass 后 chmod 600，之后自动加密"
 else
   echo "→ 未检测到 systemd，跳过每日自动备份（可手动: tar czf backup.tar.gz -C $INSTALL_DIR data）"
 fi
@@ -870,6 +877,7 @@ if systemctl is-active --quiet "$SERVICE"; then
   fi
   print_login_info
   echo "  自动备份:  每日 03:30 → $INSTALL_DIR/backups（保留 7 份；手动: sudo bash $INSTALL_DIR/backup.sh）"
+  echo "  备份加密:  写入 $INSTALL_DIR/backup.pass 并 chmod 600 后自动启用（age 口令加密）"
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  查看日志:  journalctl -u triune-panel -f"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网；或 curl -fsSL $RAW_BASE/deploy/install.sh | sudo bash -s -- --uninstall）"

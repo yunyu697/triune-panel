@@ -3,8 +3,10 @@ module triune
 go 1.26.0
 
 require (
+	filippo.io/age v1.2.1
 	github.com/go-acme/lego/v4 v4.35.2
 	golang.org/x/crypto v0.58.0
+	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.0
 )

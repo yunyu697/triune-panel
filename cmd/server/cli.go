@@ -674,19 +674,54 @@ func cmdBackup(args []string) {
 	dataDir := fs.String("data", "", "数据目录（默认自动探测）")
 	outDir := fs.String("out", "", "输出目录（默认 <数据目录>/backups）")
 	keep := fs.Int("keep", backup.DefaultKeep, "保留份数")
+	passFile := fs.String("passphrase-file", "", "从文件读取加密口令（无人值守场景）")
+	passStdin := fs.Bool("passphrase-stdin", false, "从标准输入读取加密口令")
+	encrypt := fs.Bool("encrypt", false, "交互式输入口令并加密归档")
+	genPass := fs.Bool("gen-passphrase", false, "生成随机口令并用它加密（口令只显示一次）")
 	_ = fs.Parse(args)
 
 	dir := resolveDataDir(*dataDir)
-	res, err := backup.Create(backup.Options{DataDir: dir, OutDir: *outDir, Keep: *keep})
+
+	var pass string
+	if *genPass {
+		p, err := genPassphrase(6)
+		if err != nil {
+			die(1, "生成口令失败: %v", err)
+		}
+		fmt.Fprintln(os.Stderr, "\n  ⚠ 备份口令只显示这一次，请立刻存进密码管理器：")
+		fmt.Fprintf(os.Stderr, "\n    %s\n\n", p)
+		fmt.Fprintln(os.Stderr, "  丢失口令 = 备份永久打不开（age 没有后门，面板也救不回来）。")
+		pass = p
+	} else {
+		p, err := resolvePassphrase(passphraseOpts{file: passFile, stdin: passStdin}, *encrypt)
+		if err != nil {
+			die(2, "%v", err)
+		}
+		pass = p
+	}
+
+	res, err := backup.Create(backup.Options{
+		DataDir: dir, OutDir: *outDir, Keep: *keep, Passphrase: pass,
+	})
 	if err != nil {
 		die(1, "备份失败: %v", err)
 	}
 	fmt.Println("✔ 备份完成")
 	fmt.Printf("  %s%s\n", padLabel("归档", 10), res.Path)
 	fmt.Printf("  %s%s\n", padLabel("大小", 10), humanSize(res.Size))
+	if res.Encrypted {
+		fmt.Printf("  %s%s\n", padLabel("加密", 10), "age（口令加密，可用 `age -d` 独立解密）")
+	} else {
+		fmt.Printf("  %s%s\n", padLabel("加密", 10), "未加密（含密码哈希与用户凭据，请勿放到不可信位置）")
+	}
 	fmt.Printf("  %s%d 份\n", padLabel("保留", 10), *keep)
 	if len(res.Removed) > 0 {
 		fmt.Printf("  %s%d 份旧归档已轮转删除\n", padLabel("清理", 10), len(res.Removed))
+	}
+	if res.WALBytes > 0 {
+		fmt.Printf("\n  提示: triune.db-wal 里还有 %s 未合并的事务，已一并打包（恢复时会自动重放）。\n", humanSize(res.WALBytes))
+		fmt.Println("        若面板正在运行，建议停服后再备份一次，避免拿到不一致的快照：")
+		fmt.Println("        sudo systemctl stop triune-panel && sudo triune-panel backup")
 	}
 }
 
@@ -702,6 +737,8 @@ func cmdRestore(args []string) {
 	yes := fs.Bool("yes", false, "跳过交互确认")
 	noBackup := fs.Bool("no-backup", false, "恢复前不备份当前数据（不推荐）")
 	force := fs.Bool("force", false, "面板可能仍在运行时也继续（危险）")
+	passFile := fs.String("passphrase-file", "", "从文件读取归档口令（加密归档需要）")
+	passStdin := fs.Bool("passphrase-stdin", false, "从标准输入读取归档口令")
 	_ = fs.Parse(args)
 
 	// Go 的 flag 解析到第一个非 flag 参数就停（`restore <归档> --yes` 里的
@@ -714,10 +751,15 @@ func cmdRestore(args []string) {
 		_ = fs.Parse(pos[1:])
 	}
 	if archive == "" || fs.NArg() > 0 {
-		die(2, "用法: triune-panel restore <归档.tar.gz> [--data DIR] [--yes]")
+		die(2, "用法: triune-panel restore <归档.tar.gz[.age]> [--data DIR] [--yes] [--passphrase-file FILE]")
 	}
 	if _, err := os.Stat(archive); err != nil {
 		die(1, "归档不存在: %s", archive)
+	}
+	// 加密归档先拿口令：拿不到就别往下走，免得删了临时目录才发现解不开
+	pass, err := requirePassphraseForArchive(archive, passphraseOpts{file: passFile, stdin: passStdin})
+	if err != nil {
+		die(2, "%v", err)
 	}
 	dir := resolveDataDir(*dataDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -737,7 +779,7 @@ func cmdRestore(args []string) {
 		die(1, "创建临时目录失败: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	dbPath, err := backup.ExtractDB(archive, tmpDir)
+	dbPath, err := backup.ExtractDB(archive, tmpDir, pass)
 	if err != nil {
 		die(1, "归档不可用: %v", err)
 	}
@@ -780,16 +822,16 @@ func cmdRestore(args []string) {
 		}
 	}
 
-	// ③ 恢复前备份当前数据
+	// ③ 恢复前备份当前数据（沿用同一口令：恢复加密备份时不能悄悄降级成明文备份）
 	if hasCurrentDB && !*noBackup {
-		pre, err := backup.Create(backup.Options{DataDir: dir, Keep: backup.DefaultKeep})
+		pre, err := backup.Create(backup.Options{DataDir: dir, Keep: backup.DefaultKeep, Passphrase: pass})
 		if err != nil {
 			die(1, "恢复前备份失败，已中止（当前数据未改动）: %v", err)
 		}
 		fmt.Printf("\n✔ 已备份当前数据: %s（%s）\n", pre.Path, humanSize(pre.Size))
 	}
 
-	res, err := backup.Restore(backup.RestoreOptions{Archive: archive, DataDir: dir})
+	res, err := backup.Restore(backup.RestoreOptions{Archive: archive, DataDir: dir, Passphrase: pass})
 	if err != nil {
 		die(1, "恢复失败: %v", err)
 	}

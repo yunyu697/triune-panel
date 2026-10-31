@@ -99,6 +99,55 @@ func TestRestoreBadArchive(t *testing.T) {
 	}
 }
 
+// TestExtractDBCarriesWAL 只读 schema 检查必须把 WAL 一起解出来。
+//
+// 面板的库是 WAL 模式，停服后最后一个事务常留在 triune.db-wal 里；
+// 只解主库会读到空库，误报「no such table: settings」。
+func TestExtractDBCarriesWAL(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "wal.tar.gz")
+	writeTar(t, archive, map[string]string{
+		"triune.db":      "MAIN",
+		"triune.db-wal":  "WAL-FRAMES",
+		"triune.db-shm":  "SHM",
+		"web/index.html": "x",
+	})
+
+	out := t.TempDir()
+	p, err := ExtractDB(archive, out, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != filepath.Join(out, "triune.db") {
+		t.Fatalf("返回的主库路径不对: %s", p)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "triune.db-wal")); string(b) != "WAL-FRAMES" {
+		t.Fatalf("WAL 必须一并解出，实际 %q", string(b))
+	}
+	// 只解库文件，别把整包都倒出来
+	if _, err := os.Stat(filepath.Join(out, "web")); !os.IsNotExist(err) {
+		t.Error("不应解出 triune.db 之外的其他文件")
+	}
+}
+
+// TestExtractDBEncryptedWAL 加密归档同样要带 WAL。
+func TestExtractDBEncryptedWAL(t *testing.T) {
+	src := t.TempDir()
+	mustWrite(t, filepath.Join(src, "triune.db"), "MAIN")
+	mustWrite(t, filepath.Join(src, "triune.db-wal"), "WAL-FRAMES")
+	res, err := Create(Options{DataDir: src, Passphrase: testPass})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if _, err := ExtractDB(res.Path, out, testPass); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "triune.db-wal")); string(b) != "WAL-FRAMES" {
+		t.Fatalf("加密归档的 WAL 未解出，实际 %q", string(b))
+	}
+}
+
 func writeTar(t *testing.T, path string, files map[string]string) {
 	t.Helper()
 	f, err := os.Create(path)

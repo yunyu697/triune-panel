@@ -17,6 +17,9 @@ type RestoreOptions struct {
 	Archive string    // 归档路径
 	DataDir string    // 目标数据目录
 	Now     time.Time // 便于测试注入
+	// Passphrase 归档为 age 加密时的口令；明文归档忽略此字段。
+	// 缺失时返回 ErrPassphraseRequired，调用方据此提示输入。
+	Passphrase string
 }
 
 // RestoreResult 恢复结果。
@@ -56,7 +59,7 @@ func Restore(opts RestoreOptions) (*RestoreResult, error) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	files, err := extract(opts.Archive, tmpDir)
+	files, err := extract(opts.Archive, tmpDir, opts.Passphrase)
 	if err != nil {
 		return nil, err
 	}
@@ -90,13 +93,14 @@ func Restore(opts RestoreOptions) (*RestoreResult, error) {
 }
 
 // extract 解包归档到 dst，返回写入的文件数。拒绝路径穿越与非常规文件。
-func extract(archive, dst string) (int, error) {
-	f, err := os.Open(archive)
+// 归档为 age 加密时先解密再解压（按魔数自动识别，不看扩展名）。
+func extract(archive, dst, passphrase string) (int, error) {
+	rc, err := openArchive(archive, passphrase)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+	defer rc.Close()
+	gz, err := gzip.NewReader(rc)
 	if err != nil {
 		return 0, fmt.Errorf("不是有效的 tar.gz: %w", err)
 	}
@@ -181,16 +185,28 @@ func moveEntries(src, dst string, skipKeep bool) (int, error) {
 	return n, nil
 }
 
-// ExtractDB 把归档里的 triune.db 单独解到 dir，返回其路径。
+// dbCheckFiles 做只读 schema 检查时需要一并解出的文件。
+//
+// 必须带上 -wal：面板的库是 WAL 模式，停服后最后一个事务常常还留在
+// triune.db-wal 里没合并回主库。只解 triune.db 会看到「空库」，
+// 表现为 no such table: settings——数据其实一点没少。
+var dbCheckFiles = map[string]bool{
+	"triune.db":     true,
+	"triune.db-wal": true,
+	"triune.db-shm": true,
+}
+
+// ExtractDB 把归档里的 triune.db（连同 -wal/-shm）解到 dir，返回主库路径。
 //
 // 用途：恢复前只读检查归档的 schema 版本，不必解整包。
-func ExtractDB(archive, dir string) (string, error) {
-	f, err := os.Open(archive)
+// 加密归档需要提供口令。
+func ExtractDB(archive, dir, passphrase string) (string, error) {
+	rc, err := openArchive(archive, passphrase)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+	defer rc.Close()
+	gz, err := gzip.NewReader(rc)
 	if err != nil {
 		return "", fmt.Errorf("不是有效的 tar.gz: %w", err)
 	}
@@ -200,6 +216,7 @@ func ExtractDB(archive, dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+	found := ""
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -208,10 +225,11 @@ func ExtractDB(archive, dir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if filepath.ToSlash(filepath.Clean(hdr.Name)) != "triune.db" || hdr.Typeflag != tar.TypeReg {
+		name := filepath.ToSlash(filepath.Clean(hdr.Name))
+		if !dbCheckFiles[name] || hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		dst := filepath.Join(dir, "triune.db")
+		dst := filepath.Join(dir, name)
 		out, err := os.Create(dst)
 		if err != nil {
 			return "", err
@@ -223,7 +241,12 @@ func ExtractDB(archive, dir string) (string, error) {
 		if err := out.Close(); err != nil {
 			return "", err
 		}
-		return dst, nil
+		if name == "triune.db" {
+			found = dst
+		}
 	}
-	return "", fmt.Errorf("归档里没有 triune.db")
+	if found == "" {
+		return "", fmt.Errorf("归档里没有 triune.db")
+	}
+	return found, nil
 }

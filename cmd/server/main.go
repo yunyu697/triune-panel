@@ -85,9 +85,9 @@ func usage() {
                                      重置管理密码（忘记密码时用；默认生成随机密码）
   triune-panel status [--json]       只读汇总：版本/入站/用户/证书/上次应用
   triune-panel doctor                环境自检（数据目录、密码状态、内核、防火墙、端口）
-  triune-panel backup [--out DIR] [--keep N]
+  triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase]
                                      打包数据目录到 backups/（默认保留 7 份）
-  triune-panel restore <归档.tar.gz> [--yes]
+  triune-panel restore <归档.tar.gz[.age]> [--yes]
                                      用备份覆盖数据目录（恢复前自动备份当前数据）
   triune-panel version               打印版本
   triune-panel help                  本帮助
@@ -95,6 +95,15 @@ func usage() {
 通用参数:
   --data DIR    数据目录；默认自动探测 ./data → /opt/triune-panel/data
                 （也可用环境变量 TRIUNE_DATA 指定）
+
+备份加密（age 口令模式，可选）:
+  backup --encrypt            交互输入口令（两次确认，无回显）
+  backup --gen-passphrase     随机生成口令，只打印一次
+  backup/restore --passphrase-file FILE    从文件读口令（systemd timer 用）
+  backup/restore --passphrase-stdin        从标准输入读口令
+  TRIUNE_BACKUP_PASSPHRASE    环境变量，优先级低于上面两个参数
+  口令至少 12 位；丢失口令 = 归档永久打不开（无后门、无法找回）。
+  归档是标准 age 格式，可用 "age -d 归档.tar.gz.age > 还原.tar.gz" 独立解密。
 
 退出码: 0 成功 · 1 执行失败 · 2 用法错误
 `)

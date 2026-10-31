@@ -10,3 +10,4 @@ downloads/
 *.update-new
 *.rollback-new
 .DS_Store
+.e2e/

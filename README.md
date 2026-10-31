@@ -69,8 +69,8 @@ echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --pass
 ```bash
 triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证书/上次应用/最近登录
 triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
-triune-panel backup [--out DIR] [--keep N]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
-triune-panel restore <归档.tar.gz> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
+triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
+triune-panel restore <归档.tar.gz[.age]> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
 triune-panel reset-password      # 见上一节
 triune-panel version
 ```
@@ -92,10 +92,60 @@ sudo systemctl start triune-panel
 |---|---|
 | 拒绝运行中恢复 | 检测 10010 端口是否仍在监听——daemon 持有旧 db 句柄，替换后它会继续写被移走的旧 inode，造成"数据分裂"；确认无误可 `--force` 跳过 |
 | 恢复前自动备份 | 先把当前数据打一份到 `backups/`，恢复错了还能回去（`--no-backup` 可关） |
-| schema 版本校验 | 只读解析归档里的 `triune.db`；归档比当前二进制**新**就拒绝（旧二进制打开新库会缺列）；更旧则允许，启动时自动迁移 |
+| schema 版本校验 | 只读解析归档里的 `triune.db`（连同 `-wal`/`-shm`——WAL 模式库停服后最后一个事务常还在 WAL 里，只解主库会误判成空库）；归档比当前二进制**新**就拒绝（旧二进制打开新库会缺列）；更旧则允许，启动时自动迁移 |
 | 路径穿越防护 | 归档里的绝对路径与 `..` 条目直接拒绝；`backups/` 不参与替换，历史备份不会被恢复清掉 |
 
 失败会自动回滚到恢复前状态（旧数据先移到 `.pre-restore-<时间>`，成功后才删除）。
+
+### 备份加密
+
+归档里有 `triune.db`——密码哈希、TOTP 密钥、全部用户凭据、订阅令牌都在里面。
+一旦落到对象存储、网盘、另一台机器，等于把面板钥匙一起交出去。加密是可选的：
+
+```bash
+sudo triune-panel backup --gen-passphrase     # 随机生成口令，只打印一次
+sudo triune-panel backup --encrypt            # 手动输入两次（无回显）
+```
+
+输出 `triune-data-<时间>.tar.gz.age`，是**标准 age 格式**（scrypt 口令模式），
+不依赖本面板也能解：
+
+```bash
+age -d triune-data-20261031-220347.tar.gz.age > 还原.tar.gz
+tar -xzf 还原.tar.gz -C /tmp/restore
+```
+
+`restore` 按文件头魔数（`age-encryption.org/v1`）自动识别，**不看扩展名**——
+改名的加密包不会当成明文去解，反过来也一样：
+
+```bash
+sudo triune-panel restore triune-data-20261031-220347.tar.gz.age --passphrase-file /etc/triune-panel/backup.pass
+```
+
+口令的四种给法（优先级从高到低）：
+
+| 方式 | 场景 |
+|---|---|
+| `--passphrase-file FILE` | systemd timer / cron 无人值守（文件建议 `chmod 600`） |
+| `--passphrase-stdin` | `pass show x \| triune-panel backup --passphrase-stdin` |
+| `TRIUNE_BACKUP_PASSPHRASE` | 容器环境变量注入 |
+| 交互式无回显 | 手动运维 |
+
+几点硬约定：
+
+- **口令不接受命令行明文参数**（`--passphrase xxx` 会留在 shell 历史与
+  `/proc/<pid>/cmdline` 里），只认上面四种。
+- 口令至少 12 个字符；太短直接拒绝，且**不会留下半个密文文件**。
+- **口令丢失 = 归档永久打不开**。age 没有后门，面板也没有恢复通道，
+  请把口令存进密码管理器，别和归档放同一台机器。
+- 恢复加密归档时，`restore` 的"恢复前自动备份"会沿用同一口令，
+  不会悄悄降级成明文备份。
+- 明文与加密归档可以混存，`--keep` 轮转按时间戳排序，一视同仁。
+
+WAL 模式的一个提醒：面板运行中 `triune.db-wal` 里可能还有未合并的事务，
+`backup` 会把它们一起打包（恢复时 SQLite 自动重放），但直接拷运行中的库
+理论上可能拿到不一致快照。`backup` 检测到未合并 WAL 会打印提示——
+要严格一致就先停服再备份。
 
 
 - **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
@@ -359,6 +409,27 @@ v0.8 已验证：
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
+v0.9.0 已验证：
+
+1. **备份加密**（`internal/backup/crypt.go` + `cmd/server/passphrase.go`）：age 口令模式
+   （scrypt + X25519），流式 `tar → gzip → age` 写入，归档名加 `.age`。
+   归档是标准 age 格式，`age -d` 可独立解密（已用官方 `age` 源码编译出 CLI 交叉验证：
+   解出的 tar.gz 内容与原始数据一致）。口令四种来源：`--passphrase-file` >
+   `--passphrase-stdin` > `TRIUNE_BACKUP_PASSPHRASE` > 交互无回显；
+   不接受命令行明文参数。口令不足 12 位直接拒绝且不留半个文件。
+   `restore` 按魔数自动识别加密与否，改名骗不过去；恢复前备份沿用同一口令。
+2. **修掉一个 WAL 相关的恢复 bug**：面板的库是 WAL 模式，停服后最后一个事务
+   常常还在 `triune.db-wal` 里没合并回主库。`restore` 的 schema 只读校验原先只解
+   `triune.db`，于是把正常备份误判成「no such table: settings」并拒绝恢复
+   （数据其实完好）。现在 `ExtractDB` 连 `-wal`/`-shm` 一起解，实测 79 KB 真实库
+   加密备份 → 恢复 → `status` 全部正常。补了 `TestExtractDBCarriesWAL` 等回归用例。
+3. **每日自动备份改用 `triune-panel backup`**：原先 `deploy/install.sh` 里是裸
+   `tar czf`，既拿不到一致快照也不能加密。现在脚本调用二进制自身的 backup
+   （统一轮转与排除逻辑），把口令写进 `$INSTALL_DIR/backup.pass` 并 `chmod 600`
+   即自动加密。
+4. **WAL 提示**：`backup` 发现 `triune.db-wal` 非空时提示「已一并打包，但运行中
+   建议停服再备份」，避免用户误以为拿到了严格一致的快照。
+
 v0.8.9 已验证：
 
 1. **审计日志**（`internal/store/audit.go` + `internal/api/audit.go`）：新增 `audit_log`
@@ -540,6 +611,14 @@ v0.8.1 已验证：
    等是沙箱化手段，开发环境是 macOS 无法实测。若升级后出现「能启动但写配置失败」
    「防火墙不放行」「自更新失败」这类症状，先按 `deploy/triune-panel.service`
    里的注释逐条放开（最可能是 `ReadWritePaths` 少了你的安装目录）。
+8. **运行中备份不是严格一致快照**：`backup` 直接拷数据目录里的文件，面板正在跑时
+   SQLite 可能在两次读取之间写入新事务。归档里 `-wal` 是完整的，恢复时能重放，
+   但理论上存在拿到"半新半旧"状态的窗口。要严格一致就停服后再备份
+   （`backup` 检测到未合并 WAL 会打印提示）。真正的在线快照要用
+   `VACUUM INTO` 或 SQLite Backup API，目前没做。
+9. **备份口令丢失无法找回**：age 是端到端加密，没有后门也没有恢复密钥。
+   `--gen-passphrase` 生成的口令只打印一次，务必当场存进密码管理器。
+   面板不会把口令写进任何配置或日志。
 
 ## 部署到 VPS
 
