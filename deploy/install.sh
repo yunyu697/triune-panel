@@ -17,6 +17,12 @@
 # 指定版本（默认自动取最新）:
 #   curl -fsSL .../install.sh | bash -s -- amd64 v0.8.0
 #
+# 自定义面板监听端口（默认 10010）:
+#   curl -fsSL .../install.sh | sudo TRIUNE_PANEL_PORT=10010 bash
+#
+# 安装时自动放行防火墙端口（ufw / firewalld / iptables 有则自动配，
+# 云服务器还需在厂商控制台安全组放行同一端口）。
+#
 # 下载源 = GitHub 原始地址 + 多个加速镜像，写在同一个候选池里；
 # 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优。
 # 也可手动指定镜像跳过探测:  curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
@@ -38,6 +44,7 @@ REPO="yunyu697/triune-panel"
 INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
 SYSTEMD_DIR="${TRIUNE_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE=triune-panel.service
+PANEL_PORT="${TRIUNE_PANEL_PORT:-10010}"   # 面板监听端口，可用环境变量覆盖
 GH_PROXY="${GH_PROXY:-}"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
 
@@ -402,7 +409,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=@EXEC@ -addr :2087 -data @DATA@
+ExecStart=@EXEC@ -addr :@PORT@ -data @DATA@
 Restart=on-failure
 RestartSec=3
 User=root
@@ -415,7 +422,8 @@ WantedBy=multi-user.target
 UNIT
 sed -i.bak \
   -e "s|@EXEC@|$(exec_prefix "$INSTALL_DIR/triune-panel")|g" \
-  -e "s|@DATA@|$(exec_prefix "$INSTALL_DIR/data")|g" "$UNIT_TMP" && rm -f "$UNIT_TMP.bak"
+  -e "s|@DATA@|$(exec_prefix "$INSTALL_DIR/data")|g" \
+  -e "s|@PORT@|$PANEL_PORT|g" "$UNIT_TMP" && rm -f "$UNIT_TMP.bak"
 if ! $SUDO tee "${SYSTEMD_DIR%/}/$SERVICE" >/dev/null < "$UNIT_TMP"; then
   echo ""
   echo "✘ 写入 systemd 单元失败: ${SYSTEMD_DIR%/}/$SERVICE"
@@ -524,9 +532,13 @@ $SUDO chmod 755 "$INSTALL_DIR/uninstall.sh"
 # ---- 健康检查 ----
 sleep 1.5
 
-# 访问地址探测：优先取本机默认路由源 IP（不受系统代理干扰）；
-# 是内网地址时再探测公网出口 IP（--noproxy 防止代理服务器 IP 混入）。
-# 每一步都做降级，缺命令（精简容器无 iproute2/curl）也不能让脚本崩掉。
+# 访问地址探测：
+#   1) 先取本机默认路由源 IP（不受系统代理干扰）——云服务器上这通常是内网 IP；
+#   2) 源 IP 是内网/回环地址（或取不到）时，再探测公网出口 IP。
+# 公网探测必须全部加 --noproxy '*'：否则系统里配置的代理（http_proxy 等）
+# 会让"公网 IP"显示成代理节点的 IP，而不是本机真实 IP——这是此前版本的 bug。
+# 探测源覆盖国际与国内可达服务，任一成功即返回；全部失败则输出空串，
+# 由调用方给出自查指引，绝不显示代理 IP 或错误 IP。
 detect_ip() {
   local ip=""
   ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="src"){print $(i+1)}}' | head -1) || true
@@ -534,11 +546,91 @@ detect_ip() {
   [[ -z "$ip" ]] && ip=$(hostname -I 2>/dev/null | awk '{print $1}') || true
   case "$ip" in
     ""|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*)
-      ip=$(curl --noproxy '*' -s --connect-timeout 3 https://api.ipify.org 2>/dev/null) || true
-      [[ -z "$ip" ]] && ip=$(curl -s --connect-timeout 3 https://ifconfig.me 2>/dev/null) || true
+      local pub c
+      for c in "https://api.ipify.org" "https://ifconfig.me/ip" "https://4.ipw.cn" \
+               "https://ip.3322.net" "https://api-ipv4.ip.sb/ip" "https://ipv4.icanhazip.com"; do
+        pub=$(curl --noproxy '*' -4 -s --connect-timeout 2 --max-time 4 "$c" 2>/dev/null | tr -d '[:space:]') || true
+        # 只接受形如 IPv4 的返回，防止代理/镜像返回 HTML 或代理自身 IP 以外的垃圾内容
+        case "$pub" in
+          [1-9]*.[0-9]*.[0-9]*.[0-9]*)
+            case "$pub" in
+              10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*|100.6[4-9].*|100.1[0-1][0-9].*|100.12[0-7].*)
+                continue ;;  # 返回的还是内网/CGNAT 地址，换下一个源
+              *) printf '%s' "$pub"; return 0 ;;
+            esac ;;
+        esac
+      done
+      printf '%s' "$ip"  # 公网探测全部失败：回退显示内网地址，由调用方提示
       ;;
+    *) printf '%s' "$ip"; return 0 ;;
   esac
-  printf '%s' "$ip"
+}
+
+# is_private_ip 判断给定地址是否内网/回环。
+is_private_ip() {
+  case "$1" in
+    ""|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ensure_port_open 安装时检查面板端口是否已放行，未放行则自动放行。
+# 只在检测到已启用的防火墙时才动配置：
+#   - ufw / firewalld：查询状态 → 未放行则 add；
+#   - iptables：仅当 INPUT 链默认策略为 DROP/REJECT 时才插入放行规则
+#     （避免在无防火墙的机器上无谓改动）；
+#   - 都没有：跳过并提示云服务器安全组需要放行（安全组无法在机器内修改）。
+ensure_port_open() {
+  local port="$1"
+  echo "→ 检查防火墙对端口 $port/tcp 的放行状态"
+  # 1) ufw
+  if command -v ufw >/dev/null 2>&1; then
+    if $SUDO ufw status 2>/dev/null | grep -qi "status: active"; then
+      if $SUDO ufw status 2>/dev/null | grep -q "$port/tcp"; then
+        echo "  ✔ ufw 已放行 $port/tcp"
+      else
+        if $SUDO ufw allow "$port/tcp" >/dev/null 2>&1; then
+          echo "  ✔ 已在 ufw 放行 $port/tcp"
+        else
+          echo "  ⚠ ufw 放行失败，请手动执行: sudo ufw allow $port/tcp"
+        fi
+      fi
+    else
+      echo "  · ufw 未启用，跳过"
+    fi
+    return 0
+  fi
+  # 2) firewalld
+  if command -v firewall-cmd >/dev/null 2>&1 && $SUDO firewall-cmd --state >/dev/null 2>&1; then
+    if $SUDO firewall-cmd --query-port="$port/tcp" 2>/dev/null | grep -q yes; then
+      echo "  ✔ firewalld 已放行 $port/tcp"
+    else
+      if $SUDO firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 \
+         && $SUDO firewall-cmd --reload >/dev/null 2>&1; then
+        echo "  ✔ 已在 firewalld 放行 $port/tcp"
+      else
+        echo "  ⚠ firewalld 放行失败，请手动执行:"
+        echo "      sudo firewall-cmd --permanent --add-port=$port/tcp && sudo firewall-cmd --reload"
+      fi
+    fi
+    return 0
+  fi
+  # 3) iptables（仅默认策略为 DROP/REJECT 时才需要放行）
+  if command -v iptables >/dev/null 2>&1; then
+    if $SUDO iptables -S INPUT 2>/dev/null | grep -Eq -- "-P INPUT (DROP|REJECT)"; then
+      if $SUDO iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+        echo "  ✔ iptables 已放行 $port/tcp"
+      elif $SUDO iptables -I INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+        echo "  ✔ 已在 iptables 放行 $port/tcp（注意：该规则重启后失效，建议持久化）"
+      else
+        echo "  ⚠ iptables 放行失败，请手动执行: sudo iptables -I INPUT -p tcp --dport $port -j ACCEPT"
+      fi
+    else
+      echo "  · iptables INPUT 默认策略非 DROP/REJECT，跳过"
+    fi
+    return 0
+  fi
+  echo "  · 未检测到防火墙工具，跳过"
 }
 
 if [[ "$SERVICE_STARTED" -eq 0 ]]; then
@@ -546,23 +638,38 @@ if [[ "$SERVICE_STARTED" -eq 0 ]]; then
   echo ""
   echo "✔ Triune Panel 已安装完成（当前环境无 systemd，未注册开机自启）"
   echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
-  echo "  手动启动: $INSTALL_DIR/triune-panel -addr :2087 -data $INSTALL_DIR/data"
-  echo "  后台启动: nohup $INSTALL_DIR/triune-panel -addr :2087 -data $INSTALL_DIR/data >/var/log/triune-panel.log 2>&1 &"
-  IP=$(detect_ip); [[ -z "$IP" ]] && IP="<服务器IP>"
-  echo "  访问:      http://$IP:2087"
+  echo "  手动启动: $INSTALL_DIR/triune-panel -addr :$PANEL_PORT -data $INSTALL_DIR/data"
+  echo "  后台启动: nohup $INSTALL_DIR/triune-panel -addr :$PANEL_PORT -data $INSTALL_DIR/data >/var/log/triune-panel.log 2>&1 &"
+  ensure_port_open "$PANEL_PORT"
+  IP=$(detect_ip)
+  if is_private_ip "$IP" || [[ -z "$IP" ]]; then
+    echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
+    echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
+    echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+  else
+    echo "  访问:      http://$IP:$PANEL_PORT"
+  fi
   echo "  默认账号:  admin / admin（请立即在设置中修改）"
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网）"
   exit 0
 fi
 
+ensure_port_open "$PANEL_PORT"
+
 if systemctl is-active --quiet "$SERVICE"; then
   IP=$(detect_ip)
-  [[ -z "$IP" ]] && IP="<服务器IP>"
   echo ""
   echo "✔ Triune Panel 安装并启动成功"
   echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
-  echo "  访问:      http://$IP:2087"
+  if is_private_ip "$IP" || [[ -z "$IP" ]]; then
+    echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
+    echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
+    echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+  else
+    echo "  访问:      http://$IP:$PANEL_PORT"
+  fi
+  echo "  云服务器请在控制台安全组放行 $PANEL_PORT/tcp（机器内无法代改）"
   echo "  默认账号:  admin / admin（请立即在设置中修改）"
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  查看日志:  journalctl -u triune-panel -f"

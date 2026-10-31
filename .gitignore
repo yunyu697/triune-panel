@@ -2,6 +2,8 @@
 triune-panel
 triune-panel-*
 deploy/triune-panel-linux-*
+deploy/sha256sums.txt
+deploy/triune-panel-darwin-*
 data/
 downloads/
 *.bak

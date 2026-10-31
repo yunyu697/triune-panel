@@ -30,7 +30,7 @@ import (
 var version = "dev"
 
 func main() {
-	addr := flag.String("addr", ":2087", "listen address")
+	addr := flag.String("addr", ":10010", "listen address")
 	dataDir := flag.String("data", "./data", "data directory")
 	showVer := flag.Bool("version", false, "print version and exit")
 	flag.Parse()

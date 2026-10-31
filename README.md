@@ -22,8 +22,8 @@
 # 编译（需 Go 1.23+，国内加速：export GOPROXY=https://goproxy.cn,direct）
 go build -o triune-panel ./cmd/server
 
-# 运行（默认端口 2087，默认账号 admin/admin）
-./triune-panel -addr :2087 -data ./data
+# 运行（默认端口 10010，默认账号 admin/admin）
+./triune-panel -addr :10010 -data ./data
 
 # 交叉编译 Linux 服务器
 GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server
@@ -281,7 +281,12 @@ GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地�
 
 安装完成后：
 
-- 访问 `http://<服务器IP>:2087`（默认 `admin/admin`，**立即改密码**）
+- 访问 `http://<服务器IP>:10010`（默认 `admin/admin`，**立即改密码**）
+- 端口：面板默认监听 **10010**（安装时可用 `TRIUNE_PANEL_PORT=端口` 覆盖）；
+  安装脚本会自动检测并放行本机防火墙（ufw / firewalld / iptables），
+  **云服务器还需在厂商控制台安全组放行同一端口**（机器内无法代改）
+- 公网 IP：安装完成时自动探测显示（全部 `--noproxy` 直连探测，绝不会被
+  系统代理污染显示成代理 IP）；探测失败时会给出自查指引
 - 日志：`journalctl -u triune-panel -f`
 - 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
 
@@ -341,5 +346,5 @@ curl -LO https://github.com/yunyu697/triune-panel/releases/latest/download/triun
 chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local/bin/triune-panel
 
 # 2. 运行（也可自行编写 systemd unit，参考 deploy/triune-panel.service）
-sudo triune-panel -addr :2087 -data /opt/triune-panel/data
+sudo triune-panel -addr :10010 -data /opt/triune-panel/data
 ```
