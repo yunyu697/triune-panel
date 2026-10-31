@@ -14,9 +14,19 @@
 # 安装到自定义目录（无需 root，写到用户目录）:
 #   TRIUNE_INSTALL_DIR=~/.local/triune-panel bash install.sh
 #
+# 指定版本（默认自动取最新）:
+#   curl -fsSL .../install.sh | bash -s -- amd64 v0.8.0
+#
 # 下载源 = GitHub 原始地址 + 多个加速镜像，写在同一个候选池里；
 # 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优。
 # 也可手动指定镜像跳过探测:  curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
+#
+# ★ 防"装到旧版本"三件套（重要）:
+#   1) 先向 GitHub 解析出真实的最新 tag，再按 tag 拼固定版本 URL 下载
+#      —— 不用 releases/latest，避免镜像/代理缓存了旧的 latest 指向。
+#   2) 下载后比对 sha256（与 GitHub API / sha256sums.txt 一致），不匹配即换源重下。
+#   3) 校验二进制自报版本必须等于目标 tag，且比已安装版本更新，否则中止。
+#      —— 即使某个镜像返回 HTTP 200 但内容是旧的/截断的，也装不上。
 #
 # 离线模式：脚本同目录存在 triune-panel-linux-<arch> 时直接使用，不联网。
 # 升级安全：已有安装时只替换面板二进制，数据目录 /opt/triune-panel/data 原样保留。
@@ -72,6 +82,7 @@ MIRRORS=(
 
 # ---- 架构检测 ----
 ARCH="${1:-}"
+WANT_TAG="${2:-}"
 if [[ -z "$ARCH" ]]; then
   MACHINE="$(uname -m 2>/dev/null || true)"
   if [[ -z "$MACHINE" ]]; then
@@ -90,21 +101,84 @@ case "$ARCH" in amd64|arm64) ;; *) echo "✘ 架构参数只能是 amd64 或 arm
 BIN_NAME="triune-panel-linux-${ARCH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
+# ============================================================
+# 版本解析：先确定"要装哪个版本"，再按 tag 拼固定 URL。
+#
+# 为什么不用 releases/latest：
+#   releases/latest 是一条 302，很多加速镜像/CDN 会缓存这条重定向，
+#   缓存期内即使仓库已经发了新 Release，镜像仍会把你导向旧 tag，
+#   于是"装到的还是旧版本"。所以这里先解析出真实 tag，
+#   再拼 releases/download/<tag>/<file> 这种不可变 URL。
+# ============================================================
+resolve_latest_tag() {
+  # 1) GitHub API（最权威，带 tag_name）
+  local tag
+  tag=$(curl -fsSL --connect-timeout 8 --max-time 20 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+        | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || true
+  if [[ -n "$tag" ]]; then printf '%s' "$tag"; return 0; fi
+
+  # 2) releases/latest 的 302 Location（API 不可用时的退路）
+  tag=$(curl -fsSI --connect-timeout 8 --max-time 20 \
+        "https://github.com/$REPO/releases/latest" 2>/dev/null \
+        | tr -d '\r' | grep -i '^location:' | sed -E 's#.*/releases/tag/([^/[:space:]]+).*#\1#' | head -1) || true
+  if [[ -n "$tag" ]]; then printf '%s' "$tag"; return 0; fi
+
+  return 1
+}
+
+# 读取目标版本对应资产的 sha256（优先 API，其次 sha256sums.txt 资产）
+resolve_sha256() { # resolve_sha256 <tag> <bin_name>
+  local tag="$1" bin="$2" sha=""
+  sha=$(curl -fsSL --connect-timeout 8 --max-time 25 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$REPO/releases/tags/$tag" 2>/dev/null \
+        | tr '{' '\n' | grep -F "\"name\": \"$bin\"" \
+        | grep -m1 '"digest"' | sed -E 's/.*"sha256:([0-9a-f]{64})".*/\1/') || true
+  if [[ -n "$sha" ]]; then printf '%s' "$sha"; return 0; fi
+
+  # 退路：Release 附带的 sha256sums.txt
+  local sums
+  sums=$(curl -fsSL --connect-timeout 8 --max-time 20 \
+         "https://github.com/$REPO/releases/download/$tag/sha256sums.txt" 2>/dev/null) || true
+  sha=$(printf '%s' "$sums" | awk -v b="$bin" '$2==b{print $1; exit}')
+  if [[ -n "$sha" ]]; then printf '%s' "$sha"; return 0; fi
+
+  return 1
+}
+
+# 计算本地文件 sha256（兼容 sha256sum / shasum / openssl）
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" 2>/dev/null | awk '{print $NF}'
+  else
+    return 1
+  fi
+}
+
 # ---- 源探测：并行测试 原始地址 + 各镜像，按响应速度排出可用源顺序 ----
-# 探测文件用仓库 README（体积小）；content-type 为 HTML 的视为假响应（反爬/挑战页）剔除。
-rank_sources() {
-  local probe="https://raw.githubusercontent.com/$REPO/main/README.md"
+# 探测用 Range 请求只取前 1KB，既快又能验证"该源真能吐出二进制"：
+#   - 必须返回 206/200 且 content-type 不是 html（html = 反爬/挑战页假响应）
+#   - 实测 ghproxy.cn / ghproxy.link 会返回 200 + HTML 挑战页，必须剔除
+rank_sources() { # rank_sources <探测URL>
+  local probe="$1"
   local tmp; tmp=$(mktemp -d)
   local bases=("" "${MIRRORS[@]}")
   local i=0
   for b in "${bases[@]}"; do
     (
       local r
-      r=$(curl -fsL -o /dev/null --connect-timeout 5 --max-time 8 \
+      r=$(curl -fsL -r 0-1023 -o /dev/null --connect-timeout 5 --max-time 10 \
             -w '%{time_total}|%{http_code}|%{content_type}' "${b}${probe}" 2>/dev/null || echo "999|000|")
       local t="${r%%|*}"; local rest="${r#*|}"
       local code="${rest%%|*}"; local ct="${rest#*|}"
-      if [[ "$code" == "200" && "$ct" != *html* && "$t" != "999" ]]; then
+      # 只认 200/206 + 非 HTML + 有实际字节
+      if [[ ("$code" == "200" || "$code" == "206") && "$ct" != *html* && "$t" != "999" ]]; then
         printf '%s\t%s\n' "$t" "$b" > "$tmp/$i"
       fi
     ) &
@@ -116,32 +190,46 @@ rank_sources() {
   rm -rf "$tmp"
 }
 
-# ---- 下载：按择优顺序尝试；GH_PROXY 手动指定时跳过探测置于首位 ----
-dl() { # dl <输出文件> <完整URL...>
-  local out="$1"; shift
-  local url base
-  local ordered=()
+# ---- 下载：按择优顺序尝试；任一源失败（下载失败/校验不过）自动换下一个 ----
+# 用法: dl <输出文件> <期望sha256> <URL>
+dl() { # dl <输出文件> <期望sha256> <完整URL>
+  local out="$1" want_sha="$2" url="$3"
+  local base ordered=()
   if [[ -n "$GH_PROXY" ]]; then
     ordered=("${GH_PROXY%/}/")
   fi
   # 自动探测择优（GH_PROXY 已在首位，探测结果紧随其后兜底；空行=直连）
   while IFS= read -r b; do
     ordered+=("$b")
-  done < <(rank_sources)
+  done < <(rank_sources "$url")
   if [[ ${#ordered[@]} -eq 0 ]]; then
     # 探测全部失败（可能断网/仓库不可见）——退回静态顺序兜底
     ordered=("" "${MIRRORS[@]}")
   fi
-  for url in "$@"; do
-    for base in "${ordered[@]}"; do
-      echo "→ 下载 ${base:-GitHub 直连}${url}"
-      # --speed-time/--speed-limit: 15 秒内速度低于 10KB/s 判定失败，切换下一源
-      if curl -fL --connect-timeout 8 --retry 1 \
-           --speed-time 15 --speed-limit 10240 \
-           -o "$out" "${base}${url}" 2>/dev/null; then
-        return 0
+  for base in "${ordered[@]}"; do
+    local label="${base:-GitHub 直连}"
+    echo "→ 下载 ${label}${url}"
+    rm -f "$out"
+    # --speed-time/--speed-limit: 15 秒内速度低于 10KB/s 判定失败，切换下一源
+    if ! curl -fL --connect-timeout 8 --retry 1 \
+         --speed-time 15 --speed-limit 10240 \
+         -o "$out" "${base}${url}" 2>/dev/null; then
+      echo "  ✗ 下载失败，尝试下一个源"
+      continue
+    fi
+    # ---- 完整性校验：sha256 不符说明拿到的是损坏/旧内容，必须换源 ----
+    if [[ -n "$want_sha" ]]; then
+      local got; got=$(file_sha256 "$out" || true)
+      if [[ -z "$got" ]]; then
+        echo "  ✗ 无法计算 sha256（缺少 sha256sum/shasum/openssl），跳过校验"
+      elif [[ "$got" != "$want_sha" ]]; then
+        echo "  ✗ sha256 不匹配（期望 ${want_sha:0:16}… 实得 ${got:0:16}…）—— 该源返回的不是当前版本，换下一个源"
+        continue
+      else
+        echo "  ✓ sha256 校验通过"
       fi
-    done
+    fi
+    return 0
   done
   return 1
 }
@@ -153,17 +241,49 @@ if [[ -f "$SCRIPT_DIR/$BIN_NAME" ]]; then
   cp "$SCRIPT_DIR/$BIN_NAME" "$TMP_BIN"
 else
   echo "→ 检测架构: $ARCH"
+
+  # ---- 步骤1：确定目标版本 ----
+  if [[ -n "$WANT_TAG" ]]; then
+    TAG="$WANT_TAG"
+    echo "→ 指定版本: $TAG"
+  else
+    echo "→ 正在解析最新版本..."
+    TAG=$(resolve_latest_tag || true)
+    if [[ -z "$TAG" ]]; then
+      echo ""
+      echo "✘ 无法解析最新版本（GitHub API 与 releases/latest 均不可达）"
+      echo "  可能原因：网络受限、仓库为私有、或代理未放行 api.github.com"
+      echo "  解决办法："
+      echo "    · 指定版本重试:  .../install.sh | bash -s -- $ARCH v0.8.0"
+      echo "    · 手动指定镜像:  .../install.sh | bash -s -- $ARCH   （配合 GH_PROXY=）"
+      echo ""
+      rm -f "$TMP_BIN"
+      exit 1
+    fi
+    echo "→ 最新版本: $TAG"
+  fi
+
+  # ---- 步骤2：取期望 sha256 ----
+  echo "→ 正在获取 $TAG 的校验和..."
+  WANT_SHA=$(resolve_sha256 "$TAG" "$BIN_NAME" || true)
+  if [[ -n "$WANT_SHA" ]]; then
+    echo "  sha256: ${WANT_SHA:0:16}…"
+  else
+    echo "  (未获取到 sha256，将只做版本号校验)"
+  fi
+
+  # ---- 步骤3：按固定 tag URL 下载（不用 latest，避免镜像缓存旧版本）----
+  ASSET_URL="https://github.com/$REPO/releases/download/$TAG/$BIN_NAME"
   echo "→ 正在探测下载源（GitHub 原始地址 + ${#MIRRORS[@]} 个镜像，自动择优）..."
-  dl "$TMP_BIN" \
-     "https://github.com/$REPO/releases/latest/download/$BIN_NAME" \
-     "https://raw.githubusercontent.com/$REPO/main/deploy/$BIN_NAME" \
-     || { echo "✘ 全部下载源均失败：请检查网络；若仓库为私有，匿名无法拉取，请将仓库设为 Public 或改用离线安装";
+  dl "$TMP_BIN" "$WANT_SHA" "$ASSET_URL" \
+     || { echo "✘ 全部下载源均失败或校验不通过";
+          echo "  请检查网络；若仓库为私有，匿名无法拉取，请将仓库设为 Public 或改用离线安装";
           rm -f "$TMP_BIN"; exit 1; }
 fi
 chmod +x "$TMP_BIN"
 
 # ---- 版本确认（同时校验二进制可执行，架构不匹配/文件损坏时立即中止）----
-if ! "$TMP_BIN" -version; then
+if ! BIN_VER_OUT=$("$TMP_BIN" -version 2>/dev/null); then
   echo ""
   echo "✘ 下载的二进制无法执行，可能架构不匹配或文件已损坏"
   echo "  目标架构: $ARCH  （uname -m = $(uname -m)）"
@@ -172,6 +292,47 @@ if ! "$TMP_BIN" -version; then
   echo ""
   rm -f "$TMP_BIN"
   exit 1
+fi
+# 输出形如: triune-panel v0.8.0 (linux/arm64)
+GOT_VER=$(printf '%s' "$BIN_VER_OUT" | awk '{print $2}')
+echo "→ 下载完成: $BIN_VER_OUT"
+# ---- 版本必须等于目标 tag —— 挡住"镜像返回旧版本"的最后一道闸 ----
+if [[ -n "${TAG:-}" && -n "$GOT_VER" && "$GOT_VER" != "$TAG" ]]; then
+  echo ""
+  echo "✘ 版本校验失败：期望 $TAG，实际 $GOT_VER"
+  echo "  该源返回的是旧版本（可能是镜像缓存未更新），请重试或指定其它镜像："
+  echo "    GH_PROXY=https://ghfast.top bash install.sh $ARCH $TAG"
+  echo ""
+  rm -f "$TMP_BIN"
+  exit 1
+fi
+# ---- 不允许降级：目标版本必须不低于已安装版本 ----
+OLD_VER=""
+if [[ -x "$INSTALL_DIR/triune-panel" ]]; then
+  OLD_VER=$("$INSTALL_DIR/triune-panel" -version 2>/dev/null | awk '{print $2}' || true)
+fi
+if [[ -n "$OLD_VER" && -n "$GOT_VER" && "$GOT_VER" != "$OLD_VER" ]]; then
+  # 仅做字符串比较：vX.Y.Z 数字段逐段比大小
+  ver_lt() {
+    local a="${1#v}" b="${2#v}"
+    local IFS=.
+    local -a A=($a) B=($b)
+    for i in 0 1 2; do
+      local x="${A[$i]:-0}" y="${B[$i]:-0}"
+      x=$((10#${x:-0})); y=$((10#${y:-0}))
+      [[ "$x" -lt "$y" ]] && return 0
+      [[ "$x" -gt "$y" ]] && return 1
+    done
+    return 1
+  }
+  if ver_lt "$GOT_VER" "$OLD_VER"; then
+    echo ""
+    echo "✘ 拒绝降级：已安装版本 $OLD_VER 高于本次获取到的 $GOT_VER"
+    echo "  如确认需要降级，请手动指定版本:  .../install.sh | bash -s -- $ARCH $GOT_VER"
+    echo ""
+    rm -f "$TMP_BIN"
+    exit 1
+  fi
 fi
 
 # ---- 停旧服务（升级场景）----
@@ -384,6 +545,7 @@ if [[ "$SERVICE_STARTED" -eq 0 ]]; then
   # 无 systemd：服务未注册，手动前台/后台启动并给出访问地址
   echo ""
   echo "✔ Triune Panel 已安装完成（当前环境无 systemd，未注册开机自启）"
+  echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
   echo "  手动启动: $INSTALL_DIR/triune-panel -addr :2087 -data $INSTALL_DIR/data"
   echo "  后台启动: nohup $INSTALL_DIR/triune-panel -addr :2087 -data $INSTALL_DIR/data >/var/log/triune-panel.log 2>&1 &"
   IP=$(detect_ip); [[ -z "$IP" ]] && IP="<服务器IP>"
@@ -399,6 +561,7 @@ if systemctl is-active --quiet "$SERVICE"; then
   [[ -z "$IP" ]] && IP="<服务器IP>"
   echo ""
   echo "✔ Triune Panel 安装并启动成功"
+  echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
   echo "  访问:      http://$IP:2087"
   echo "  默认账号:  admin / admin（请立即在设置中修改）"
   echo "  数据目录:  $INSTALL_DIR/data"
