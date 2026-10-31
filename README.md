@@ -392,7 +392,7 @@ v0.2 已验证（按序追加的能力）：
    `traffic_daily`（按日），订阅 header `subscription-userinfo` 输出真实用量。
 2. **到期/配额自动禁用**：巡检循环发现到期或超配额用户即停用，
    自动走 apply 流水线重新渲染受影响内核（有校验保护，失败不影响运行配置），
-   并记入修订历史；`rate_limit_mbps` 为预留字段（三内核暂无原生服务端每用户限速）。
+   并记入修订历史。
 3. **ACME + Reality 工具**：lego 实现 Let's Encrypt HTTP-01 自动签发/续期，
    证书落盘 `data/certs/<domain>/fullchain.pem + privkey.pem`（签发期间临时占用 :80）；
    `POST /api/tools/reality-keypair`（调内核 x25519 生成）、`GET /api/tools/uuid`。
@@ -522,6 +522,27 @@ v0.8 已验证：
    忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
+
+v0.9.3 已验证：
+
+1. **移除假的每用户限速字段**：`rate_limit_mbps` 从 `model.Client`、SQL 读写
+   与 API 响应中全部摘掉。此前它能写、能存库、能被 GET 回来，唯独内核不消费——
+   脚本传个「100」会以为限速生效，实际什么也没发生。
+2. **改为明确拒绝而不是静默忽略**：`POST/PUT /api/clients` 收到非零
+   `rate_limit_mbps` 返回 400，错误里写清「三个内核都没有这个能力」并指出
+   该用 `quota_gb`（超限自动停用）或在内核外做整形。传 0 或不传都放行。
+3. **修掉 `PUT /api/clients/{id}` 的数据丢失 bug**：旧实现把请求体解成完整的
+   `model.Client` 再整行 UPDATE，于是 `PUT {"quota_gb":42}` 会把没传的
+   `credential`、`sub_token` 清成空串、`enabled` 置为 false，**还返回 200**——
+   用户的订阅链接和登录凭据静默失效。现在改成真正的部分更新：先读当前记录，
+   只覆盖请求里出现的键；`expires_at: null` 表示清除到期时间，不传则保持。
+   改不存在的用户返回 404 而不是假装成功。
+4. **历史列兼容**：数据库里的 `rate_limit_mbps` 列保留（schema 版本号就是迁移
+   条目数，删条目会让已升级的库跳过后续迁移），但不再读写；旧库里该列有值也
+   不影响加载与更新，有回归测试守着。
+5. **列顺序回归测试**：`clientCols` 与 `scanClient` 的扫描顺序都是手写的，
+   改一处忘另一处会让字段静默串位（`enabled` 读到 `quota_gb` 上之类），
+   新增 CRUD round-trip 用例锁住。
 
 v0.9.2 已验证：
 
@@ -744,8 +765,14 @@ v0.8.1 已验证：
    （firewalld / ufw / iptables），阿里云/腾讯云/Vultr 等控制台的安全组需自行放行。
 3. **iptables 规则重启不保留**：面板写入的是运行时规则，重启后需重新放行
    （面板启动会对账补放行，前提是面板随系统自启）；ufw / firewalld 规则持久化。
-4. **每用户限速未实现**：`rate_limit_mbps` 为预留字段，三个内核均无原生
-   服务端每用户限速能力，填了也不会生效。
+4. **每用户带宽限速做不到**：sing-box / xray / mihomo 三个内核都没有这个能力
+   （xray 的 `policy.levels` 只有超时、统计开关与 `bufferSize`；sing-box 与
+   mihomo 的 `users` 只有名字和凭据）。面板曾有一个 `rate_limit_mbps` 字段，
+   能写能读但内核完全不消费——填了「100」以为限速了，其实没有，这比没有这个
+   功能更糟，所以已经移除：API 收到非零值会返回 400 并说明原因，响应里也不再
+   出现该字段（数据库里的历史列保留但不再读写）。
+   真要限速只能在内核之外做：`tc`/HTB 按出口整形、上游交换机限速、或云厂商的
+   带宽上限。**用量控制请用 `quota_gb`**，那是真的会被执行的（超限自动停用）。
 5. **mihomo 流量统计依赖内核字段**：需 `inboundName` / `inboundUser` 出现在
    mihomo 的连接统计里，不同版本字段可能有差异；代码已做多键防御，
    若某版本统计恒为 0，先升级 mihomo 再排查。

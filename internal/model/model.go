@@ -35,17 +35,23 @@ type Inbound struct {
 }
 
 // Client 面板用户（可订阅多个入站）。
+//
+// 刻意没有「每用户带宽限速」字段：sing-box / xray / mihomo 三者都没有这个能力
+// （xray 的 policy.levels 只有超时、统计开关与 bufferSize；sing-box 的 users
+// 只有 name/uuid/password；mihomo 的 listener users 同样如此）。曾经有过一个
+// rate_limit_mbps 字段，能写能读但内核完全不消费——用户填了以为生效，比没有
+// 这个功能更糟，已移除。要限速只能在内核外做（tc/HTB、上游交换机、云厂商
+// 带宽上限）。用量控制请用 QuotaGB，那是真的会被执行的。
 type Client struct {
-	ID            int64      `json:"id"`
-	Name          string     `json:"name"`
-	Credential    string     `json:"credential"` // UUID 或密码
-	SubToken      string     `json:"sub_token"`  // 订阅令牌
-	QuotaGB       float64    `json:"quota_gb"`   // 0 = 不限量
-	ExpiresAt     *time.Time `json:"expires_at"`
-	RateLimitMbps int        `json:"rate_limit_mbps"` // 预留：三内核暂无原生每用户限速
-	Enabled       bool       `json:"enabled"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID         int64      `json:"id"`
+	Name       string     `json:"name"`
+	Credential string     `json:"credential"` // UUID 或密码
+	SubToken   string     `json:"sub_token"`  // 订阅令牌
+	QuotaGB    float64    `json:"quota_gb"`   // 0 = 不限量；超限后由 ops 自动停用
+	ExpiresAt  *time.Time `json:"expires_at"`
+	Enabled    bool       `json:"enabled"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // ClientInbound 用户-入站关联。
@@ -65,23 +71,23 @@ type ExternalNode struct {
 
 // RevisionStatus 修订状态。
 const (
-	RevPending    = "pending"             // 已渲染，待校验
-	RevFailed     = "failed_validation"   // 校验失败：运行配置未被触碰
-	RevApplied    = "applied"             // 已原子替换并重启
-	RevSuperseded = "superseded"          // 被更新的修订取代
+	RevPending    = "pending"           // 已渲染，待校验
+	RevFailed     = "failed_validation" // 校验失败：运行配置未被触碰
+	RevApplied    = "applied"           // 已原子替换并重启
+	RevSuperseded = "superseded"        // 被更新的修订取代
 )
 
 // ConfigRevision 配置修订记录：每次渲染的完整配置快照，
 // 升级/回滚/审计都基于它，任何一次变更都可追溯、可还原。
 type ConfigRevision struct {
-	ID          int64     `json:"id"`
-	Core        string    `json:"core"`
-	Content     string    `json:"content"` // 渲染后的完整配置
-	Hash        string    `json:"hash"`
-	Status      string    `json:"status"`
-	Note        string    `json:"note"`
-	Detail      string    `json:"detail"` // 校验输出等详细信息
-	CreatedAt   time.Time `json:"created_at"`
+	ID        int64     `json:"id"`
+	Core      string    `json:"core"`
+	Content   string    `json:"content"` // 渲染后的完整配置
+	Hash      string    `json:"hash"`
+	Status    string    `json:"status"`
+	Note      string    `json:"note"`
+	Detail    string    `json:"detail"` // 校验输出等详细信息
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Setting 键值设置（含 schema 版本号、二进制路径等）。

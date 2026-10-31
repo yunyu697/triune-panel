@@ -83,7 +83,12 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_inbounds_core ON inbounds(core);
 	CREATE INDEX IF NOT EXISTS idx_revisions_core ON config_revisions(core, id);
 	`,
-	// v2: 流量统计 + 限速预留字段
+	// v2: 流量统计
+	//
+	// rate_limit_mbps 是历史遗留列：当初以为可以给内核做每用户限速，实际三个
+	// 内核都没有这个能力（见 model.Client 注释）。字段已从代码里摘掉，但迁移
+	// 条目必须原样保留——schema 版本号就是迁移条目数，删一条会让已升级的库
+	// 认为自己版本更高而跳过后续迁移。列留在库里，恒为 0，不参与读写。
 	`
 	ALTER TABLE clients ADD COLUMN rate_limit_mbps INTEGER NOT NULL DEFAULT 0;
 	CREATE TABLE IF NOT EXISTS traffic_counters (
@@ -310,8 +315,8 @@ func (s *Store) GetInbound(id int64) (*model.Inbound, error) {
 // ---- Clients ----
 
 func (s *Store) CreateClient(c *model.Client) error {
-	res, err := s.db.Exec(`INSERT INTO clients(name,credential,sub_token,quota_gb,expires_at,rate_limit_mbps,enabled) VALUES(?,?,?,?,?,?,?)`,
-		c.Name, c.Credential, c.SubToken, c.QuotaGB, c.ExpiresAt, c.RateLimitMbps, b2i(c.Enabled))
+	res, err := s.db.Exec(`INSERT INTO clients(name,credential,sub_token,quota_gb,expires_at,enabled) VALUES(?,?,?,?,?,?)`,
+		c.Name, c.Credential, c.SubToken, c.QuotaGB, c.ExpiresAt, b2i(c.Enabled))
 	if err != nil {
 		return err
 	}
@@ -320,8 +325,8 @@ func (s *Store) CreateClient(c *model.Client) error {
 }
 
 func (s *Store) UpdateClient(c *model.Client) error {
-	_, err := s.db.Exec(`UPDATE clients SET name=?,credential=?,sub_token=?,quota_gb=?,expires_at=?,rate_limit_mbps=?,enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		c.Name, c.Credential, c.SubToken, c.QuotaGB, c.ExpiresAt, c.RateLimitMbps, b2i(c.Enabled), c.ID)
+	_, err := s.db.Exec(`UPDATE clients SET name=?,credential=?,sub_token=?,quota_gb=?,expires_at=?,enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		c.Name, c.Credential, c.SubToken, c.QuotaGB, c.ExpiresAt, b2i(c.Enabled), c.ID)
 	return err
 }
 
@@ -332,21 +337,21 @@ func (s *Store) DeleteClient(id int64) error {
 
 func scanClient(row interface{ Scan(...any) error }) (*model.Client, error) {
 	var c model.Client
-	var enabled, rate int
+	var enabled int
 	var exp sql.NullTime
-	if err := row.Scan(&c.ID, &c.Name, &c.Credential, &c.SubToken, &c.QuotaGB, &exp, &rate, &enabled, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Credential, &c.SubToken, &c.QuotaGB, &exp, &enabled, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if exp.Valid {
 		t := exp.Time
 		c.ExpiresAt = &t
 	}
-	c.RateLimitMbps = rate
 	c.Enabled = enabled == 1
 	return &c, nil
 }
 
-const clientCols = `id,name,credential,sub_token,quota_gb,expires_at,rate_limit_mbps,enabled,created_at,updated_at`
+// clientCols 不含 rate_limit_mbps：那是已废弃的历史列（见 model.Client 注释）。
+const clientCols = `id,name,credential,sub_token,quota_gb,expires_at,enabled,created_at,updated_at`
 
 func (s *Store) ListClients() ([]*model.Client, error) {
 	rows, err := s.db.Query(`SELECT ` + clientCols + ` FROM clients ORDER BY id`)
@@ -363,6 +368,14 @@ func (s *Store) ListClients() ([]*model.Client, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetClient(id int64) (*model.Client, error) {
+	c, err := scanClient(s.db.QueryRow(`SELECT `+clientCols+` FROM clients WHERE id=?`, id))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("client %d not found", id)
+	}
+	return c, err
 }
 
 func (s *Store) GetClientByToken(token string) (*model.Client, error) {

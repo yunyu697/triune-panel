@@ -25,14 +25,14 @@ import (
 )
 
 type Server struct {
-	Store    *store.Store
-	Pipe     *core.PipelineManager
-	ProcMgr  *proc.Manager
-	DataDir  string
-	CertMgr  CertManager   // 可为 nil（未启用 ACME）
-	Coll     *ops.Collector // 流量采样器（实时速率查询用），可为 nil
-	sessions   sync.Map     // token -> session
-	loginFails sync.Map     // ip -> *loginFail（防爆破）
+	Store      *store.Store
+	Pipe       *core.PipelineManager
+	ProcMgr    *proc.Manager
+	DataDir    string
+	CertMgr    CertManager    // 可为 nil（未启用 ACME）
+	Coll       *ops.Collector // 流量采样器（实时速率查询用），可为 nil
+	sessions   sync.Map       // token -> session
+	loginFails sync.Map       // ip -> *loginFail（防爆破）
 	emailCode  emailCodeState // 登录邮箱验证码（2FA）
 }
 
@@ -59,7 +59,7 @@ func (a *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/login", a.handleLogin)
 	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
-	mux.HandleFunc("GET /healthz", a.handleHealthz)           // 免认证探活，供 systemd / 监控使用
+	mux.HandleFunc("GET /healthz", a.handleHealthz)            // 免认证探活，供 systemd / 监控使用
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
@@ -169,7 +169,7 @@ func (a *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 // ---- 登录防爆破 ----
 
 const (
-	maxLoginFails   = 5               // 连续失败次数阈值
+	maxLoginFails   = 5                // 连续失败次数阈值
 	loginLockPeriod = 10 * time.Minute // 锁定时长
 )
 
@@ -406,7 +406,8 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, in)
 }
 
-func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {	var in model.Inbound
+func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
+	var in model.Inbound
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		fail(w, 400, err.Error())
 		return
@@ -466,7 +467,7 @@ func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.DeleteInbound(id); err != nil {
 		fail(w, 500, err.Error())
 		return
-	}	// 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
+	} // 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
 	if fwAuto(a) && in != nil && !in.Draft {
 		proto := firewall.ProtoOf(in.Protocol, in.Transport)
 		if !a.portInUseByOthers(id, in.Port, proto) {
@@ -538,6 +539,25 @@ func (a *Server) portInUseByOthers(selfID int64, port int, proto string) bool {
 
 // ---- clients ----
 
+// errNoPerUserRateLimit 是收到 rate_limit_mbps 时的拒绝说明。
+//
+// 三个内核都没有每用户带宽限制能力（xray 的 policy.levels 只有超时/统计开关/
+// bufferSize，sing-box 与 mihomo 的 users 只有名字和凭据）。这个字段曾经能写、
+// 能读、能存库，但内核完全不消费——用户填了「100」以为限速了，其实没有，
+// 这比没有这个功能更糟。所以现在直接拒绝，并告诉调用方该往哪走。
+const errNoPerUserRateLimit = "不支持每用户带宽限速：sing-box / xray / mihomo 均无此能力，rate_limit_mbps 填了也不会生效。" +
+	"用量控制请用 quota_gb（超限会自动停用该用户）；带宽限制需要在内核之外做（tc/HTB、上游限速或云厂商带宽上限）。"
+
+// rejectRateLimit 在请求体已解码后调用：带了非零的 rate_limit_mbps 就写 400。
+// 用指针是为了区分「没传」和「显式传 0」——后者等价于不设，放行。
+func rejectRateLimit(w http.ResponseWriter, v *int) bool {
+	if v == nil || *v == 0 {
+		return true
+	}
+	fail(w, http.StatusBadRequest, errNoPerUserRateLimit)
+	return false
+}
+
 func (a *Server) listClients(w http.ResponseWriter, r *http.Request) {
 	cs, err := a.Store.ListClients()
 	if err != nil {
@@ -558,10 +578,14 @@ func (a *Server) listClients(w http.ResponseWriter, r *http.Request) {
 func (a *Server) createClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		model.Client
-		InboundIDs []int64 `json:"inbound_ids"`
+		RateLimitMbps *int    `json:"rate_limit_mbps"` // 已废弃：仅用于给出明确拒绝
+		InboundIDs    []int64 `json:"inbound_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, err.Error())
+		return
+	}
+	if !rejectRateLimit(w, req.RateLimitMbps) {
 		return
 	}
 	if req.Credential == "" {
@@ -581,14 +605,62 @@ func (a *Server) createClient(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, req.Client)
 }
 
+// updateClient 做的是「部分更新」：只覆盖请求里真正出现的键。
+//
+// 旧实现把请求体直接解成完整的 model.Client 再整行 UPDATE，于是
+// `PUT {"name":"x","quota_gb":5}` 会把没传的 credential、sub_token 清成空串、
+// enabled 置为 false，而且返回 200——用户的订阅链接和登录凭据就这么静默没了，
+// 面板上还看不出问题（列表里只是「凭据变空」）。现在先读当前记录，
+// 再按请求里出现的键逐项覆盖，未出现的字段保持原值。
 func (a *Server) updateClient(w http.ResponseWriter, r *http.Request) {
-	var c model.Client
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	c.ID = pathID(r)
-	if err := a.Store.UpdateClient(&c); err != nil {
+	// 已废弃字段：带了非零值就拒绝（见 errNoPerUserRateLimit）
+	if v, ok := raw["rate_limit_mbps"]; ok {
+		var n int
+		if err := json.Unmarshal(v, &n); err == nil && !rejectRateLimit(w, &n) {
+			return
+		}
+	}
+
+	c, err := a.Store.GetClient(pathID(r))
+	if err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	for k, v := range raw {
+		var ferr error
+		switch k {
+		case "name":
+			ferr = json.Unmarshal(v, &c.Name)
+		case "credential":
+			ferr = json.Unmarshal(v, &c.Credential)
+		case "sub_token":
+			ferr = json.Unmarshal(v, &c.SubToken)
+		case "quota_gb":
+			ferr = json.Unmarshal(v, &c.QuotaGB)
+		case "enabled":
+			ferr = json.Unmarshal(v, &c.Enabled)
+		case "expires_at":
+			// 显式传 null = 清除到期时间；键不出现 = 保持不变
+			if string(v) == "null" {
+				c.ExpiresAt = nil
+			} else {
+				var t time.Time
+				if ferr = json.Unmarshal(v, &t); ferr == nil {
+					c.ExpiresAt = &t
+				}
+			}
+		}
+		if ferr != nil {
+			fail(w, 400, "字段 "+k+" 格式有误: "+ferr.Error())
+			return
+		}
+	}
+	if err := a.Store.UpdateClient(c); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -950,14 +1022,14 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		"fw_auto": true,
 		// 可信反向代理网段：仅当直连对端落在这些网段内才采信转发头
 		TrustedProxiesSetting: true,
-		"acme_enabled": true, "acme_domain": true, "acme_email": true,
+		"acme_enabled":        true, "acme_domain": true, "acme_email": true,
 		"admin_user": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
 		// 2FA 邮箱通道（auth_2fa_mode / totp_secret 由专用端点管理，不接受直接写）
 		"auth_email": true,
-		"smtp_host": true, "smtp_port": true, "smtp_user": true,
+		"smtp_host":  true, "smtp_port": true, "smtp_user": true,
 		"smtp_pass": true, "smtp_from": true,
 	}
 	for _, c := range core.All() {
