@@ -60,6 +60,7 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", a.handleLogin)
 	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /healthz", a.handleHealthz)            // 免认证探活，供 systemd / 监控使用
+	mux.HandleFunc("GET /metrics", a.handleMetrics)            // Prometheus 指标，凭 metrics_token 访问（默认关闭）
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
@@ -1021,6 +1022,8 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
 		"quota_warn_pct", "fw_auto",
+		// Prometheus 指标令牌（空 = /metrics 关闭）
+		MetricsTokenSetting,
 		// 可信反向代理网段（登录来源识别用，默认空 = 不信任任何代理）
 		TrustedProxiesSetting,
 		"acme_enabled", "acme_domain", "acme_email",
@@ -1058,6 +1061,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]bool{
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
 		"quota_warn_pct": true,
+		// Prometheus 指标令牌：写空字符串即关闭 /metrics
+		MetricsTokenSetting: true,
 		// 入站端口的自动防火墙管理（fwAuto 读取，默认开启）
 		"fw_auto": true,
 		// 可信反向代理网段：仅当直连对端落在这些网段内才采信转发头

@@ -312,6 +312,74 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 （这也是密码泄漏后踢掉攻击者会话的手段，代价是所有设备都要重新登录）。
 登出只销毁当前这一个会话，同一账号在其他设备上的会话不受影响。登出会记一条审计。
 
+## 监控指标（Prometheus）
+
+面板内置 `/metrics`，输出 Prometheus 文本格式。**默认关闭**——没配令牌就返回 403，
+升级不会凭空多出一个「知道地址就能看用户列表和流量」的接口。
+
+在「设置 → 基础设置 → 指标访问令牌」点「生成」（24 字节随机数 → 48 位十六进制），
+保存后即生效：
+
+```bash
+curl -H "Authorization: Bearer <令牌>" http://127.0.0.1:10010/metrics
+```
+
+Prometheus 侧：
+
+```yaml
+scrape_configs:
+  - job_name: triune-panel
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["panel.example.com:10010"]
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/triune-metrics.token   # 内容就是那个令牌
+```
+
+也接受 `?token=<令牌>`（有些采集器不方便加 header），但 query 更容易出现在
+访问日志里，优先用 header。
+
+### 指标一览
+
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `triune_up` | gauge | 进程存活，恒为 1 |
+| `triune_build_info{version,go_version}` | gauge | 构建信息 |
+| `triune_uptime_seconds` | gauge | 运行时长 |
+| `triune_db_up` | gauge | 数据库可查询（1=正常） |
+| `triune_go_goroutines` / `triune_go_heap_alloc_bytes` | gauge | 排查 goroutine 泄漏与内存增长 |
+| `triune_clients_total{enabled}` | gauge | 用户数 |
+| `triune_inbounds_total{core,enabled}` | gauge | 入站数（草稿计入 `enabled="false"`） |
+| `triune_core_running{core}` | gauge | 内核进程是否在跑 |
+| `triune_client_enabled{client}` | gauge | 单用户是否启用 |
+| `triune_client_traffic_bytes{client,direction}` | counter | 单用户累计上下行 |
+| `triune_client_quota_bytes{client}` | gauge | 单用户配额（0=不限量） |
+| `triune_client_expires_timestamp_seconds{client}` | gauge | 到期时间（仅设置了到期的用户） |
+| `triune_cert_expiry_timestamp_seconds{domain}` / `triune_cert_valid{domain}` | gauge | 证书到期与是否有效 |
+| `triune_traffic_up_bytes_per_second` / `triune_traffic_down_bytes_per_second` | gauge | 最近一个采样周期的总速率 |
+
+几条常用告警：
+
+```yaml
+- alert: TriunePanelDown
+  expr: triune_up == 0
+  for: 2m
+- alert: TriuneCertExpiringSoon
+  expr: (triune_cert_expiry_timestamp_seconds - time()) < 14 * 86400
+- alert: TriuneClientQuotaAlmostFull
+  expr: triune_client_traffic_bytes{job="triune-panel"} / on(client) triune_client_quota_bytes > 0.9
+```
+
+### 两个注意点
+
+- **标签值会转义**。用户名字由你输入，`"` `\` 换行都会被正确转义——否则一个叫
+  `x"} 1\ntriune_fake 999` 的用户就能往指标里塞任意行，伪造出不存在的序列。
+- **单用户指标是逐用户展开的**，标签基数等于用户数。几百人以内没问题；
+  上千人时建议在 Prometheus 侧用 `metric_relabel_configs` 丢掉
+  `triune_client_*`，只保留聚合指标。
+- 指标里**不含**任何凭据、订阅令牌或设置里的密钥（有测试守着）。
+
 ## 审计日志
 
 面板里 **审计** 页记录关键操作，用于事后追查「谁在什么时候动了什么」：
@@ -522,6 +590,23 @@ v0.8 已验证：
    忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
+
+v0.9.5 已验证：
+
+1. **`/metrics`（Prometheus 文本格式）**：`internal/api/metrics.go` 输出 14 个指标家族，
+   覆盖进程（up / 构建信息 / 运行时长 / goroutine / 堆）、数据库可用性、用户与入站计数、
+   内核运行状态、单用户流量与配额、证书到期、实时总速率。
+2. **默认关闭 + 令牌鉴权**：没配 `metrics_token` 返回 403（附启用提示），配了之后
+   错误/缺失令牌一律 401，用 `crypto/subtle` 定长比较。刻意不做「本机免认证」——
+   面板常挂在 nginx 后面，那样等于任何能碰到反代的人都能拉指标。
+3. **标签值转义**：客户端名是用户输入，`"`、`\`、换行必须转义。否则一个叫
+   `x"} 1\ntriune_fake 999` 的用户就能往指标里注入伪造序列。有专门用例断言
+   「注入的名字不会变成独立一行」。
+4. **家族连续输出**：Prometheus 规范要求同一家族的 HELP/TYPE 与样本连成一组，
+   所以表头是「首次写样本时惰性输出」，且样本按家族分组而不是按用户交错。
+   有格式合规用例守着（这条用例在实现阶段真的抓到了交错输出的 bug）。
+5. **独立解析验证**：用官方 `github.com/prometheus/common/expfmt` 解析输出，
+   14 个家族全部识别、类型与样本数正确（不只靠自写校验）。
 
 v0.9.4 已验证：
 

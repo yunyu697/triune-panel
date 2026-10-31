@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.9.5 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -762,6 +762,10 @@ canvas{display:block;width:100%}
           <div><label>可信反向代理网段</label>
             <input id="s_trusted_proxies" class="input" placeholder="如 127.0.0.1 或 10.0.0.0/8"></div>
           <div><label>统计 API 密钥</label><input id="s_stats_secret" class="input"></div>
+          <div><label>指标访问令牌（Prometheus）</label>
+            <div style="display:flex;gap:6px"><input id="s_metrics_token" class="input mono" placeholder="留空则关闭 /metrics">
+            <button class="btn sm" style="flex:none" onclick="genMetricsToken()">生成</button></div>
+          </div>
           <div><label>流量告警阈值（%）<span class="muted" style="font-weight:400">（越过后发邮件，需在下方配置 SMTP 与收件邮箱）</span></label>
             <input id="s_warn_pct" class="input" type="number" min="1" max="100" value="80"></div>
           <div><label>新密码</label><input id="s_pass" class="input" type="password" placeholder="留空不修改"></div>
@@ -770,6 +774,11 @@ canvas{display:block;width:100%}
           可信反向代理网段：面板挂在 nginx / Caddy 后面时<b>必填</b>（同机填 <code>127.0.0.1</code>），
           否则登录来源一律是代理 IP，防爆破会变成「一个人输错五次，所有人一起被锁」。
           仅当直连对端落在这些网段内才采信 <code>X-Forwarded-For</code> / <code>X-Real-IP</code>；留空 = 不信任任何代理。
+        </p>
+        <p class="muted" style="margin:0">
+          指标访问令牌：填了才会开启 <code>/metrics</code>（Prometheus 格式），采集时用
+          <code>Authorization: Bearer &lt;令牌&gt;</code>。留空 = 该端点关闭（返回 403），
+          避免升级后凭空多出一个「知道地址就能看用户列表和流量」的接口。
         </p>
         <div class="radio-row" style="margin:0">
           <label><input type="checkbox" id="s_stats"> 开启流量统计（应用后生效，仅监听 127.0.0.1）</label>
@@ -3603,7 +3612,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",login_last_ip:"203.0.113.7",login_last_time:"2026-10-31 09:24:17"}
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",login_last_ip:"203.0.113.7",login_last_time:"2026-10-31 09:24:17"}
   };
 }
 async function mockRoute(path, opts) {
@@ -7017,6 +7026,7 @@ async function loadSettings() {
     $("s_binsingbox").value = j.bin_singbox || ""; $("s_binxray").value = j.bin_xray || "";
     $("s_binmihomo").value = j.bin_mihomo || ""; $("s_host").value = j.public_host || "";
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
+    $("s_metrics_token").value = j.metrics_token || "";
     $("s_warn_pct").value = j.quota_warn_pct || 80;
     $("s_fwauto").checked = j.fw_auto !== "0";
     $("s_trusted_proxies").value = j.trusted_proxies || "";
@@ -7276,10 +7286,16 @@ async function saveUpdateSettings() {
     $("updsetmsg").textContent = "已保存"; setTimeout(()=>$("updsetmsg").textContent="", 2500);
   } catch(e){ toast(e.message, "err"); }
 }
+// 生成 /metrics 访问令牌（24 字节 → 48 位十六进制）
+function genMetricsToken(){
+  const a = new Uint8Array(24); crypto.getRandomValues(a);
+  $("s_metrics_token").value = [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+}
 async function saveSettings() {
   const body = { bin_singbox:$("s_binsingbox").value, bin_xray:$("s_binxray").value,
     bin_mihomo:$("s_binmihomo").value, public_host:$("s_host").value,
     stats_enabled:$("s_stats").checked?"1":"0", stats_secret:$("s_stats_secret").value,
+    metrics_token:$("s_metrics_token").value.trim(),
     quota_warn_pct:String(+$("s_warn_pct").value || 80),
     fw_auto:$("s_fwauto").checked?"1":"0",
     trusted_proxies:$("s_trusted_proxies").value.trim(),
