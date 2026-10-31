@@ -29,9 +29,9 @@ import (
 	"triune/internal/webui"
 )
 
-// 构建时注入（注意需写完整导入路径）：
-//   go build -ldflags "-X triune/cmd/server.version=v0.8.5"
-var version = "dev"
+// 构建时注入（需写完整导入路径，且变量必须导出以便链接器 -X 覆盖）：
+//   go build -ldflags "-X triune/cmd/server.Version=v0.8.5"
+var Version = "dev"
 
 func main() {
 	addr := flag.String("addr", ":10010", "listen address")
@@ -40,7 +40,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("triune-panel %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("triune-panel %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
@@ -56,7 +56,7 @@ func main() {
 	pipe := &core.PipelineManager{DataDir: *dataDir, ProcMgr: pm, Settings: st}
 
 	srv := api.New(st, pipe, pm, *dataDir)
-	api.Version = version
+	api.Version = Version
 
 	// ACME 证书管理器：API 查询与后台签发/续期循环必须使用同一实例，
 	// 否则 API 侧永远看不到后台签发的证书状态。
@@ -77,7 +77,7 @@ func main() {
 	// ACME 证书自动签发/续期
 	go certMgr.Run()
 
-	log.Printf("triune-panel %s listening on %s, data dir %s", version, *addr, *dataDir)
+	log.Printf("triune-panel %s listening on %s, data dir %s", Version, *addr, *dataDir)
 	if p, _ := st.GetSetting("admin_pass"); p == "" {
 		log.Printf("管理密码仍为出厂默认，首次登录将要求修改；新装可用 data/bootstrap.creds 设置初始凭据")
 	}
