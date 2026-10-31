@@ -216,6 +216,12 @@ v0.8 已验证：
 8. **已用真实内核全矩阵校验**：mihomo 1.19.33（`mihomo -t`）与
    sing-box 1.14.4（`sing-box check`）**54/54 通过**（23 场景 × 2 内核、
    全规则集 107/105 条 × 2 内核、3 种目标设备 × 2 内核）。
+9. **修复安装脚本权限问题**：此前以普通用户重跑安装时，
+   `install: cannot create regular file '/opt/triune-panel/triune-panel': Permission denied`
+   （目录已存在但属主为 root）。现在特权步骤逐条交给 `sudo` 执行，
+   忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
+   新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
+   二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
 ## 部署到 VPS
 
@@ -238,6 +244,32 @@ GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地�
 - 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
 
 > 注意：在线安装依赖匿名访问 GitHub，要求仓库为 **Public**；私有仓库所有源（含镜像）都会返回 404，请将仓库设为 Public，或改用「手动部署」离线安装。
+
+#### 权限说明（避免 `Permission denied`）
+
+安装需要写入 `/opt/triune-panel` 与 `/etc/systemd/system`，这两个位置需要 root。脚本已做健壮化处理，**忘记加 `sudo` 也能装**——特权步骤会逐条交给 `sudo` 执行：
+
+```bash
+# 忘记 sudo 也没问题：脚本内部会对写目录/写 systemd/启服务这些动作自动提权
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | bash
+```
+
+常见报错与对应处理：
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `install: cannot create regular file '/opt/triune-panel/triune-panel': Permission denied` | 目录已存在（此前用 root 装过）但当前用户无写权限 | 加 `sudo` 重跑，或让脚本自动提权 |
+| 提示当前用户无写权限、且系统无 `sudo` | rootless 容器 | 用 `TRIUNE_INSTALL_DIR` 装到用户目录 |
+| 提示二进制无法执行 | 架构不匹配 | 显式指定架构：`... | bash -s -- amd64` |
+
+安装目录可自定义（无需 root，适合 rootless 环境）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
+  | TRIUNE_INSTALL_DIR=~/triune-panel bash
+```
+
+自定义目录时 systemd 单元的 `ExecStart` 会自动跟随实际路径；卸载脚本同样支持 `TRIUNE_INSTALL_DIR`。
 
 ### 一键卸载
 

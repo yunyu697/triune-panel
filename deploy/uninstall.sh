@@ -22,17 +22,33 @@
 # ============================================================
 set -euo pipefail
 
-INSTALL_DIR=/opt/triune-panel
+INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
 SERVICE=triune-panel.service
 PURGE=0
 [[ "${1:-}" == "--purge" ]] && PURGE=1
+
+# 权限：删除 /opt 与 systemd 单元需要 root；脚本本体可在普通用户下运行，
+# 由 SUDO 逐条提权（与安装脚本保持一致）。
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo"
+else
+  SUDO=""
+fi
+
+if [[ "$(id -u)" -ne 0 && -z "$SUDO" ]]; then
+  echo "✘ 卸载需要 root 权限（当前用户 $(id -un)，且系统无 sudo 命令）"
+  echo "  请改用: sudo bash $INSTALL_DIR/uninstall.sh"
+  exit 1
+fi
 
 echo "=== Triune Panel 卸载 ==="
 
 # ---- 1. 停止并禁用服务（面板退出时会一并停止其托管的内核进程）----
 if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then
   echo "→ 停止服务 $SERVICE（含其托管的 sing-box / xray / mihomo 内核进程）"
-  systemctl disable --now "$SERVICE" 2>/dev/null || systemctl stop "$SERVICE" 2>/dev/null || true
+  $SUDO systemctl disable --now "$SERVICE" 2>/dev/null || $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
   sleep 1
 else
   echo "→ 未检测到 systemd 服务（可能已卸载）"
@@ -41,18 +57,18 @@ fi
 # 兜底：确认没有残留的面板进程
 if pgrep -f "$INSTALL_DIR/triune-panel" >/dev/null 2>&1; then
   echo "→ 结束残留面板进程"
-  pkill -f "$INSTALL_DIR/triune-panel" 2>/dev/null || true
+  $SUDO pkill -f "$INSTALL_DIR/triune-panel" 2>/dev/null || true
   sleep 0.5
 fi
 
 # ---- 2. 删除服务单元与二进制 ----
 if [[ -f "/etc/systemd/system/$SERVICE" ]]; then
-  rm -f "/etc/systemd/system/$SERVICE"
-  systemctl daemon-reload
+  $SUDO rm -f "/etc/systemd/system/$SERVICE"
+  $SUDO systemctl daemon-reload
   echo "→ 已删除服务单元 /etc/systemd/system/$SERVICE"
 fi
 if [[ -f "$INSTALL_DIR/triune-panel" ]]; then
-  rm -f "$INSTALL_DIR/triune-panel"
+  $SUDO rm -f "$INSTALL_DIR/triune-panel"
   echo "→ 已删除二进制 $INSTALL_DIR/triune-panel"
 fi
 
@@ -61,12 +77,12 @@ DATA_DIR="$INSTALL_DIR/data"
 if [[ -d "$DATA_DIR" ]]; then
   if [[ $PURGE -eq 1 ]]; then
     echo "→ --purge 模式：删除数据目录 $DATA_DIR（含数据库/证书/内核副本/备份）"
-    rm -rf "$DATA_DIR"
+    $SUDO rm -rf "$DATA_DIR"
   elif [[ -t 0 ]]; then
     printf "是否同时删除数据目录 %s（数据库、证书、自动备份等，删除后不可恢复）？[y/N] " "$DATA_DIR"
     read -r ans
     if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-      rm -rf "$DATA_DIR"
+      $SUDO rm -rf "$DATA_DIR"
       echo "→ 数据目录已删除"
     else
       echo "→ 数据目录已保留: $DATA_DIR（重装脚本会自动复用）"
@@ -79,7 +95,7 @@ if [[ -d "$DATA_DIR" ]]; then
 fi
 
 # ---- 4. 清理空目录 ----
-rmdir "$INSTALL_DIR" 2>/dev/null || true
+$SUDO rmdir "$INSTALL_DIR" 2>/dev/null || true
 
 echo ""
 echo "✔ Triune Panel 卸载完成"
