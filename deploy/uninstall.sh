@@ -2,17 +2,22 @@
 # ============================================================
 # Triune Panel 一键卸载脚本
 #
-# 在线一键卸载（默认保留数据，可随时重装恢复）:
-#   curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+# 首选（无需联网）——安装时卸载脚本已落地在服务器本地，直接执行:
+#   sudo bash /opt/triune-panel/uninstall.sh            # 保留数据
+#   sudo bash /opt/triune-panel/uninstall.sh --purge    # 连数据彻底删除
 #
-# raw 直连慢时，可改用加速镜像拉取本脚本（实测可用，任选其一）:
-#   curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
-#   curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
-#   curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+# 在线卸载（本地脚本已丢时的备用）：原始地址 + 加速镜像写在同一条命令里，
+# 依次尝试自动择优，任一成功即执行:
+#   for u in \
+#     https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+#     https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+#     https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+#     https://gh-proxy.org/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+#     https://ghproxy.cn/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh; do
+#     curl -fsSL "$u" | sudo bash && break
+#   done
 #
-# 连数据一起彻底删除（不可恢复，请谨慎）——在以上任一命令后加 -s -- --purge:
-#   ... | sudo bash -s -- --purge
-#
+# 注意：以上在线方式要求仓库为 Public；私有仓库匿名拉取一律 404。
 # 交互终端下运行时会二次确认是否删除数据；管道/无人值守模式默认保留。
 # ============================================================
 set -euo pipefail

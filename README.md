@@ -191,7 +191,7 @@ v0.7 已验证：
 curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
 ```
 
-GitHub 直连慢时脚本会**自动依次尝试多个加速镜像**（ghfast.top / gh-proxy.com / ghproxy.net / gh-proxy.net / gh.ddlc.top），无需手动配置；也可指定镜像：`| sudo GH_PROXY=https://ghfast.top bash`。
+GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地址 + 多个加速镜像」（ghfast.top / gh-proxy.com / gh-proxy.org / ghproxy.cn / gh-proxy.net / ghproxy.net / gh.ddlc.top / ghproxy.link）统一候选池，运行时并行探测全部候选，自动选择实测最快的源下载，失败自动切换次优，无需手动配置；也可指定镜像跳过探测：`| sudo GH_PROXY=https://ghfast.top bash`。
 
 指定架构：`| sudo bash -s -- arm64`。重复执行即**原地升级**（只替换面板二进制，`/opt/triune-panel/data` 数据原样保留）。
 
@@ -201,18 +201,24 @@ GitHub 直连慢时脚本会**自动依次尝试多个加速镜像**（ghfast.to
 - 日志：`journalctl -u triune-panel -f`
 - 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
 
+> 注意：在线安装依赖匿名访问 GitHub，要求仓库为 **Public**；私有仓库所有源（含镜像）都会返回 404，请将仓库设为 Public，或改用「手动部署」离线安装。
+
 ### 一键卸载
 
 ```bash
-# 默认卸载，保留数据目录（可随时重装恢复全部数据）
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+# 首选：安装时卸载脚本已落地在服务器本地，直接执行（无需联网，不受仓库可见性影响）
+sudo bash /opt/triune-panel/uninstall.sh            # 默认卸载，保留数据目录（可随时重装恢复全部数据）
+sudo bash /opt/triune-panel/uninstall.sh --purge    # 连数据一起彻底删除（不可恢复）
 
-# raw 直连慢时，用加速镜像拉取卸载脚本（任选其一）
-curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
-curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
-
-# 连数据一起彻底删除（不可恢复）：以上任一命令改为 ... | sudo bash -s -- --purge
+# 备用：本地脚本已丢时在线拉取（原始地址+镜像写在同一条命令里，逐个尝试自动择优）
+for u in \
+  https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://gh-proxy.org/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://ghproxy.cn/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh; do
+  curl -fsSL "$u" | sudo bash && break
+done
 ```
 
 卸载会自动停止面板及其托管的内核进程、删除 systemd 服务单元与二进制；交互终端下会二次确认是否删除数据，管道执行默认保留。
