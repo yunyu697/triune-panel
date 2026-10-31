@@ -129,7 +129,15 @@ func TestLoginTOTPFlow(t *testing.T) {
 	a := New(st, nil, nil, dir)
 
 	secret, _ := generateTOTPSecret()
-	_ = st.SetSetting("totp_secret", secret)
+	// TOTP 密钥是账号级的（admin_users.totp_secret），不再是 settings 全局槽
+	owner, err := st.OwnerAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.TotpSecret = secret
+	if err := st.UpdateAdmin(owner); err != nil {
+		t.Fatal(err)
+	}
 	_ = st.SetSetting("auth_2fa_mode", "totp")
 	key, _ := decodeSecret(secret)
 	code := totpAt(key, time.Now())

@@ -121,6 +121,31 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 	CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 	`,
+	// v4: 多管理员账号
+	//
+	// 播种语句直接从 settings 的旧单账号槽搬过来，让老库升级后原来的
+	// 用户名/密码照常可用（哈希原样搬，用户无感）；全新库 settings 里没有
+	// 这两个键，于是得到 admin + 空哈希，也就是「出厂默认、首登强制改密」。
+	// 用 WHERE NOT EXISTS 兜住「迁移重跑」的情况（版本号丢失的存量库）。
+	`
+	CREATE TABLE IF NOT EXISTS admin_users (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		username    TEXT NOT NULL UNIQUE,
+		pass_hash   TEXT NOT NULL DEFAULT '',
+		role        TEXT NOT NULL DEFAULT 'admin',
+		enabled     INTEGER NOT NULL DEFAULT 1,
+		totp_secret TEXT NOT NULL DEFAULT '',
+		last_ip     TEXT NOT NULL DEFAULT '',
+		last_login  TEXT NOT NULL DEFAULT '',
+		created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	INSERT INTO admin_users(username,pass_hash,role,enabled)
+	SELECT COALESCE(NULLIF((SELECT value FROM settings WHERE key='admin_user'),''),'admin'),
+	       COALESCE((SELECT value FROM settings WHERE key='admin_pass_hash'),''),
+	       'owner',1
+	WHERE NOT EXISTS (SELECT 1 FROM admin_users);
+	`,
 }
 
 func Open(dataDir string) (*Store, error) {

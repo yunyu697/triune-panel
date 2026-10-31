@@ -227,9 +227,22 @@ func applyBootstrapCreds(dataDir string, st *store.Store) {
 	if user == "" {
 		user = "admin"
 	}
-	if err := st.SetSetting(authn.SettingUser, user); err != nil {
-		log.Printf("bootstrap admin_user: %v", err)
+	// 初始凭据写进超级管理员账号（多管理员之后不再是 settings 里的单账号槽）
+	owner, err := st.OwnerAdmin()
+	if err != nil {
+		log.Printf("bootstrap: 找不到超级管理员账号: %v", err)
 		return
+	}
+	if user != owner.Username {
+		if err := authn.ValidateUsername(user); err != nil {
+			log.Printf("bootstrap admin_user: %v", err)
+			return
+		}
+		owner.Username = user
+		if err := st.UpdateAdmin(owner); err != nil {
+			log.Printf("bootstrap admin_user: %v", err)
+			return
+		}
 	}
 	if err := authn.SetPassword(st, pass); err != nil {
 		log.Printf("bootstrap admin_pass: %v", err)

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"triune/internal/authn"
 	"triune/internal/store"
 )
 
@@ -41,15 +40,28 @@ const (
 	AuditAuth2FA       = "auth2fa"
 	AuditCert          = "cert.issue"
 	AuditUpdate        = "update"
+	AuditAdmin         = "admin"     // 管理员账号增删改
+	AuditDeny          = "rbac.deny" // 越权访问被拒
 )
 
-// audit 记录一条审计。r 可为 nil（CLI / 后台任务等无请求上下文的场景）。
+// audit 记录一条审计，操作人取自当前登录账号（匿名请求为空）。
 func (a *Server) audit(r *http.Request, action, target, result, detail string) {
+	a.auditAs(a.actorName(r), r, action, target, result, detail)
+}
+
+// auditAs 指定操作人的审计写入。
+//
+// 登录失败这类场景没有「当前用户」，但要记下**被尝试的用户名**：
+// 「有人在猜 alice 的密码」和「有人在猜 root 的密码」是两条不同的线索。
+func (a *Server) auditAs(actor string, r *http.Request, action, target, result, detail string) {
 	if a.Store == nil {
 		return
 	}
+	if actor == "" {
+		actor = "anonymous"
+	}
 	e := store.AuditEntry{
-		Actor:  authn.User(a.Store),
+		Actor:  actor,
 		Action: action,
 		Target: target,
 		Result: result,
@@ -71,6 +83,11 @@ func (a *Server) auditOK(r *http.Request, action, target, detail string) {
 // auditFail 失败事件的简写。
 func (a *Server) auditFail(r *http.Request, action, target, detail string) {
 	a.audit(r, action, target, store.AuditFail, detail)
+}
+
+// auditFailAs 指定操作人的失败事件（登录失败、账号停用等匿名场景）。
+func (a *Server) auditFailAs(actor string, r *http.Request, action, target, detail string) {
+	a.auditAs(actor, r, action, target, store.AuditFail, detail)
 }
 
 // GET /api/audit?limit=&offset=&prefix=&result=

@@ -24,6 +24,12 @@ var protectedRoutes = []struct{ method, path string }{
 	{"POST", "/api/auth2fa/email/test"},
 	{"POST", "/api/auth2fa/disable"},
 	{"POST", "/api/logout"},
+	{"GET", "/api/me"},
+	{"PUT", "/api/me/password"},
+	{"GET", "/api/admins"},
+	{"POST", "/api/admins"},
+	{"PUT", "/api/admins/1"},
+	{"DELETE", "/api/admins/1"},
 	{"GET", "/api/status"},
 	{"GET", "/api/inbounds"},
 	{"POST", "/api/inbounds"},
@@ -179,10 +185,10 @@ func TestAuthRejectsExpiredSession(t *testing.T) {
 	}
 }
 
-// TestAuthInvalidatedByPasswordChange 改密后旧会话立即失效（纪元机制）。
+// TestAuthInvalidatedByPasswordChange 改密后旧会话立即失效（密码指纹机制）。
 //
 // 这是「密码泄漏后改密能踢掉攻击者会话」的唯一保障——
-// 会话存在内存里，改密不会逐个清理，只能靠纪元比对。
+// 会话存在内存里，改密不会逐个清理，只能靠指纹比对。
 func TestAuthInvalidatedByPasswordChange(t *testing.T) {
 	a := newAuthTestServer(t)
 	tok := loginForToken(t, a)

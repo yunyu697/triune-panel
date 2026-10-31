@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.5 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.9.6 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -155,6 +155,16 @@ a:hover{text-decoration:underline}
   border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--acc),var(--acc2))}
 .nav-item .badge{margin-left:auto}
 .side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;position:relative}
+/* 当前登录账号与角色（多管理员之后必须一眼看出「我是谁、我能干什么」） */
+.whoami{display:flex;align-items:center;gap:7px;padding:0 10px 8px;font-size:12px;min-width:0}
+.whoami-user{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px}
+.whoami-role{flex:none;font-size:10.5px;padding:1px 7px;border-radius:99px;font-weight:600;
+  background:var(--acc-soft);color:var(--acc-text);border:1px solid transparent}
+.whoami-role.owner{background:var(--warn-soft);color:var(--warn)}
+.whoami-role.viewer{background:var(--hover);color:var(--muted)}
+/* 只读账号看不到的东西：靠角色类整体隐藏，避免点进去满屏 403 */
+body[data-role="viewer"] .need-admin,body[data-role="viewer"] .need-owner{display:none!important}
+body[data-role="admin"] .need-owner{display:none!important}
 .main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:14px 28px;
   background:var(--glass);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
@@ -472,6 +482,10 @@ canvas{display:block;width:100%}
     </div>
     <nav id="nav"></nav>
     <div class="side-foot">
+      <div class="whoami" id="whoami" title="当前登录账号与角色">
+        <span class="whoami-user" id="whoami_user">—</span>
+        <span class="whoami-role" id="whoami_role"></span>
+      </div>
       <div style="position:relative">
         <button class="theme-btn" id="themeBtn" onclick="toggleThemePop()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1 0 1.5-.7 1.2-1.5-.5-1.4.2-2.5 1.8-2.5h1.5c1.4 0 2.5-1.1 2.5-2.5A9 9 0 0 0 12 3z"/></svg>
@@ -751,6 +765,21 @@ canvas{display:block;width:100%}
 
     <!-- 设置 -->
     <section id="v-settings" class="view">
+      <!-- 我的账号：所有角色都能看（只读账号进设置页只会看到这一张卡） -->
+      <div class="card">
+        <h3>我的账号<span class="spacer"></span><span class="badge b-idle" id="me_role_badge">—</span></h3>
+        <div class="frm">
+          <div><label>用户名</label><input id="me_user" class="input" disabled></div>
+          <div><label>上次登录</label><input id="me_last" class="input" disabled placeholder="—"></div>
+          <div><label>原密码<span class="muted" style="font-weight:400">（首次登录设密码时可留空）</span></label>
+            <input id="me_old" class="input" type="password" autocomplete="current-password" placeholder="当前密码"></div>
+          <div><label>新密码</label><input id="me_new" class="input" type="password" autocomplete="new-password" placeholder="至少 8 位"></div>
+        </div>
+        <p class="muted" style="margin:0">改密后<b>本账号</b>的在线会话全部失效（其他管理员不受影响），需要用新密码重新登录。</p>
+        <div style="margin-top:14px"><button class="btn primary" onclick="changeMyPassword()">修改密码</button></div>
+      </div>
+
+      <div class="need-admin">
       <div class="card">
         <h3>基础设置</h3>
         <div class="frm">
@@ -768,7 +797,6 @@ canvas{display:block;width:100%}
           </div>
           <div><label>流量告警阈值（%）<span class="muted" style="font-weight:400">（越过后发邮件，需在下方配置 SMTP 与收件邮箱）</span></label>
             <input id="s_warn_pct" class="input" type="number" min="1" max="100" value="80"></div>
-          <div><label>新密码</label><input id="s_pass" class="input" type="password" placeholder="留空不修改"></div>
         </div>
         <p class="muted" style="margin:0">
           可信反向代理网段：面板挂在 nginx / Caddy 后面时<b>必填</b>（同机填 <code>127.0.0.1</code>），
@@ -875,6 +903,34 @@ canvas{display:block;width:100%}
         <button class="btn sm" onclick="saveUpdateSettings()">保存更新设置</button>
         <span class="muted" id="updsetmsg"></span>
       </div>
+
+      <!-- 管理员账号：只有超级管理员可见（服务端同样只允许 owner 调用） -->
+      <div class="card need-owner">
+        <h3>管理员账号<span class="spacer"></span>
+          <span class="muted" style="font-weight:400;font-size:12px">角色：超级管理员 &gt; 管理员 &gt; 只读</span>
+        </h3>
+        <p class="muted" style="margin:0 0 12px">
+          每个账号独立密码、独立 TOTP。审计日志里的「操作人」就是这里的用户名——
+          多人共用一个密码的时代结束了。
+          <b>管理员</b>能改配置但不能管账号；<b>只读</b>只能看状态、入站与流量。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>上次登录</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="admbody"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <div class="frm" style="margin-top:14px">
+          <div><label>新管理员用户名</label><input id="adm_user" class="input" placeholder="2~32 位字母数字或 . _ -"></div>
+          <div><label>角色</label>
+            <select id="adm_role" class="input">
+              <option value="admin">管理员（可改配置）</option>
+              <option value="viewer">只读（只能看）</option>
+            </select></div>
+          <div><label>初始密码<span class="muted" style="font-weight:400">（留空自动生成 16 位随机密码）</span></label>
+            <input id="adm_pass" class="input" placeholder="留空自动生成"></div>
+        </div>
+        <button class="btn primary" onclick="createAdmin()">新建管理员</button>
+      </div>
+      </div><!-- /need-admin -->
     </section>
 
     <!-- 审计日志 -->
@@ -892,6 +948,8 @@ canvas{display:block;width:100%}
             <option value="import">导入</option>
             <option value="external">外部节点</option>
             <option value="auth2fa">二次验证</option>
+            <option value="admin">管理员账号</option>
+            <option value="rbac">越权拦截</option>
             <option value="update">版本更新</option>
           </select>
           <select id="au_result" class="input" style="width:110px" onchange="loadAudit()">
@@ -907,12 +965,12 @@ canvas{display:block;width:100%}
           超过 90 天的记录由面板自动清理。
         </p>
         <div class="tbl-wrap"><table>
-          <thead><tr><th style="width:150px">时间</th><th style="width:130px">动作</th><th>对象</th><th style="width:130px">来源</th><th style="width:70px">结果</th><th>详情</th></tr></thead>
-          <tbody id="autbody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+          <thead><tr><th style="width:150px">时间</th><th style="width:110px">操作人</th><th style="width:130px">动作</th><th>对象</th><th style="width:130px">来源</th><th style="width:70px">结果</th><th>详情</th></tr></thead>
+          <tbody id="autbody"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
         </table></div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
           <button class="btn sm" id="au_more" onclick="loadAudit(true)">加载更多</button>
-          <button class="btn sm danger" onclick="clearAudit()">清空审计</button>
+          <button class="btn sm danger need-owner" onclick="clearAudit()">清空审计</button>
           <span class="muted" id="au_msg"></span>
         </div>
       </div>
@@ -1036,6 +1094,20 @@ canvas{display:block;width:100%}
     <div class="foot">
       <button class="btn" onclick="closeModal('mDiff')">关闭</button>
       <button class="btn primary" onclick="closeModal('mDiff');applyCfg()">确认无误，应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建管理员 / 重置密码后的一次性密码展示 -->
+<div class="overlay" id="mAdminPass" onclick="if(event.target===this)closeModal('mAdminPass')">
+  <div class="modal" style="max-width:480px">
+    <h3>初始密码（只显示这一次）</h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">
+      账号 <b id="ap_user"></b> 的密码如下。关闭本窗口后无法再次查看，只能重新重置。
+      请立刻抄下来并通过安全渠道交给本人，首次登录后建议让对方自行修改。</p>
+    <div class="input mono" id="ap_pass" style="font-size:15px;letter-spacing:.5px;user-select:all;padding:12px;text-align:center"></div>
+    <div class="foot">
+      <button class="btn primary" onclick="closeModal('mAdminPass')">我已保存</button>
     </div>
   </div>
 </div>
@@ -3463,6 +3535,13 @@ var qrcode = function() {
 const DEMO = location.hash.includes("demo") || /demo\.html?$/i.test(location.pathname);
 const $ = id => document.getElementById(id);
 let TOKEN = localStorage.getItem("triune_token") || "";
+/* 当前账号身份。只用于「体验层」显隐与提前拦截——
+   真正的权限判定全在服务端，改前端改不掉 403。 */
+let ROLE = localStorage.getItem("triune_role") || "";
+let ME = { user: localStorage.getItem("triune_user") || "", role: ROLE };
+const isOwner = () => ROLE === "owner";
+const isViewer = () => ROLE === "viewer";
+const ROLE_LABEL = { owner:"超级管理员", admin:"管理员", viewer:"只读" };
 // 仪表盘数据状态（需在演示 mock 初始化之前声明）
 const OV = { daily: [], hist: [], traffic: [], cores: [] };
 let INB_N = 0;
@@ -3492,21 +3571,37 @@ const VIEWS = [
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
 
-$("nav").innerHTML = (() => {
+/* 只读账号的可见页面：其余页面依赖的接口（客户端凭据、导出、应用、审计）
+   都会 403，与其让人点进去看一堆红字，不如不给入口。
+   「设置」保留，但里面只显示「我的账号」卡片（见 applyRole）。 */
+const VIEWER_VIEWS = ["overview", "inbounds", "traffic", "settings"];
+function visibleViews() {
+  return VIEWS.filter(([k]) => !isViewer() || VIEWER_VIEWS.includes(k));
+}
+
+let CURRENT = "overview";
+function renderNav() {
+  const list = visibleViews();
+  // 当前页若因角色变化变得不可见，退回概览
+  if (!list.some(([k]) => k === CURRENT)) CURRENT = "overview";
   let html = "", last = null;
-  VIEWS.forEach(([v, label, sec]) => {
+  list.forEach(([v, label, sec]) => {
     if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
-    html += `<button class="nav-item${v==="overview"?" on":""}" data-v="${v}">
+    html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
       <span>${label}</span></button>`;
   });
-  return html;
-})();
+  $("nav").innerHTML = html;
+}
+renderNav();
 $("nav").addEventListener("click", e => {
   const b = e.target.closest(".nav-item");
   if (b) goto(b.dataset.v);
 });
 function goto(v) {
+  // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
+  if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
+  CURRENT = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
   $("pageTitle").textContent = TITLES[v];
@@ -3559,9 +3654,13 @@ setTheme(localStorage.getItem("triune_theme") || "light");
 
 /* ================= API（含演示 mock） ================= */
 async function req(path, opts = {}) {
+  const m = opts.method || "GET";
+  // 只读账号的写请求在本地就拦掉：服务端会回 403，但等一个往返再弹错误
+  // 不如直接说清楚「你是只读账号」。绕过前端也没用——服务端照样 403。
+  if (isViewer() && m !== "GET") throw new Error("当前账号为只读角色，无权执行此操作");
   if (DEMO) return mockRoute(path, opts);
   const r = await fetch(path, {
-    method: opts.method || "GET",
+    method: m,
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
@@ -3612,7 +3711,12 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",login_last_ip:"203.0.113.7",login_last_time:"2026-10-31 09:24:17"}
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com"},
+    admins:[
+      {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
+      {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
+      {id:3,username:"noc-watch",role:"viewer",enabled:false,has_totp:false,last_ip:"",last_login:"",created_at:"2026-10-20 09:00:00"}
+    ]
   };
 }
 async function mockRoute(path, opts) {
@@ -3624,7 +3728,41 @@ async function mockRoute(path, opts) {
     // 演示 TOTP 两步登录：任意账密 → 返回 need_2fa，输入 123456 放行
     if (!opts.body?.code) return { need_2fa: "totp" };
     if (opts.body.code !== "123456") throw new Error("动态口令不正确（演示模式请输入 123456）");
-    return { token: "demo", last_ip: "203.0.113.7", last_time: "2026-10-31 09:24:17" };
+    return { token: "demo", user:"admin", role:"owner", last_ip: "203.0.113.7", last_time: "2026-10-31 09:24:17" };
+  }
+  if (api === "me") {
+    if (rest.includes("/password")) {
+      if (!opts.body?.new || opts.body.new.length < 8) throw new Error("密码至少 8 位");
+      return { ok: 1, relogin: true };
+    }
+    return { user:"admin", role:"owner", last_ip:"203.0.113.7", last_login:"2026-10-31 09:24:17", must_change:false, has_totp:true };
+  }
+  if (api === "admins") {
+    if (m === "GET") return MDB.admins;
+    if (m === "POST") {
+      const b = opts.body || {};
+      if (!b.username) throw new Error("用户名不能为空");
+      if (MDB.admins.some(a => a.username === b.username)) throw new Error("用户名已存在");
+      const a = { id: Math.max(0, ...MDB.admins.map(x => x.id)) + 1, username: b.username,
+        role: b.role || "admin", enabled: true, has_totp: false, last_ip: "", last_login: "",
+        created_at: new Date().toISOString().slice(0, 19).replace("T", " ") };
+      MDB.admins.push(a);
+      return { ok: 1, admin: a, password: b.password || "DemoGen3ratedPass" };
+    }
+    const id = +rest.split("/")[1];
+    const a = MDB.admins.find(x => x.id === id);
+    if (m === "PUT") {
+      if (!a) throw new Error("管理员不存在");
+      if (a.role === "owner" && (opts.body.role || opts.body.enabled === false)) throw new Error("超级管理员不能降级或停用");
+      Object.assign(a, opts.body || {});
+      return { ok: 1, admin: a };
+    }
+    if (m === "DELETE") {
+      if (!a) throw new Error("管理员不存在");
+      if (a.role === "owner") throw new Error("超级管理员不能删除");
+      MDB.admins = MDB.admins.filter(x => x.id !== id);
+      return { ok: 1 };
+    }
   }
   if (api === "auth2fa") {
     if (m === "GET") return { mode:"off", totp_ready:false, email:"admin@example.com", smtp_ready:true };
@@ -3791,6 +3929,12 @@ async function login() {
       return;
     }
     TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); resetLoginUI();
+    // 记住身份：后续所有显隐与按钮可用性都靠它（真正的权限判定在服务端）
+    ME = { user: j.user || "", role: j.role || "" };
+    ROLE = ME.role;
+    localStorage.setItem("triune_user", ME.user);
+    localStorage.setItem("triune_role", ROLE);
+    applyRole();
     // 上次登录来源提示（本次之前的那次），便于发现异常访问
     if (j.last_ip) {
       toast(`上次登录：${j.last_ip}${j.last_time ? " · " + j.last_time : ""}`);
@@ -3812,7 +3956,8 @@ async function submitMustChange() {
   if (p1.length < 8) { toast("新密码至少 8 位", "err"); return; }
   if (p1 !== p2) { toast("两次输入的密码不一致", "err"); return; }
   try {
-    const r = await req("/api/settings", { method:"PUT", body:{ admin_pass: p1 } });
+    // 首次设密码时原密码为空（服务端对「从未设过密码」的账号跳过原密码校验）
+    const r = await req("/api/me/password", { method:"PUT", body:{ old:"", new:p1 } });
     $("mc_pass").value = ""; $("mc_pass2").value = "";
     closeModal("mMustChange");
     // 改密会让所有会话失效（含当前这个），必须回登录页重新登录
@@ -3840,12 +3985,21 @@ function logout(){
   // 演示模式没有后端，跳过。
   const t = TOKEN;
   if (t && !DEMO) fetch("api/logout", { method: "POST", headers: { Authorization: "Bearer " + t } }).catch(() => {});
-  TOKEN=""; localStorage.removeItem("triune_token"); resetLoginUI(); showLogin();
+  TOKEN=""; localStorage.removeItem("triune_token");
+  localStorage.removeItem("triune_role"); localStorage.removeItem("triune_user");
+  ROLE=""; ME={user:"",role:""};
+  resetLoginUI(); showLogin();
 }
 
 /* ================= 数据加载 ================= */
 async function loadAll() {
-  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(), loadGen(), loadOverview(), loadAuth2FA()]);
+  // 按角色决定拉什么：只读账号拉客户端 / 设置 / 配置生成会被 403，
+  // 与其刷一串错误提示，不如根本不请求。
+  const jobs = [loadStatus(), loadInbounds(), loadTraffic(), loadRevisions(), loadVersion(),
+                loadCerts(), loadComponents(), loadLive(), loadExternal(), loadOverview(), loadMe()];
+  if (!isViewer()) jobs.push(loadClients(), loadSettings(), loadGen(), loadAuth2FA());
+  if (isOwner()) jobs.push(loadAdmins());
+  await Promise.allSettled(jobs);
 }
 function fmtBytes(b) {
   if (!b) return "0";
@@ -7035,12 +7189,6 @@ async function loadSettings() {
     $("s_auth_email").value = j.auth_email || "";
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
     $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
-    // 概览页展示最近一次登录（便于发现异常访问）
-    if (j.login_last_ip) {
-      const el = $("last_login_line");
-      el.textContent = `上次登录：${j.login_last_ip}${j.login_last_time ? " · " + j.login_last_time : ""}`;
-      el.classList.remove("hide");
-    }
   } catch(e){}
 }
 
@@ -7300,15 +7448,136 @@ async function saveSettings() {
     fw_auto:$("s_fwauto").checked?"1":"0",
     trusted_proxies:$("s_trusted_proxies").value.trim(),
     acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
-  if ($("s_pass").value) body.admin_pass = $("s_pass").value;
   try {
-    const r = await req("/api/settings", { method:"PUT", body });
-    $("s_pass").value = "";
-    // 改密后服务端会让所有会话失效（含当前这个），回登录页重新登录
-    if (r && r.relogin) { toast("密码已更新，请用新密码重新登录"); logout(); return; }
+    await req("/api/settings", { method:"PUT", body });
     toast("设置已保存（统计开关需应用后生效）");
   }
   catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- 我的账号：改自己的密码（需原密码，首次设密码时留空） ---- */
+async function changeMyPassword() {
+  const oldP = $("me_old").value, newP = $("me_new").value;
+  if (newP.length < 8) { toast("新密码至少 8 位", "err"); return; }
+  if (!(await ask("修改密码", "确认修改当前账号的密码？改完需要用新密码重新登录。"))) return;
+  try {
+    const r = await req("/api/me/password", { method:"PUT", body:{ old: oldP, new: newP } });
+    $("me_old").value = ""; $("me_new").value = "";
+    if (r && r.relogin) { toast("密码已更新，请用新密码重新登录"); logout(); return; }
+  } catch (e) { toast("修改失败：" + e.message, "err"); }
+}
+
+/* ---- 管理员账号（仅超级管理员） ---- */
+async function loadMe() {
+  try {
+    const j = await req("/api/me");
+    ME = j; ROLE = j.role || "";
+    localStorage.setItem("triune_role", ROLE);
+    localStorage.setItem("triune_user", j.user || "");
+    applyRole();
+    $("me_user").value = j.user || "";
+    $("me_last").value = j.last_ip ? `${j.last_ip}${j.last_login ? " · " + j.last_login : ""}` : "—";
+    // 概览页展示最近一次登录（按人记录，便于发现异常访问）
+    if (j.last_ip) {
+      const el = $("last_login_line");
+      el.textContent = `上次登录：${j.last_ip}${j.last_login ? " · " + j.last_login : ""}`;
+      el.classList.remove("hide");
+    }
+    const badge = $("me_role_badge");
+    if (badge) { badge.textContent = ROLE_LABEL[ROLE] || ROLE; badge.className = "badge " + (ROLE === "owner" ? "b-warn" : ROLE === "viewer" ? "b-idle" : "b-ok"); }
+  } catch (e) { /* 401 已由 req 处理 */ }
+}
+
+function applyRole() {
+  document.body.dataset.role = ROLE || "admin";
+  const u = $("whoami_user"), r = $("whoami_role");
+  if (u) u.textContent = ME.user || "—";
+  if (r) { r.textContent = ROLE_LABEL[ROLE] || ROLE || ""; r.className = "whoami-role " + (ROLE || ""); }
+  renderNav();
+}
+
+async function loadAdmins() {
+  if (!isOwner()) return;
+  try {
+    const list = await req("/api/admins");
+    const tb = $("admbody");
+    if (!list.length) { tb.innerHTML = '<tr><td colspan="5" class="muted">暂无账号</td></tr>'; return; }
+    tb.innerHTML = list.map(a => {
+      const roleTxt = ROLE_LABEL[a.role] || a.role;
+      const self = a.username === ME.user;
+      const ops = [];
+      if (a.role !== "owner") {
+        ops.push(`<button class="btn sm" onclick="toggleAdmin(${a.id},${!a.enabled})">${a.enabled ? "停用" : "启用"}</button>`);
+        ops.push(`<button class="btn sm" onclick="resetAdminPassword(${a.id},'${escHtml(a.username)}')">重置密码</button>`);
+        ops.push(`<button class="btn sm danger" onclick="deleteAdmin(${a.id},'${escHtml(a.username)}')">删除</button>`);
+      } else {
+        ops.push('<span class="muted" style="font-size:12px">受保护</span>');
+      }
+      return `<tr>
+        <td><b>${escHtml(a.username)}</b>${self ? ' <span class="muted" style="font-size:11px">（我）</span>' : ""}${a.has_totp ? ' <span class="badge b-ok" style="font-size:10px">TOTP</span>' : ""}</td>
+        <td>${roleTxt}</td>
+        <td>${a.enabled ? '<span class="badge b-ok">启用</span>' : '<span class="badge b-idle">停用</span>'}</td>
+        <td class="muted" style="font-size:12px">${a.last_login ? escHtml(a.last_ip) + " · " + escHtml(a.last_login) : "—"}</td>
+        <td class="ta-r">${ops.join(" ")}</td></tr>`;
+    }).join("");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function createAdmin() {
+  const username = $("adm_user").value.trim();
+  const role = $("adm_role").value;
+  const password = $("adm_pass").value;
+  if (!username) { toast("请填写用户名", "err"); return; }
+  try {
+    const j = await req("/api/admins", { method:"POST", body:{ username, role, password } });
+    $("adm_user").value = ""; $("adm_pass").value = "";
+    if (j.password) {
+      // 生成的密码只出现这一次，必须让用户有机会抄下来
+      openModal("mAdminPass");
+      $("ap_user").textContent = username;
+      $("ap_pass").textContent = j.password;
+    } else {
+      toast("已新建管理员 " + username);
+    }
+    loadAdmins();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function toggleAdmin(id, enabled) {
+  try {
+    await req("/api/admins/" + id, { method:"PUT", body:{ enabled } });
+    toast(enabled ? "已启用" : "已停用（该账号在线会话立即失效）");
+    loadAdmins();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function resetAdminPassword(id, name) {
+  const p = prompt(`为 ${name} 设置新密码（至少 8 位，留空自动生成）：`);
+  if (p === null) return;
+  const body = p ? { password: p } : { password: "" };
+  try {
+    if (!p) {
+      // 留空 = 服务端不接受空密码，这里自己生成一个再提交，避免「重置成空」
+      const gen = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"[b % 56]).join("");
+      body.password = gen;
+      await req("/api/admins/" + id, { method:"PUT", body });
+      openModal("mAdminPass"); $("ap_user").textContent = name; $("ap_pass").textContent = gen;
+    } else {
+      if (p.length < 8) { toast("密码至少 8 位", "err"); return; }
+      await req("/api/admins/" + id, { method:"PUT", body });
+      toast("密码已重置（该账号旧会话立即失效）");
+    }
+    loadAdmins();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function deleteAdmin(id, name) {
+  if (!(await ask("删除管理员", `确认删除 ${name}？该账号的在线会话会立即失效，操作会记入审计。`))) return;
+  try {
+    await req("/api/admins/" + id, { method:"DELETE" });
+    toast("已删除 " + name);
+    loadAdmins();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 /* ================= 审计日志 ================= */
@@ -7320,7 +7589,8 @@ const AU_LABEL = {
   "client.reset-token":"重置订阅令牌",
   "apply":"应用配置","apply.dry-run":"预检","rollback":"回滚配置","switch-core":"切换内核",
   "import":"导入链接","external":"外部节点","auth2fa":"二次验证",
-  "cert.issue":"证书签发","update":"版本更新","restore":"数据恢复","audit.clear":"清空审计"
+  "cert.issue":"证书签发","update":"版本更新","restore":"数据恢复","audit.clear":"清空审计",
+  "admin":"管理员账号","rbac.deny":"越权拦截"
 };
 // 未登记的动作名退化为前缀标签（如 foo.bar → foo 的标签），不至于显示成一串英文
 function auLabel(a) {
@@ -7331,7 +7601,7 @@ function auLabel(a) {
 let auOffset = 0;
 async function loadAudit(more) {
   const body = $("autbody");
-  if (!more) { auOffset = 0; body.innerHTML = `<tr><td colspan="6" class="muted">加载中…</td></tr>`; }
+  if (!more) { auOffset = 0; body.innerHTML = `<tr><td colspan="7" class="muted">加载中…</td></tr>`; }
   try {
     const q = new URLSearchParams({ limit: 100, offset: auOffset });
     if ($("au_prefix").value) q.set("prefix", $("au_prefix").value);
@@ -7343,19 +7613,20 @@ async function loadAudit(more) {
         : `<span class="badge b-err">失败</span>`;
       return `<tr>
         <td class="muted" style="white-space:nowrap">${escHtml(e.time)}</td>
+        <td>${e.actor ? escHtml(e.actor) : '<span class="muted">—</span>'}</td>
         <td>${escHtml(auLabel(e.action))}<div class="muted" style="font-size:11px">${escHtml(e.action)}</div></td>
         <td>${e.target ? escHtml(e.target) : '<span class="muted">—</span>'}</td>
         <td class="muted">${e.ip ? escHtml(e.ip) : "—"}</td>
         <td>${badge}</td>
         <td class="muted">${escHtml(e.detail)}</td></tr>`;
     }).join("");
-    if (!more) body.innerHTML = rows || `<tr><td colspan="6" class="muted">暂无记录</td></tr>`;
+    if (!more) body.innerHTML = rows || `<tr><td colspan="7" class="muted">暂无记录</td></tr>`;
     else body.insertAdjacentHTML("beforeend", rows);
     auOffset += j.length;
     $("au_more").classList.toggle("hide", j.length < 100);
     $("au_msg").textContent = auOffset ? `已显示 ${auOffset} 条` : "";
   } catch(e) {
-    body.innerHTML = `<tr><td colspan="6" style="color:var(--err)">加载失败：${escHtml(e.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" style="color:var(--err)">加载失败：${escHtml(e.message)}</td></tr>`;
   }
 }
 async function clearAudit() {
@@ -7369,8 +7640,10 @@ async function clearAudit() {
 
 /* ================= 启动 ================= */
 if (DEMO) {
-  // 演示模式：直接进入主界面，无需登录
+  // 演示模式：直接进入主界面，无需登录（演示的是超级管理员视角）
+  ROLE = "owner"; ME = { user: "admin", role: "owner" };
   $("forgot_hint").classList.add("hide");
+  applyRole();
   showApp();
 } else if (TOKEN) {
   fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })

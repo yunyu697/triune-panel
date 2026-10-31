@@ -158,8 +158,18 @@ func cmdResetPassword(args []string) {
 		}
 	}
 
+	// --user 改的是**超级管理员**的用户名（多管理员之后面板里还有别的账号，
+	// 命令行这一层只负责「把自己关在门外时把门打开」这一件事）。
 	if *user != "" {
-		if err := st.SetSetting(authn.SettingUser, *user); err != nil {
+		owner, err := st.OwnerAdmin()
+		if err != nil {
+			die(1, "找不到超级管理员账号: %v", err)
+		}
+		if err := authn.ValidateUsername(*user); err != nil {
+			die(1, "用户名无效: %v", err)
+		}
+		owner.Username = *user
+		if err := st.UpdateAdmin(owner); err != nil {
 			die(1, "写入用户名失败: %v", err)
 		}
 	}

@@ -2,9 +2,16 @@ package api
 
 // 登录二次验证（2FA）：管理端点 + 邮箱验证码状态机。
 // 支持两种验证方式（二选一，由 auth_2fa_mode 控制）：
-//   - totp：验证器 App 动态口令（密钥存 settings.totp_secret）
-//   - email：登录时向后配置的邮箱发送 6 位验证码（5 分钟有效）
+//   - totp：验证器 App 动态口令（密钥存在 admin_users.totp_secret，**每账号一份**）
+//   - email：登录时向后配置的邮箱发送 6 位验证码（5 分钟有效，面板级单槽位）
 // 2FA 校验失败同样计入登录防爆破计数。
+//
+// 多管理员之后的分工：
+//   - auth_2fa_mode 仍是面板级开关（开/关一次，全体生效）；
+//   - TOTP 密钥是账号级的：没绑验证器的人登录时**跳过**这一步，
+//     不会因为同事绑了 TOTP 就把自己锁在外面；
+//   - 邮箱验证码是面板级单收件人，多账号共用——这适合「小团队共用一个
+//     运维邮箱」的场景；要按人收信得给每个账号配邮箱，暂未做。
 
 import (
 	"crypto/rand"
@@ -48,35 +55,44 @@ func genEmailCode() string {
 // handleAuth2FAStatus GET /api/auth2fa
 func (a *Server) handleAuth2FAStatus(w http.ResponseWriter, r *http.Request) {
 	mode, _ := a.Store.GetSetting("auth_2fa_mode")
-	secret, _ := a.Store.GetSetting("totp_secret")
 	email, _ := a.Store.GetSetting("auth_email")
 	smtp := a.loadSMTPConfig()
+	u := a.currentUser(r)
 	writeJSON(w, 200, map[string]any{
-		"mode":        orDefault(mode, "off"),
-		"totp_ready":  secret != "",
-		"email":       email,
-		"smtp_ready":  smtp.ready(),
+		"mode":       orDefault(mode, "off"),
+		"totp_ready": u != nil && u.TotpSecret != "",
+		"email":      email,
+		"smtp_ready": smtp.ready(),
 	})
 }
 
 // handleAuth2FATotpSetup POST /api/auth2fa/totp/setup
 // 生成新密钥暂存（staged），用户在验证器中绑定后输入当前口令调用 enable 才会生效。
+//
+// 暂存放内存而不是 settings：它是**每个账号**的临时状态，落库既没必要
+// （重启后重扫一次二维码就行）也会和「谁在绑定」耦合出一堆脏数据。
 func (a *Server) handleAuth2FATotpSetup(w http.ResponseWriter, r *http.Request) {
+	u := a.currentUser(r)
+	if u == nil {
+		fail(w, 401, "unauthorized")
+		return
+	}
 	secret, err := generateTOTPSecret()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	if err := a.Store.SetSetting("totp_secret_staged", secret); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	u, _ := a.Store.GetSetting("admin_user")
-	writeJSON(w, 200, map[string]string{"secret": secret, "uri": otpauthURI(secret, u)})
+	a.totpStaged.Store(u.ID, secret)
+	writeJSON(w, 200, map[string]string{"secret": secret, "uri": otpauthURI(secret, u.Username)})
 }
 
 // handleAuth2FATotpEnable POST /api/auth2fa/totp/enable  body: {"code":"123456"}
 func (a *Server) handleAuth2FATotpEnable(w http.ResponseWriter, r *http.Request) {
+	u := a.currentUser(r)
+	if u == nil {
+		fail(w, 401, "unauthorized")
+		return
+	}
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -84,25 +100,27 @@ func (a *Server) handleAuth2FATotpEnable(w http.ResponseWriter, r *http.Request)
 		fail(w, 400, err.Error())
 		return
 	}
-	staged, _ := a.Store.GetSetting("totp_secret_staged")
-	if staged == "" {
+	staged, _ := a.totpStaged.Load(u.ID)
+	secret, _ := staged.(string)
+	if secret == "" {
 		fail(w, 400, "请先生成密钥并在验证器 App 中添加")
 		return
 	}
-	if !verifyTOTP(staged, req.Code) {
+	if !verifyTOTP(secret, req.Code) {
 		fail(w, 401, "动态口令不正确，请确认验证器已绑定且时间同步")
 		return
 	}
-	if err := a.Store.SetSetting("totp_secret", staged); err != nil {
+	u.TotpSecret = secret
+	if err := a.Store.UpdateAdmin(u); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	_ = a.Store.SetSetting("totp_secret_staged", "")
+	a.totpStaged.Delete(u.ID)
 	if err := a.Store.SetSetting("auth_2fa_mode", "totp"); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	log.Printf("[auth] 已启用 TOTP 二次验证")
+	log.Printf("[auth] %s 已启用 TOTP 二次验证", u.Username)
 	a.auditOK(r, AuditAuth2FA, "totp", "启用 TOTP 二次验证")
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
@@ -111,12 +129,12 @@ func (a *Server) handleAuth2FATotpEnable(w http.ResponseWriter, r *http.Request)
 // 保存 SMTP 配置并立即发送一封验证邮件，发送成功才启用。
 func (a *Server) handleAuth2FAEmailEnable(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Host     string `json:"smtp_host"`
-		Port     string `json:"smtp_port"`
-		User     string `json:"smtp_user"`
-		Pass     string `json:"smtp_pass"`
-		From     string `json:"smtp_from"`
+		Email string `json:"email"`
+		Host  string `json:"smtp_host"`
+		Port  string `json:"smtp_port"`
+		User  string `json:"smtp_user"`
+		Pass  string `json:"smtp_pass"`
+		From  string `json:"smtp_from"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, err.Error())
@@ -185,12 +203,21 @@ func (a *Server) handleAuth2FAEmailTest(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleAuth2FADisable POST /api/auth2fa/disable
+//
+// 关闭的是**面板级**的二次验证开关（auth_2fa_mode），同时清掉自己的 TOTP
+// 密钥；其他管理员的密钥保留，重新开启后他们无需重新绑定。
 func (a *Server) handleAuth2FADisable(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.SetSetting("auth_2fa_mode", "off"); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	_ = a.Store.SetSetting("totp_secret_staged", "")
+	if u := a.currentUser(r); u != nil {
+		u.TotpSecret = ""
+		if err := a.Store.UpdateAdmin(u); err != nil {
+			log.Printf("[auth] 清空 %s 的 TOTP 密钥失败: %v", u.Username, err)
+		}
+		a.totpStaged.Delete(u.ID)
+	}
 	log.Printf("[auth] 已关闭二次验证")
 	a.auditOK(r, AuditAuth2FA, "off", "关闭二次验证")
 	writeJSON(w, 200, map[string]string{"ok": "1"})

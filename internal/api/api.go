@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,15 +34,20 @@ type Server struct {
 	Coll       *ops.Collector // 流量采样器（实时速率查询用），可为 nil
 	sessions   sync.Map       // token -> session
 	loginFails sync.Map       // ip -> *loginFail（防爆破）
+	totpStaged sync.Map       // uid -> 待绑定的 TOTP 密钥（每账号一份，重启即丢）
 	emailCode  emailCodeState // 登录邮箱验证码（2FA）
 }
 
 // session 一次登录签发的会话。
-// epoch 记录签发时的会话纪元，改密/重置密码后纪元变化 → 旧会话全部失效
-// （CLI 重置密码在另一个进程里，只有存 DB 的纪元能让 daemon 立刻感知）。
+//
+// uid 记住是谁；fp 是签发时该账号密码哈希的指纹（见 authn.Fingerprint）。
+// 请求时比对指纹：只有「这个人的密码变了 / 账号被删 / 被停用」才会失效。
+// v0.9.6 之前用的是全局 session_epoch，多管理员下那是错的——
+// A 改密码不该把 B 踢下线。
 type session struct {
-	exp   time.Time
-	epoch string
+	exp time.Time
+	uid int64
+	fp  string
 }
 
 // CertManager ACME 证书管理器接口（internal/certmgr 实现）。
@@ -57,64 +63,80 @@ func New(s *store.Store, pipe *core.PipelineManager, pm *proc.Manager, dataDir s
 func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// ---- 免认证 ----
 	mux.HandleFunc("POST /api/login", a.handleLogin)
-	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /healthz", a.handleHealthz)            // 免认证探活，供 systemd / 监控使用
 	mux.HandleFunc("GET /metrics", a.handleMetrics)            // Prometheus 指标，凭 metrics_token 访问（默认关闭）
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
+	mux.HandleFunc("GET /sub/{token}", a.handleSub)            // 订阅，凭 sub_token
+
+	// ---- 任意登录账号（含只读 viewer）：只看不改，且响应不吐凭据 ----
+	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
+	mux.HandleFunc("GET /api/me", a.auth(a.handleMe))
+	mux.HandleFunc("PUT /api/me/password", a.auth(a.handleChangeOwnPassword))
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
-	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
-	mux.HandleFunc("POST /api/auth2fa/totp/enable", a.auth(a.handleAuth2FATotpEnable))
-	mux.HandleFunc("POST /api/auth2fa/email/enable", a.auth(a.handleAuth2FAEmailEnable))
-	mux.HandleFunc("POST /api/auth2fa/email/test", a.auth(a.handleAuth2FAEmailTest))
-	mux.HandleFunc("POST /api/auth2fa/disable", a.auth(a.handleAuth2FADisable))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
-	mux.HandleFunc("POST /api/inbounds", a.auth(a.createInbound))
-	mux.HandleFunc("PUT /api/inbounds/{id}", a.auth(a.updateInbound))
-	mux.HandleFunc("DELETE /api/inbounds/{id}", a.auth(a.deleteInbound))
-	mux.HandleFunc("GET /api/inbounds/{id}/export", a.auth(a.handleInboundExport))
-	mux.HandleFunc("GET /api/export/catalog", a.auth(a.handleExportCatalog))
-	mux.HandleFunc("POST /api/export/config", a.auth(a.handleExportConfig))
-	mux.HandleFunc("GET /api/clients", a.auth(a.listClients))
-	mux.HandleFunc("POST /api/clients", a.auth(a.createClient))
-	mux.HandleFunc("PUT /api/clients/{id}", a.auth(a.updateClient))
-	mux.HandleFunc("DELETE /api/clients/{id}", a.auth(a.deleteClient))
-	mux.HandleFunc("PUT /api/clients/{id}/inbounds", a.auth(a.setClientInbounds))
-	mux.HandleFunc("POST /api/clients/{id}/reset-token", a.auth(a.resetSubToken))
 	mux.HandleFunc("GET /api/inbounds/{id}/check", a.auth(a.checkInbound))
-	mux.HandleFunc("POST /api/config/diff", a.auth(a.handleConfigDiff))
-	mux.HandleFunc("POST /api/external-nodes/import-url", a.auth(a.importSubURL))
 	mux.HandleFunc("GET /api/external-nodes", a.auth(a.listExternal))
-	mux.HandleFunc("POST /api/external-nodes", a.auth(a.addExternal))
-	mux.HandleFunc("DELETE /api/external-nodes/{id}", a.auth(a.deleteExternal))
-	mux.HandleFunc("POST /api/import", a.auth(a.handleImport))
-	mux.HandleFunc("POST /api/apply", a.auth(a.handleApply))
-	mux.HandleFunc("POST /api/apply/dry-run", a.auth(a.handleDryRun))
-	mux.HandleFunc("POST /api/rollback", a.auth(a.handleRollback))
-	mux.HandleFunc("POST /api/switch-core", a.auth(a.handleSwitchCore))
 	mux.HandleFunc("GET /api/revisions", a.auth(a.listRevisions))
 	mux.HandleFunc("GET /api/logs", a.auth(a.handleLogs))
-	mux.HandleFunc("GET /api/settings", a.auth(a.getSettings))
-	mux.HandleFunc("PUT /api/settings", a.auth(a.putSettings))
-	mux.HandleFunc("GET /api/audit", a.auth(a.handleAuditList))
-	mux.HandleFunc("DELETE /api/audit", a.auth(a.handleAuditClear))
 	mux.HandleFunc("GET /api/traffic", a.auth(a.handleTraffic))
 	mux.HandleFunc("GET /api/traffic/daily", a.auth(a.handleTrafficDaily))
 	mux.HandleFunc("GET /api/traffic/live", a.auth(a.handleTrafficLive))
-	mux.HandleFunc("POST /api/tools/reality-keypair", a.auth(a.handleRealityKeypair))
-	mux.HandleFunc("GET /api/tools/uuid", a.auth(a.handleUUID))
 	mux.HandleFunc("GET /api/version", a.auth(a.handleVersion))
-	mux.HandleFunc("POST /api/self-update", a.auth(a.handleSelfUpdate))
 	mux.HandleFunc("GET /api/components", a.auth(a.handleComponents))
 	mux.HandleFunc("GET /api/updates/versions", a.auth(a.handleUpdateVersions))
-	mux.HandleFunc("POST /api/cores/{name}/update", a.auth(a.handleCoreUpdate))
-	mux.HandleFunc("POST /api/cores/{name}/rollback", a.auth(a.handleCoreRollback))
-	mux.HandleFunc("GET /api/panel/backups", a.auth(a.handlePanelBackups))
-	mux.HandleFunc("POST /api/panel/rollback", a.auth(a.handlePanelRollback))
 	mux.HandleFunc("GET /api/certs", a.auth(a.handleCerts))
-	mux.HandleFunc("POST /api/certs/issue", a.auth(a.handleCertsIssue))
-	mux.HandleFunc("GET /sub/{token}", a.handleSub)
+	mux.HandleFunc("GET /api/tools/uuid", a.auth(a.handleUUID))
+
+	// ---- 管理员（owner + admin）：会改状态，或响应里带凭据 ----
+	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.write(a.handleAuth2FATotpSetup))
+	mux.HandleFunc("POST /api/auth2fa/totp/enable", a.write(a.handleAuth2FATotpEnable))
+	mux.HandleFunc("POST /api/auth2fa/email/enable", a.write(a.handleAuth2FAEmailEnable))
+	mux.HandleFunc("POST /api/auth2fa/email/test", a.write(a.handleAuth2FAEmailTest))
+	mux.HandleFunc("POST /api/auth2fa/disable", a.write(a.handleAuth2FADisable))
+	mux.HandleFunc("POST /api/inbounds", a.write(a.createInbound))
+	mux.HandleFunc("PUT /api/inbounds/{id}", a.write(a.updateInbound))
+	mux.HandleFunc("DELETE /api/inbounds/{id}", a.write(a.deleteInbound))
+	// 导出接口会把节点凭据（UUID / 密码 / 私钥）整段吐出来，只读角色不能碰
+	mux.HandleFunc("GET /api/inbounds/{id}/export", a.write(a.handleInboundExport))
+	mux.HandleFunc("GET /api/export/catalog", a.write(a.handleExportCatalog))
+	mux.HandleFunc("POST /api/export/config", a.write(a.handleExportConfig))
+	// 客户端列表含 credential 与订阅令牌，等同凭据
+	mux.HandleFunc("GET /api/clients", a.write(a.listClients))
+	mux.HandleFunc("POST /api/clients", a.write(a.createClient))
+	mux.HandleFunc("PUT /api/clients/{id}", a.write(a.updateClient))
+	mux.HandleFunc("DELETE /api/clients/{id}", a.write(a.deleteClient))
+	mux.HandleFunc("PUT /api/clients/{id}/inbounds", a.write(a.setClientInbounds))
+	mux.HandleFunc("POST /api/clients/{id}/reset-token", a.write(a.resetSubToken))
+	mux.HandleFunc("POST /api/config/diff", a.write(a.handleConfigDiff))
+	mux.HandleFunc("POST /api/external-nodes/import-url", a.write(a.importSubURL))
+	mux.HandleFunc("POST /api/external-nodes", a.write(a.addExternal))
+	mux.HandleFunc("DELETE /api/external-nodes/{id}", a.write(a.deleteExternal))
+	mux.HandleFunc("POST /api/import", a.write(a.handleImport))
+	mux.HandleFunc("POST /api/apply", a.write(a.handleApply))
+	mux.HandleFunc("POST /api/apply/dry-run", a.write(a.handleDryRun))
+	mux.HandleFunc("POST /api/rollback", a.write(a.handleRollback))
+	mux.HandleFunc("POST /api/switch-core", a.write(a.handleSwitchCore))
+	// 设置里含 stats_secret / metrics_token / SMTP 账号，不给只读角色看
+	mux.HandleFunc("GET /api/settings", a.write(a.getSettings))
+	mux.HandleFunc("PUT /api/settings", a.write(a.putSettings))
+	mux.HandleFunc("GET /api/audit", a.write(a.handleAuditList))
+	mux.HandleFunc("POST /api/tools/reality-keypair", a.write(a.handleRealityKeypair))
+	mux.HandleFunc("POST /api/self-update", a.write(a.handleSelfUpdate))
+	mux.HandleFunc("POST /api/cores/{name}/update", a.write(a.handleCoreUpdate))
+	mux.HandleFunc("POST /api/cores/{name}/rollback", a.write(a.handleCoreRollback))
+	mux.HandleFunc("GET /api/panel/backups", a.write(a.handlePanelBackups))
+	mux.HandleFunc("POST /api/certs/issue", a.write(a.handleCertsIssue))
+
+	// ---- 仅超级管理员：账号管理、销毁审计、整面板回滚 ----
+	mux.HandleFunc("GET /api/admins", a.ownerOnly(a.handleAdminsList))
+	mux.HandleFunc("POST /api/admins", a.ownerOnly(a.handleAdminCreate))
+	mux.HandleFunc("PUT /api/admins/{id}", a.ownerOnly(a.handleAdminUpdate))
+	mux.HandleFunc("DELETE /api/admins/{id}", a.ownerOnly(a.handleAdminDelete))
+	mux.HandleFunc("DELETE /api/audit", a.ownerOnly(a.handleAuditClear))
+	mux.HandleFunc("POST /api/panel/rollback", a.ownerOnly(a.handlePanelRollback))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致
@@ -158,12 +180,21 @@ func (a *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		s := v.(session)
-		// 过期，或改密后纪元已变（旧会话立即失效）
-		if s.exp.Before(time.Now()) || s.epoch != authn.Epoch(a.Store) {
+		if s.exp.Before(time.Now()) {
+			a.sessions.Delete(t)
 			fail(w, 401, "session expired")
 			return
 		}
-		next(w, r)
+		// 每次请求都回库取账号：账号被删、被停用、密码被改都必须立刻生效。
+		// 只信内存里的会话副本会让「停用一个管理员」变成空操作——他还坐在
+		// 已经登录的浏览器里继续操作。
+		u, err := a.Store.GetAdmin(s.uid)
+		if err != nil || !u.Enabled || authn.Fingerprint(u.PassHash) != s.fp {
+			a.sessions.Delete(t)
+			fail(w, 401, "session expired")
+			return
+		}
+		next(w, withUser(r, u))
 	}
 }
 
@@ -236,19 +267,28 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 密码校验：哈希优先；命中遗留明文槽则在本次登录后静默升级为哈希。
-	ok, legacy, err := authn.Verify(a.Store, req.Pass)
-	if err != nil {
+	u, legacy, err := authn.Authenticate(a.Store, req.User, req.Pass)
+	if err != nil && !errors.Is(err, authn.ErrDisabled) {
 		fail(w, 500, err.Error())
 		return
 	}
-	if req.User != authn.User(a.Store) || !ok {
+	if u == nil {
 		a.recordLoginFail(key)
-		a.auditFail(r, AuditLogin, req.User, "用户名或密码错误")
+		// 登录失败没有「当前用户」，Actor 记的是**被尝试的用户名**：
+		// 「有人在猜 alice 的密码」和「有人在猜 root 的密码」是两条不同的线索。
+		a.auditFailAs(req.User, r, AuditLogin, req.User, "用户名或密码错误")
 		fail(w, 401, "用户名或密码错误")
 		return
 	}
+	if errors.Is(err, authn.ErrDisabled) {
+		// 密码对了才走到这里，所以告诉对方「账号停用」不额外泄漏信息
+		a.recordLoginFail(key)
+		a.auditFailAs(u.Username, r, AuditLogin, u.Username, "账号已停用，拒绝登录")
+		fail(w, http.StatusForbidden, authn.ErrDisabled.Error())
+		return
+	}
 	if legacy {
-		if err := authn.MigrateLegacy(a.Store); err != nil {
+		if err := authn.MigrateLegacy(a.Store, u); err != nil {
 			log.Printf("迁移遗留明文密码失败: %v", err)
 		} else {
 			log.Printf("已把遗留明文密码升级为 bcrypt 哈希")
@@ -256,18 +296,19 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 二次验证：账密正确后按 auth_2fa_mode 进入第二步。
+	// TOTP 密钥是**每账号**的：账号没绑验证器就跳过这一步，
+	// 不会因为别的管理员开了 TOTP 就把自己也锁在外面。
 	mode, _ := a.Store.GetSetting("auth_2fa_mode")
 	switch mode {
 	case "totp":
-		secret, _ := a.Store.GetSetting("totp_secret")
-		if secret != "" {
+		if u.TotpSecret != "" {
 			if strings.TrimSpace(req.Code) == "" {
 				writeJSON(w, 200, map[string]any{"need_2fa": "totp"})
 				return
 			}
-			if !verifyTOTP(secret, req.Code) {
+			if !verifyTOTP(u.TotpSecret, req.Code) {
 				a.recordLoginFail(key)
-				a.auditFail(r, AuditLogin, req.User, "动态口令不正确")
+				a.auditFailAs(u.Username, r, AuditLogin, u.Username, "动态口令不正确")
 				fail(w, 401, "动态口令不正确")
 				return
 			}
@@ -286,7 +327,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := a.checkEmailCode(req.Code); err != nil {
 				a.recordLoginFail(key)
-				a.auditFail(r, AuditLogin, req.User, "邮箱验证码校验失败")
+				a.auditFailAs(u.Username, r, AuditLogin, u.Username, "邮箱验证码校验失败")
 				fail(w, 401, err.Error())
 				return
 			}
@@ -295,24 +336,30 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	a.loginFails.Delete(key) // 登录成功，清零失败计数
 
-	// 最近一次成功登录的来源与时间：先读旧值（随本次响应返回给用户，
-	// 便于发现异常访问），再写入本次的（概览页常驻展示）。
-	prevIP, _ := a.Store.GetSetting("login_last_ip")
-	prevTime, _ := a.Store.GetSetting("login_last_time")
-	_ = a.Store.SetSetting("login_last_ip", key)
-	_ = a.Store.SetSetting("login_last_time", time.Now().Format("2006-01-02 15:04:05"))
+	// 上次成功登录的来源与时间：先读旧值（随本次响应返回给用户，便于发现
+	// 异常访问），再写入本次的（概览页常驻展示）。多管理员之后这是**按人**
+	// 记录的，不再是全局最后一个登录者。
+	prevIP, prevTime := u.LastIP, u.LastLogin
+	if err := a.Store.TouchAdminLogin(u.ID, key); err != nil {
+		log.Printf("[auth] 记录登录来源失败: %v", err)
+	}
 
 	t := token()
-	a.sessions.Store(t, session{exp: time.Now().Add(24 * time.Hour), epoch: authn.Epoch(a.Store)})
-	// 管理密码仍是出厂默认 → 要求首次登录后强制改密
-	mustChange := authn.IsFactoryDefault(a.Store)
+	a.sessions.Store(t, session{
+		exp: time.Now().Add(24 * time.Hour),
+		uid: u.ID,
+		fp:  authn.Fingerprint(u.PassHash),
+	})
+	// 密码哈希为空 = 这个账号从未设置过密码（出厂默认），首次登录强制改密
+	mustChange := u.PassHash == ""
 	detail := "登录成功"
 	if mode != "" {
 		detail += "（已通过 " + mode + " 二次验证）"
 	}
-	a.auditOK(r, AuditLogin, req.User, detail)
+	a.auditAs(u.Username, r, AuditLogin, u.Username, store.AuditOK, detail)
 	writeJSON(w, 200, map[string]any{
 		"token": t, "must_change": mustChange,
+		"user": u.Username, "role": u.Role,
 		"last_ip": prevIP, "last_time": prevTime,
 	})
 }
@@ -1030,9 +1077,7 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
 		"auth_2fa_mode", "auth_email",
-		"smtp_host", "smtp_port", "smtp_user", "smtp_from",
-		// 最近一次成功登录（只读展示，PUT 白名单不含）
-		"login_last_ip", "login_last_time"} {
+		"smtp_host", "smtp_port", "smtp_user", "smtp_from"} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -1045,13 +1090,19 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	// 改密单独处理：写 bcrypt 哈希 + 递增会话纪元，旧会话（含当前这个）
-	// 立即失效，前端收到 relogin 后清 token 回登录页。密码不走白名单直写。
+	// 改密单独处理：只改**当前登录账号**的密码（多管理员之后不存在
+	// 「全局面板密码」这种东西），密码不走白名单直写。
+	// 改完当前会话因指纹变化失效，前端收到 relogin 后回登录页。
 	relogin := false
 	if pass, ok := m["admin_pass"]; ok {
 		delete(m, "admin_pass")
 		if pass != "" {
-			if err := authn.SetPassword(a.Store, pass); err != nil {
+			u := a.currentUser(r)
+			if u == nil {
+				fail(w, 401, "unauthorized")
+				return
+			}
+			if err := authn.SetPasswordFor(a.Store, u.ID, pass); err != nil {
 				fail(w, 400, err.Error())
 				return
 			}
@@ -1068,7 +1119,6 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 可信反向代理网段：仅当直连对端落在这些网段内才采信转发头
 		TrustedProxiesSetting: true,
 		"acme_enabled":        true, "acme_domain": true, "acme_email": true,
-		"admin_user": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
@@ -1105,7 +1155,7 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		a.auditOK(r, AuditSettings, strings.Join(changed, ","), "修改设置")
 	}
 	if relogin {
-		a.auditOK(r, AuditPassword, authn.User(a.Store), "管理密码已修改，全部会话失效")
+		a.auditOK(r, AuditPassword, a.actorName(r), "本账号密码已修改，该账号的旧会话全部失效")
 	}
 	// ACME 设置变更后立即触发一次签发/续期检查，无需等下一个检查周期
 	if m["acme_enabled"] == "1" && a.CertMgr != nil {

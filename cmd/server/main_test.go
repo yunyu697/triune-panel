@@ -10,7 +10,7 @@ import (
 )
 
 // TestApplyBootstrapCreds：全新安装消费初始凭据；已有密码时不覆盖；文件一律删除。
-// 密码落库后是 bcrypt 哈希，明文槽必须为空。
+// 密码落库后是 bcrypt 哈希（存在 admin_users 里），明文槽必须为空。
 func TestApplyBootstrapCreds(t *testing.T) {
 	writeCreds := func(dir, content string) {
 		if err := os.WriteFile(filepath.Join(dir, "bootstrap.creds"), []byte(content), 0o600); err != nil {
@@ -24,15 +24,22 @@ func TestApplyBootstrapCreds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeCreds(dir, "admin_user=admin\nadmin_pass=Rand0mPass16ch\n")
+	writeCreds(dir, "admin_user=ops\nadmin_pass=Rand0mPass16ch\n")
 	applyBootstrapCreds(dir, st)
-	if ok, _, _ := authn.Verify(st, "Rand0mPass16ch"); !ok {
+	if u, _, _ := authn.Authenticate(st, "ops", "Rand0mPass16ch"); u == nil {
 		t.Fatal("scenario1: 初始密码应可校验通过")
 	}
 	if p, _ := st.GetSetting(authn.SettingPlain); p != "" {
 		t.Fatalf("scenario1: 明文槽应为空，实际 %q", p)
 	}
-	if h, _ := st.GetSetting(authn.SettingHash); h == "" {
+	owner, err := st.OwnerAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.Username != "ops" {
+		t.Fatalf("scenario1: 用户名应改成 ops，实际 %q", owner.Username)
+	}
+	if owner.PassHash == "" {
 		t.Fatal("scenario1: 应写入 bcrypt 哈希")
 	}
 	if authn.IsFactoryDefault(st) {
@@ -52,10 +59,10 @@ func TestApplyBootstrapCreds(t *testing.T) {
 	}
 	writeCreds(dir2, "admin_pass=leaked-old\n")
 	applyBootstrapCreds(dir2, st2)
-	if ok, _, _ := authn.Verify(st2, "real-password"); !ok {
+	if u, _, _ := authn.Authenticate(st2, "admin", "real-password"); u == nil {
 		t.Fatal("scenario2: 真实密码必须继续有效")
 	}
-	if ok, _, _ := authn.Verify(st2, "leaked-old"); ok {
+	if u, _, _ := authn.Authenticate(st2, "admin", "leaked-old"); u != nil {
 		t.Fatal("scenario2: 初始凭据不得覆盖真实密码")
 	}
 	if _, err := os.Stat(filepath.Join(dir2, "bootstrap.creds")); !os.IsNotExist(err) {
@@ -67,7 +74,8 @@ func TestApplyBootstrapCreds(t *testing.T) {
 	st3, _ := store.Open(dir3)
 	defer st3.Close()
 	applyBootstrapCreds(dir3, st3) // 不应 panic 或报错
-	if u, _ := st3.GetSetting("admin_user"); u != "" {
-		t.Fatalf("scenario3: want untouched, got %q", u)
+	owner3, _ := st3.OwnerAdmin()
+	if owner3.Username != "admin" || owner3.PassHash != "" {
+		t.Fatalf("scenario3: want untouched, got %+v", owner3)
 	}
 }
