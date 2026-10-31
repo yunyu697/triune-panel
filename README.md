@@ -2,6 +2,9 @@
 
 三内核（**mihomo / sing-box / xray**）统一管理面板，Go 单二进制 + 内置 Web UI。
 
+> 下载：[Releases](https://github.com/yunyu697/triune-panel/releases) ·
+> 离线演示：`demo.html`（浏览器直接打开，内置模拟数据，可交互体验全部功能）
+
 ## 核心目标：根治 3x-ui 式"升级配置失效"
 
 | 防线 | 机制 |
@@ -153,10 +156,14 @@ v0.6 已验证：
 ## 部署到 VPS
 
 ```bash
-# 1. 上传 deploy/ 目录到服务器
+# 方式一：从 Release 直接下载（Linux amd64 示例，arm64 换文件名）
+curl -LO https://github.com/yunyu697/triune-panel/releases/latest/download/triune-panel-linux-amd64
+chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local/bin/triune-panel
+
+# 方式二：上传 deploy/ 目录到服务器
 scp -r deploy/ root@your-vps:/tmp/triune/
 
-# 2. 在服务器上执行
+# 在服务器上执行
 ssh root@your-vps
 cd /tmp/triune && sudo bash install.sh amd64   # ARM 机器用 arm64
 
