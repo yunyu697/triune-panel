@@ -140,8 +140,9 @@ a:hover{text-decoration:underline}
 .logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
 .logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
-.logo b{font-size:15px;letter-spacing:.3px;font-weight:650}
-.logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap}
+.logo b{font-size:15px;letter-spacing:.3px;font-weight:650;white-space:nowrap;flex:0 0 auto}
+.logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
 .nav-sec{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);opacity:.75;
   padding:12px 12px 6px;font-weight:600}
 .nav-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
@@ -1058,7 +1059,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.7.0-demo",
+    version:"v0.8.0-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -1199,9 +1200,11 @@ setInterval(() => { if (TOKEN) loadLive(); }, 10000);
 async function loadVersion() {
   try {
     const j = await req("/api/version");
+    // 后端版本串可能自带 "v" 前缀（如 v0.8.0），此处只补不重复，避免出现 "vv0.8.0"
+    const ver = /^v/i.test(j.version) ? j.version : "v" + j.version;
     $("curver").textContent = j.version;
-    $("verinfo").textContent = "v" + j.version;
-    const lv = $("logoVer"); if (lv) lv.textContent = "v" + j.version;
+    $("verinfo").textContent = ver;
+    const lv = $("logoVer"); if (lv) lv.textContent = ver.replace(/-demo$/i, "");
   } catch(e){}
 }
 async function loadStatus() {
