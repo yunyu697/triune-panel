@@ -165,13 +165,12 @@ func TestAuthRejectsExpiredSession(t *testing.T) {
 	tok := loginForToken(t, a)
 
 	// 手动把会话改成已过期（模拟 24 小时后的状态）
-	v, ok := a.sessions.Load(tok)
+	s, ok := a.sessions.Get(tok)
 	if !ok {
 		t.Fatal("登录后应存在会话")
 	}
-	s := v.(session)
-	s.exp = time.Now().Add(-time.Second)
-	a.sessions.Store(tok, s)
+	s.Exp = time.Now().Add(-time.Second)
+	a.sessions.Add(&s) // 同 token 覆盖，等价于「把这个会话改成过期」
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/settings", nil)

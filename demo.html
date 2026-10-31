@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.6 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.9.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -779,6 +779,27 @@ canvas{display:block;width:100%}
         <div style="margin-top:14px"><button class="btn primary" onclick="changeMyPassword()">修改密码</button></div>
       </div>
 
+      <!-- 登录设备：所有角色都能看，服务端按角色过滤（只读账号只返回自己的会话） -->
+      <div class="card">
+        <h3>登录设备<span class="spacer"></span>
+          <span class="muted" style="font-weight:400;font-size:12px" id="sess_count"></span>
+          <button class="btn sm" onclick="loadSessions()">刷新</button>
+        </h3>
+        <p class="muted" style="margin:0 0 12px">
+          当前在线的登录会话。标着<b>「本机」</b>的就是你现在用的这个浏览器。
+          发现陌生 IP 或设备，直接踢下线——不必再靠改密码把全部设备一起踢掉。
+          面板重启后所有会话失效，需要重新登录。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>设备</th><th>账号</th><th>IP</th><th>登录时间</th><th>最后活跃</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="sessbody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn sm" onclick="revokeOtherDevices()">退出其他设备</button>
+          <span class="muted" id="sess_msg">被踢的设备下一次请求就会掉回登录页。</span>
+        </div>
+      </div>
+
       <div class="need-admin">
       <div class="card">
         <h3>基础设置</h3>
@@ -949,6 +970,7 @@ canvas{display:block;width:100%}
             <option value="external">外部节点</option>
             <option value="auth2fa">二次验证</option>
             <option value="admin">管理员账号</option>
+            <option value="session">登录设备</option>
             <option value="rbac">越权拦截</option>
             <option value="update">版本更新</option>
           </select>
@@ -3657,7 +3679,9 @@ async function req(path, opts = {}) {
   const m = opts.method || "GET";
   // 只读账号的写请求在本地就拦掉：服务端会回 403，但等一个往返再弹错误
   // 不如直接说清楚「你是只读账号」。绕过前端也没用——服务端照样 403。
-  if (isViewer() && m !== "GET") throw new Error("当前账号为只读角色，无权执行此操作");
+  // 例外：会话吊销属于「管自己的登录」，不是改配置，服务端对每条会话单独判权
+  //（只能踢自己或权限更低的），只读账号也该能把自己的设备退掉。
+  if (isViewer() && m !== "GET" && !path.startsWith("/api/sessions")) throw new Error("当前账号为只读角色，无权执行此操作");
   if (DEMO) return mockRoute(path, opts);
   const r = await fetch(path, {
     method: m,
@@ -3716,6 +3740,18 @@ if (DEMO) {
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
       {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
       {id:3,username:"noc-watch",role:"viewer",enabled:false,has_totp:false,last_ip:"",last_login:"",created_at:"2026-10-20 09:00:00"}
+    ],
+    // 登录设备：三条会话，其中一条是「本机」，一条是同事，一条是可疑 IP
+    sessions:[
+      {id:"9f3c1a7b2d4e5f60",user:"admin",role:"owner",ip:"203.0.113.7",
+       device:"Chrome · macOS",ua:"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/141.0 Safari/537.36",
+       created:"2026-10-31 09:24:17",last_seen:"2026-10-31 09:41:52",expires:"2026-11-01 09:24:17",current:true,revocable:true},
+      {id:"4b8e2c9d1f7a3e05",user:"admin",role:"owner",ip:"198.51.100.77",
+       device:"Safari · iOS",ua:"Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1",
+       created:"2026-10-30 21:02:44",last_seen:"2026-10-30 23:18:09",expires:"2026-10-31 21:02:44",current:false,revocable:true},
+      {id:"c1d4a6e8b03f5927",user:"ops-lin",role:"admin",ip:"45.9.9.9",
+       device:"脚本 · Python",ua:"python-requests/2.32.3",
+       created:"2026-10-31 04:07:11",last_seen:"2026-10-31 04:07:11",expires:"2026-11-01 04:07:11",current:false,revocable:true}
     ]
   };
 }
@@ -3772,6 +3808,22 @@ async function mockRoute(path, opts) {
     if (rest.includes("email/enable")) { if (!opts.body?.email?.includes("@")) throw new Error("收件邮箱格式无效"); return { ok:"1" }; }
     if (rest.includes("disable")) return { ok:"1" };
     return {};
+  }
+  if (api === "sessions") {
+    if (m === "GET") return MDB.sessions;
+    const sid = (rest || "").split("/")[1];
+    if (m === "DELETE" && sid) {
+      const s = MDB.sessions.find(x => x.id === sid);
+      if (!s) throw new Error("会话不存在或已失效");
+      if (s.current) throw new Error("演示模式不踢自己（会直接掉线）");
+      MDB.sessions = MDB.sessions.filter(x => x.id !== sid);
+      return { ok: 1 };
+    }
+    if (m === "DELETE") {
+      const before = MDB.sessions.length;
+      MDB.sessions = MDB.sessions.filter(x => x.current || x.user !== "admin");
+      return { ok: 1, revoked: before - MDB.sessions.length };
+    }
   }
   if (api === "version") return { version: MDB.version };
   if (api === "status") return { cores: ["singbox","xray","mihomo"].map(c => ({
@@ -3996,7 +4048,8 @@ async function loadAll() {
   // 按角色决定拉什么：只读账号拉客户端 / 设置 / 配置生成会被 403，
   // 与其刷一串错误提示，不如根本不请求。
   const jobs = [loadStatus(), loadInbounds(), loadTraffic(), loadRevisions(), loadVersion(),
-                loadCerts(), loadComponents(), loadLive(), loadExternal(), loadOverview(), loadMe()];
+                loadCerts(), loadComponents(), loadLive(), loadExternal(), loadOverview(), loadMe(),
+                loadSessions()];
   if (!isViewer()) jobs.push(loadClients(), loadSettings(), loadGen(), loadAuth2FA());
   if (isOwner()) jobs.push(loadAdmins());
   await Promise.allSettled(jobs);
@@ -7580,6 +7633,68 @@ async function deleteAdmin(id, name) {
   } catch (e) { toast(e.message, "err"); }
 }
 
+/* ---- 登录设备：会话列表与精准吊销 ----
+   服务端只回 sid（token 的哈希前缀），前端拿不到也不需要真凭据；
+   账号名/IP 这些不放进内联 onclick 的字符串里（escHtml 不转义引号，
+   设备名里带个单引号就能把属性撑破），统一用 SESS 缓存按 id 回查。 */
+let SESS = [];
+async function loadSessions() {
+  const tb = $("sessbody");
+  if (!tb) return;
+  try {
+    const list = await req("/api/sessions");
+    SESS = Array.isArray(list) ? list : [];
+    $("sess_count").textContent = SESS.length ? SESS.length + " 个在线会话" : "";
+    if (!SESS.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="muted">暂无在线会话</td></tr>';
+      return;
+    }
+    tb.innerHTML = SESS.map(s => {
+      const roleTxt = ROLE_LABEL[s.role] || s.role || "—";
+      let ops;
+      if (s.current) ops = '<span class="badge b-ok">本机</span>';
+      else if (s.revocable) ops = `<button class="btn sm danger" onclick="revokeSession('${escHtml(s.id)}')">踢下线</button>`;
+      else ops = '<span class="muted" style="font-size:12px" title="只能吊销自己或权限更低的会话">不可吊销</span>';
+      // UA 全文放 title：设备名是压缩过的，排查异常登录时原文有用
+      return `<tr>
+        <td title="${escHtml(s.ua || "")}"><b>${escHtml(s.device)}</b>${s.current ? ' <span class="muted" style="font-size:11px">（当前）</span>' : ""}</td>
+        <td>${escHtml(s.user)} <span class="muted" style="font-size:11px">${roleTxt}</span></td>
+        <td class="mono" style="font-size:12px">${escHtml(s.ip || "—")}</td>
+        <td class="muted" style="font-size:12px">${escHtml(s.created || "—")}</td>
+        <td class="muted" style="font-size:12px">${escHtml(s.last_seen || "—")}</td>
+        <td class="ta-r">${ops}</td></tr>`;
+    }).join("");
+    const mine = SESS.filter(s => s.user === (ME.user || "") && !s.current).length;
+    $("sess_msg").textContent = mine
+      ? `你还有 ${mine} 台设备在线，可一键退出。`
+      : "被踢的设备下一次请求就会掉回登录页。";
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="6" class="muted">${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function revokeSession(sid) {
+  const s = SESS.find(x => x.id === sid);
+  const label = s ? `${s.user} · ${s.device} · ${s.ip}` : "该会话";
+  if (!(await ask("吊销会话", `确认把「${label}」踢下线？该设备下一次请求会掉回登录页，需要重新输入密码。`))) return;
+  try {
+    await req("/api/sessions/" + encodeURIComponent(sid), { method: "DELETE" });
+    toast("已吊销该会话");
+    loadSessions();
+  } catch (e) { toast("吊销失败：" + e.message, "err"); }
+}
+
+async function revokeOtherDevices() {
+  const mine = SESS.filter(s => s.user === (ME.user || "") && !s.current).length;
+  if (!mine) { toast("没有其他在线设备", "info"); return; }
+  if (!(await ask("退出其他设备", `确认吊销你账号在另外 ${mine} 台设备上的会话？本机保持登录。`))) return;
+  try {
+    const j = await req("/api/sessions", { method: "DELETE" });
+    toast(`已退出 ${(j && j.revoked) || 0} 台设备`);
+    loadSessions();
+  } catch (e) { toast("操作失败：" + e.message, "err"); }
+}
+
 /* ================= 审计日志 ================= */
 const AU_LABEL = {
   "login":"登录","logout":"登出",
@@ -7590,7 +7705,8 @@ const AU_LABEL = {
   "apply":"应用配置","apply.dry-run":"预检","rollback":"回滚配置","switch-core":"切换内核",
   "import":"导入链接","external":"外部节点","auth2fa":"二次验证",
   "cert.issue":"证书签发","update":"版本更新","restore":"数据恢复","audit.clear":"清空审计",
-  "admin":"管理员账号","rbac.deny":"越权拦截"
+  "admin":"管理员账号","rbac.deny":"越权拦截",
+  "session":"登录设备","session.revoke":"吊销会话"
 };
 // 未登记的动作名退化为前缀标签（如 foo.bar → foo 的标签），不至于显示成一串英文
 function auLabel(a) {

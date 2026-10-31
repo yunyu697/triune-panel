@@ -32,23 +32,13 @@ type Server struct {
 	DataDir    string
 	CertMgr    CertManager    // 可为 nil（未启用 ACME）
 	Coll       *ops.Collector // 流量采样器（实时速率查询用），可为 nil
-	sessions   sync.Map       // token -> session
+	sessions   *sessionStore  // 登录会话表（见 sessions.go）
 	loginFails sync.Map       // ip -> *loginFail（防爆破）
 	totpStaged sync.Map       // uid -> 待绑定的 TOTP 密钥（每账号一份，重启即丢）
 	emailCode  emailCodeState // 登录邮箱验证码（2FA）
 }
 
-// session 一次登录签发的会话。
-//
-// uid 记住是谁；fp 是签发时该账号密码哈希的指纹（见 authn.Fingerprint）。
-// 请求时比对指纹：只有「这个人的密码变了 / 账号被删 / 被停用」才会失效。
-// v0.9.6 之前用的是全局 session_epoch，多管理员下那是错的——
-// A 改密码不该把 B 踢下线。
-type session struct {
-	exp time.Time
-	uid int64
-	fp  string
-}
+// session 结构已迁到 sessions.go（带 IP / UA / 活跃时间，供「登录设备」页使用）。
 
 // CertManager ACME 证书管理器接口（internal/certmgr 实现）。
 type CertManager interface {
@@ -57,7 +47,10 @@ type CertManager interface {
 }
 
 func New(s *store.Store, pipe *core.PipelineManager, pm *proc.Manager, dataDir string) *Server {
-	return &Server{Store: s, Pipe: pipe, ProcMgr: pm, DataDir: dataDir}
+	return &Server{
+		Store: s, Pipe: pipe, ProcMgr: pm, DataDir: dataDir,
+		sessions: newSessionStore(),
+	}
 }
 
 func (a *Server) Handler() http.Handler {
@@ -74,6 +67,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /api/me", a.auth(a.handleMe))
 	mux.HandleFunc("PUT /api/me/password", a.auth(a.handleChangeOwnPassword))
+	// 登录设备：服务端按角色过滤（viewer 只看到自己的会话）
+	mux.HandleFunc("GET /api/sessions", a.auth(a.handleSessionsList))
+	mux.HandleFunc("DELETE /api/sessions", a.auth(a.handleSessionsRevokeOthers))
+	mux.HandleFunc("DELETE /api/sessions/{id}", a.auth(a.handleSessionRevoke))
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
@@ -174,13 +171,12 @@ func (a *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			fail(w, 401, "unauthorized")
 			return
 		}
-		v, ok := a.sessions.Load(t)
+		s, ok := a.sessions.Get(t)
 		if !ok {
 			fail(w, 401, "unauthorized")
 			return
 		}
-		s := v.(session)
-		if s.exp.Before(time.Now()) {
+		if s.Exp.Before(time.Now()) {
 			a.sessions.Delete(t)
 			fail(w, 401, "session expired")
 			return
@@ -188,12 +184,14 @@ func (a *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		// 每次请求都回库取账号：账号被删、被停用、密码被改都必须立刻生效。
 		// 只信内存里的会话副本会让「停用一个管理员」变成空操作——他还坐在
 		// 已经登录的浏览器里继续操作。
-		u, err := a.Store.GetAdmin(s.uid)
-		if err != nil || !u.Enabled || authn.Fingerprint(u.PassHash) != s.fp {
+		u, err := a.Store.GetAdmin(s.UID)
+		if err != nil || !u.Enabled || authn.Fingerprint(u.PassHash) != s.FP {
 			a.sessions.Delete(t)
 			fail(w, 401, "session expired")
 			return
 		}
+		// 记「最后活跃」：列表里能区分「还在用」与「登录后就没动过」
+		a.sessions.Touch(t, time.Now())
 		next(w, withUser(r, u))
 	}
 }
@@ -345,10 +343,14 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := token()
-	a.sessions.Store(t, session{
-		exp: time.Now().Add(24 * time.Hour),
-		uid: u.ID,
-		fp:  authn.Fingerprint(u.PassHash),
+	now := time.Now()
+	a.sessions.Add(&session{
+		Token: t, SID: sessionSID(t), UID: u.ID,
+		FP:      authn.Fingerprint(u.PassHash),
+		IP:      key,
+		UA:      r.UserAgent(),
+		Created: now, LastSeen: now,
+		Exp: now.Add(sessionTTL),
 	})
 	// 密码哈希为空 = 这个账号从未设置过密码（出厂默认），首次登录强制改密
 	mustChange := u.PassHash == ""
@@ -1106,6 +1108,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, err.Error())
 				return
 			}
+			// 主动清理该账号会话（指纹校验是兜底，这里让「登录设备」页立刻准确）
+			a.sessions.DeleteByUID(u.ID)
 			relogin = true
 		}
 	}
