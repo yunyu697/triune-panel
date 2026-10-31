@@ -29,8 +29,8 @@ import (
 	"triune/internal/webui"
 )
 
-// 构建时注入（需写完整导入路径，且变量必须导出以便链接器 -X 覆盖）：
-//   go build -ldflags "-X triune/cmd/server.Version=v0.8.5"
+// 构建时注入（主包符号名固定为 main，故用 main.Version）：
+//   go build -ldflags "-X main.Version=v0.8.5"
 var Version = "dev"
 
 func main() {
