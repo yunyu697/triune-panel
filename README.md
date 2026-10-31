@@ -159,6 +159,28 @@ v0.6 已验证：
    同时修复未配置节点公开地址时，回退 Host 带面板端口导致链接地址畸形的
    问题（订阅输出同步受益）。
 
+v0.7 已验证：
+
+1. **配置生成器**（新页面「配置生成」）：多选入站 × 选择目标设备
+   （客户端 / 主路由 / 旁路由）× 场景预设，一键生成可直接使用的
+   mihomo（YAML）或 sing-box（JSON）完整配置。
+   - 目标模板：客户端=混合端口 7890 不启用 TUN；主路由=TUN 接管 +
+     auto-redirect + DNS 劫持 :53 + 嗅探；旁路由=TUN + 局域网监听，
+     设备网关指向本机即可接管
+   - 场景预设（6 种）：均衡日常 / 流媒体优先 / 游戏加速 / AI 服务 /
+     隐私优先 / 国内直连优先，预设自动勾选规则集与策略
+   - 规则集目录（18 个，基于 geosite/geoip 官方数据，自动定期更新），
+     每个规则集可独立选择 DIRECT / PROXY / REJECT 策略
+   - 自定义规则：`类型,值,策略`（DOMAIN/DOMAIN-SUFFIX/DOMAIN-KEYWORD/
+     IP-CIDR/GEOSITE/GEOIP…），GEOSITE/GEOIP 自动挂载对应在线规则集；
+     sing-box 侧自动转换为 domain_suffix / ip_cidr / rule_set / reject
+   - 自定义规则集：远程 URL + behavior + 策略，mihomo 按 .mrs/.yaml/.txt
+     推断格式，sing-box 建议 .srs
+   - 已用真实内核全矩阵校验：mihomo 1.19.33（`mihomo -t`）与
+     sing-box 1.14.4（`sing-box check`）6/6 通过（含 sing-box 1.12+ 新
+     DNS 格式、rule actions、uTLS、default_domain_resolver 等兼容处理）
+2. **修复**：sing-box 订阅/导出中 Reality 出站缺少 uTLS 导致无法初始化。
+
 ## 部署到 VPS
 
 ### 一键部署（推荐）

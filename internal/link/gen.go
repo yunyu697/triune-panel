@@ -282,10 +282,12 @@ func applyTLSOut(o map[string]any, n *Node) {
 		}
 		if n.Security == "reality" {
 			tls["reality"] = map[string]any{
-				"enabled": true,
+				"enabled":    true,
 				"public_key": str(n.Extra["pbk"]),
 				"short_id":   str(n.Extra["sid"]),
 			}
+			// sing-box 的 reality 客户端要求 uTLS
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
 		}
 		o["tls"] = tls
 	}

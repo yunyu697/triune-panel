@@ -53,6 +53,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/inbounds/{id}", a.auth(a.updateInbound))
 	mux.HandleFunc("DELETE /api/inbounds/{id}", a.auth(a.deleteInbound))
 	mux.HandleFunc("GET /api/inbounds/{id}/export", a.auth(a.handleInboundExport))
+	mux.HandleFunc("GET /api/export/catalog", a.auth(a.handleExportCatalog))
+	mux.HandleFunc("POST /api/export/config", a.auth(a.handleExportConfig))
 	mux.HandleFunc("GET /api/clients", a.auth(a.listClients))
 	mux.HandleFunc("POST /api/clients", a.auth(a.createClient))
 	mux.HandleFunc("PUT /api/clients/{id}", a.auth(a.updateClient))
