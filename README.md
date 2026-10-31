@@ -155,22 +155,35 @@ v0.6 已验证：
 
 ## 部署到 VPS
 
+### 一键部署（推荐）
+
+在 VPS 上执行一条命令（自动识别架构，下载二进制，配置 systemd 并启动）：
+
 ```bash
-# 方式一：从 Release 直接下载（Linux amd64 示例，arm64 换文件名）
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
+```
+
+GitHub 直连慢的服务器，加镜像环境变量：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo GH_PROXY=https://ghfast.top bash
+```
+
+指定架构：`| sudo bash -s -- arm64`。重复执行即**原地升级**（只替换面板二进制，`/opt/triune-panel/data` 数据原样保留）。
+
+安装完成后：
+
+- 访问 `http://<服务器IP>:2087`（默认 `admin/admin`，**立即改密码**）
+- 日志：`journalctl -u triune-panel -f`
+- 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
+
+### 手动部署
+
+```bash
+# 1. 下载二进制（或上传本地 deploy/ 目录）
 curl -LO https://github.com/yunyu697/triune-panel/releases/latest/download/triune-panel-linux-amd64
 chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local/bin/triune-panel
 
-# 方式二：上传 deploy/ 目录到服务器
-scp -r deploy/ root@your-vps:/tmp/triune/
-
-# 在服务器上执行
-ssh root@your-vps
-cd /tmp/triune && sudo bash install.sh amd64   # ARM 机器用 arm64
-
-# 3. 浏览器打开 http://<服务器IP>:2087（默认 admin/admin，立即改密码）
-#    面板日志: journalctl -u triune-panel -f
+# 2. 运行（也可自行编写 systemd unit，参考 deploy/triune-panel.service）
+sudo triune-panel -addr :2087 -data /opt/triune-panel/data
 ```
-
-内核二进制（sing-box/xray/mihomo）建议放 `/usr/local/bin/`，
-在面板 **设置** 中填入路径；后续升级面板直接用 **设置 → 面板自更新**
-（下载 → sha256 校验 → 备份 → 原子替换 → 无缝重启）。
