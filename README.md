@@ -110,6 +110,46 @@ sudo systemctl start triune-panel
   + 二进制 `-version` 格式校验（install.sh 靠 `awk '{print $2}'` 取版本做终检，
   格式一变安装脚本就会误判"装到旧版本"）+ shellcheck 扫 `deploy/` 脚本。
 
+## 挂在反向代理后面（nginx / Caddy / Traefik）
+
+面板前面套一层反向代理时，TCP 直连对端永远是代理自己（本机 nginx 就是 `127.0.0.1`），
+于是「最近登录 IP」和登录防爆破的计数键都会退化成同一个地址 ——
+**一个人输错五次密码，所有访客一起被锁 10 分钟**。
+
+在 **设置 → 基础设置 → 可信反向代理网段** 填入代理地址即可（也可直接写设置
+`trusted_proxies`）：
+
+| 场景 | 填什么 |
+|---|---|
+| 代理与面板同机（nginx / Caddy） | `127.0.0.1` |
+| 代理在 Docker / 内网另一台机 | 代理所在网段，如 `172.17.0.0/16` 或 `10.0.0.0/8` |
+| 多级代理（CDN → nginx → 面板） | 各层代理网段全填，逗号分隔 |
+
+支持 CIDR 与裸 IP（裸 IP 等价于 `/32`），逗号/空格/分号/换行分隔，**任一项写错直接报错**，
+不会静默忽略。
+
+取值规则：
+
+- 直连对端**不在**可信网段内 → 一律用直连对端，完全不看转发头。
+  所以公网攻击者直接打面板时伪造 `X-Forwarded-For` 无效。
+- 直连对端可信 → 把 `X-Forwarded-For` 当作「客户端, 代理1, 代理2…」，
+  **从右往左**跳过可信代理，取第一个不可信的地址（右侧由最近一跳代理追加、不可伪造；
+  左侧可被客户端随意伪造，所以不能取最左）。没有 XFF 时再看 `X-Real-IP`。
+
+对应的 nginx 配置（关键是 `proxy_set_header`，缺了它们转发头根本不会出现）：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:10010;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Caddy 默认就会带 `X-Forwarded-For`，同样把 `127.0.0.1` 填进可信网段即可。
+
 ## 反向导入现有链接（迁移不失效）
 
 **导入链接** 页支持粘贴 `vless://` `vmess://` `trojan://` `ss://` `hysteria2://` `tuic://`
@@ -298,6 +338,17 @@ v0.8 已验证：
    忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
+
+v0.8.8 已验证：
+
+1. **反向代理 IP 识别**（`internal/api/clientip.go`）：新增设置 `trusted_proxies`
+   （默认空 = 不信任任何代理，行为与旧版一致）。只有直连对端落在可信网段内才采信
+   `X-Forwarded-For` / `X-Real-IP`，且从右往左取第一个不可信地址，客户端伪造左侧无效。
+   `login_last_ip` 与登录防爆破计数键都改用真实客户端 IP。
+   设置页写入前整体校验，非法 CIDR/IP 直接 400，不会留下半套配置。
+2. 端到端实测（本地实例 + 伪造转发头）：配了 `127.0.0.1` 后 A 客户端失败 5 次被锁 429、
+   B 客户端不受影响；清空可信网段后伪造 `X-Forwarded-For: 6.6.6.6` 被忽略、
+   仍记为直连对端。
 
 v0.8.7 已验证：
 

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -172,12 +171,11 @@ type loginFail struct {
 	until time.Time
 }
 
-func loginKey(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	return host
+// loginKey 防爆破计数键 = 真实来源 IP。
+// 挂在反向代理后面时会按 trusted_proxies 采信 X-Forwarded-For，
+// 否则所有请求的来源都是 127.0.0.1，一次误操作就能把全站锁死。
+func (a *Server) loginKey(r *http.Request) string {
+	return a.clientIP(r)
 }
 
 // loginLocked 判断该来源是否处于锁定状态，返回剩余秒数。
@@ -213,7 +211,7 @@ func (a *Server) recordLoginFail(key string) {
 }
 
 func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	key := loginKey(r)
+	key := a.loginKey(r)
 	if remain := a.loginLocked(key); remain > 0 {
 		fail(w, http.StatusTooManyRequests,
 			fmt.Sprintf("登录失败次数过多，已临时锁定，请约 %d 分钟后再试", remain/60+1))
@@ -848,6 +846,8 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
 		"quota_warn_pct", "fw_auto",
+		// 可信反向代理网段（登录来源识别用，默认空 = 不信任任何代理）
+		TrustedProxiesSetting,
 		"acme_enabled", "acme_domain", "acme_email",
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
@@ -885,6 +885,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		"quota_warn_pct": true,
 		// 入站端口的自动防火墙管理（fwAuto 读取，默认开启）
 		"fw_auto": true,
+		// 可信反向代理网段：仅当直连对端落在这些网段内才采信转发头
+		TrustedProxiesSetting: true,
 		"acme_enabled": true, "acme_domain": true, "acme_email": true,
 		"admin_user": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）
@@ -897,6 +899,14 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
+	}
+	// 可信代理网段先整体校验再落库，避免半套配置写进去（写一半失败时
+	// 用户看到的是 500，但设置里已经躺着一条错值）。
+	if v, ok := m[TrustedProxiesSetting]; ok {
+		if _, err := parseTrustedProxies(v); err != nil {
+			fail(w, 400, "可信反向代理填写有误："+err.Error())
+			return
+		}
 	}
 	for k, v := range m {
 		if allowed[k] {

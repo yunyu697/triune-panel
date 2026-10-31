@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -759,6 +759,9 @@ canvas{display:block;width:100%}
           <div><label>mihomo 二进制路径</label><input id="s_binmihomo" class="input"></div>
           <p class="muted" style="margin:0">留空可前往下方「组件更新与版本管理」一键安装面板专用副本到 <code>data/bin/</code>，与系统其他服务互不影响。</p>
           <div><label>节点公开地址（订阅生成用）</label><input id="s_host" class="input" placeholder="如 vps.example.com"></div>
+          <div><label>可信反向代理网段<span class="muted" style="font-weight:400">（面板挂在 nginx / Caddy 后面时必填，否则登录来源一律是 127.0.0.1）</span></label>
+            <input id="s_trusted_proxies" class="input" placeholder="如 127.0.0.1 或 127.0.0.1,10.0.0.0/8；留空 = 不信任任何代理"></div>
+          <p class="muted" style="margin:0">仅当请求的直连对端落在这些网段内，才会采信 <code>X-Forwarded-For</code> / <code>X-Real-IP</code>。这样登录来源、防爆破计数才是真实客户端 IP；不配或配错时退化为「所有访问都算代理那一个 IP」，一个人输错五次会把所有人一起锁住。</p>
           <div><label>统计 API 密钥</label><input id="s_stats_secret" class="input"></div>
           <div><label>流量告警阈值（%）<span class="muted" style="font-weight:400">（越过后发邮件，需在下方配置 SMTP 与收件邮箱）</span></label>
             <input id="s_warn_pct" class="input" type="number" min="1" max="100" value="80"></div>
@@ -3529,7 +3532,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.7-demo",
+    version:"v0.8.8-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -6895,6 +6898,7 @@ async function loadSettings() {
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
     $("s_warn_pct").value = j.quota_warn_pct || 80;
     $("s_fwauto").checked = j.fw_auto !== "0";
+    $("s_trusted_proxies").value = j.trusted_proxies || "";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
     $("s_auth_email").value = j.auth_email || "";
@@ -7157,6 +7161,7 @@ async function saveSettings() {
     stats_enabled:$("s_stats").checked?"1":"0", stats_secret:$("s_stats_secret").value,
     quota_warn_pct:String(+$("s_warn_pct").value || 80),
     fw_auto:$("s_fwauto").checked?"1":"0",
+    trusted_proxies:$("s_trusted_proxies").value.trim(),
     acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
   if ($("s_pass").value) body.admin_pass = $("s_pass").value;
   try {
