@@ -406,33 +406,73 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, in)
 }
 
+// updateInbound 做的是「部分更新」：只覆盖请求里真正出现的键。
+//
+// 旧实现和 updateClient 是同一个毛病——把请求体解成完整的 model.Inbound 再
+// 整行 UPDATE。`PUT {"name":"改名"}` 会把 core/protocol/port/tag/settings 全部
+// 清成零值（settings 变 "{}"、port 变 0），而且返回 200。更糟的是内核切换守卫
+// 拿零值去比，启用中的入站会收到「请使用 /api/switch-core」——调用方根本没想
+// 换内核，这条错误只会让人以为是权限或状态问题。
 func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
-	var in model.Inbound
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	in.ID = pathID(r)
+
+	old, err := a.Store.GetInbound(pathID(r))
+	if err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	in := *old
+	for k, v := range raw {
+		var ferr error
+		switch k {
+		case "name":
+			ferr = json.Unmarshal(v, &in.Name)
+		case "core":
+			ferr = json.Unmarshal(v, &in.Core)
+		case "protocol":
+			ferr = json.Unmarshal(v, &in.Protocol)
+		case "listen":
+			ferr = json.Unmarshal(v, &in.Listen)
+		case "port":
+			ferr = json.Unmarshal(v, &in.Port)
+		case "tag":
+			ferr = json.Unmarshal(v, &in.Tag)
+		case "transport":
+			ferr = json.Unmarshal(v, &in.Transport)
+		case "tls":
+			ferr = json.Unmarshal(v, &in.TLS)
+		case "settings":
+			ferr = json.Unmarshal(v, &in.Settings)
+		case "enabled":
+			ferr = json.Unmarshal(v, &in.Enabled)
+		case "draft":
+			ferr = json.Unmarshal(v, &in.Draft)
+		}
+		if ferr != nil {
+			fail(w, 400, "字段 "+k+" 格式有误: "+ferr.Error())
+			return
+		}
+	}
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
 	// 运行中的入站不允许直接改内核 —— 必须走 /api/switch-core 安全切换流程
 	// （预检 → 停旧 → 启新 → 健康检查 → 失败自动回滚），否则可能出现
 	// 新内核配置从未校验过就上线的风险。
-	var old *model.Inbound
-	if o, err := a.Store.GetInbound(in.ID); err == nil && o != nil {
-		old = o
-		if o.Core != in.Core && o.Enabled && !o.Draft {
-			fail(w, 400, "运行中的入站切换内核请使用 POST /api/switch-core（含预检与健康检查）")
-			return
-		}
+	if old.Core != in.Core && old.Enabled && !old.Draft {
+		fail(w, 400, "运行中的入站切换内核请使用 POST /api/switch-core（含预检与健康检查）")
+		return
 	}
 	if err := a.Store.UpdateInbound(&in); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
 	// 防火墙端口对账：草稿转正 / 端口或协议变化
-	if fwAuto(a) && old != nil {
+	if fwAuto(a) {
 		oldProto := firewall.ProtoOf(old.Protocol, old.Transport)
 		newProto := firewall.ProtoOf(in.Protocol, in.Transport)
 		// 草稿 → 正式：放行新端口
@@ -454,7 +494,7 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	detail := fmt.Sprintf("%s/%s 端口 %d", in.Core, in.Protocol, in.Port)
-	if old != nil && old.Draft && !in.Draft {
+	if old.Draft && !in.Draft {
 		detail += "（草稿转正）"
 	}
 	a.auditOK(r, AuditInboundUpdate, in.Name, detail)
