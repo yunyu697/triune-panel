@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.4 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -867,24 +867,31 @@ canvas{display:block;width:100%}
 
 <!-- 入站 编辑弹窗 -->
 <div class="overlay" id="mInbound" onclick="if(event.target===this)closeModal('mInbound')">
-  <div class="modal">
+  <div class="modal" style="max-width:640px">
     <h3 id="ibtitle">新增入站</h3>
     <div class="frm">
-      <div><label>名称</label><input id="ib_name" class="input"></div>
-      <div><label>内核</label><select id="ib_core" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select></div>
-      <div><label>协议</label><input id="ib_protocol" class="input" placeholder="vless"></div>
-      <div><label>监听地址（留空=全部）</label><input id="ib_listen" class="input"></div>
-      <div><label>端口</label><input id="ib_port" class="input" type="number"></div>
-      <div><label>传输</label><select id="ib_transport" class="input"><option>tcp</option><option>ws</option><option>grpc</option><option>h2</option></select></div>
-      <div><label>TLS</label><select id="ib_tls" class="input"><option>none</option><option>tls</option><option>reality</option></select></div>
-      <div class="full"><label>透传 Settings（JSON）</label>
-        <textarea id="ib_settings" class="input" style="min-height:64px">{}</textarea>
+      <div><label>名称 <span class="muted" style="font-weight:400">（自动，可改）</span></label><input id="ib_name" class="input"></div>
+      <div><label>内核</label><select id="ib_core" class="input" onchange="ibOnCore()"><option>singbox</option><option>xray</option><option>mihomo</option></select></div>
+      <div><label>协议 <span class="muted" style="font-weight:400">（仅显示当前内核支持的）</span></label>
+        <select id="ib_protocol" class="input" onchange="ibOnProto()"></select></div>
+      <div><label>端口 <span class="muted" style="font-weight:400">（自动推荐）</span></label><input id="ib_port" class="input" type="number"></div>
+      <div><label>监听地址（留空=全部）</label><input id="ib_listen" class="input" placeholder="留空 = 监听全部网卡"></div>
+      <div><label>传输</label><select id="ib_transport" class="input" onchange="ibDynamic()"></select></div>
+      <div><label>TLS</label><select id="ib_tls" class="input" onchange="ibDynamic()"></select></div>
+      <div id="ib_dyn_tls" class="full" style="display:none"><div class="frm" id="ib_dyn_tls_inner"></div></div>
+      <div class="full" id="ib_dyn_row" style="display:none"><div class="frm" id="ib_dyn_inner"></div></div>
+      <div class="full" id="ib_reality_row" style="display:none">
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn sm" onclick="genReality()">重新生成 Reality 密钥对</button>
+          <span class="muted mono" id="ibkey" style="font-size:11.5px"></span>
+        </div>
       </div>
+      <details class="full">
+        <summary class="muted" style="cursor:pointer;font-size:13px;margin-bottom:8px">高级：透传 Settings（JSON，表单字段会自动并入）</summary>
+        <textarea id="ib_settings" class="input mono" style="min-height:72px;font-size:12px">{}</textarea>
+      </details>
     </div>
-    <div style="display:flex;gap:10px;align-items:center">
-      <button class="btn" onclick="genReality()">生成 Reality 密钥对</button>
-      <span class="muted" id="ibkey"></span>
-    </div>
+    <p class="muted" id="ib_hint" style="font-size:12.5px;margin:0 0 4px"></p>
     <div class="foot">
       <button class="btn" onclick="closeModal('mInbound')">取消</button>
       <button class="btn primary" onclick="saveInbound()">保存</button>
@@ -944,6 +951,10 @@ canvas{display:block;width:100%}
         <select id="vs_select" class="input" onchange="pickVersion()"></select></div>
       <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
       <div class="full"><label>sha256（可选）</label><input id="vs_sha" class="input mono"></div>
+      <div class="full" id="vs_notes_wrap" style="display:none">
+        <label>Release Notes（<span id="vs_notes_tag"></span>）</label>
+        <div id="vs_notes" class="input" style="max-height:200px;overflow:auto;font-size:12.5px;line-height:1.65;background:var(--bg,transparent);white-space:normal"></div>
+      </div>
     </div>
     <div class="foot">
       <button class="btn" onclick="closeModal('mVersions')">取消</button>
@@ -1152,7 +1163,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.3-demo",
+    version:"v0.8.4-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -1228,8 +1239,8 @@ async function mockRoute(path, opts) {
     MDB.revisions.unshift({id:++REV_N,core:b.to,status:"applied",note:"switch → "+b.to,created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"});
     return {ok:1, to:b.to, from:["(原内核)"], inbounds:moved, validated:true, hash:"d3m0abcd", revision_id:REV_N, warnings:[]};
   }
-  if (api === "tools/reality-keypair") return {private_key:"demo-priv-"+Math.random().toString(16).slice(2,10),public_key:"demo-pub-"+Math.random().toString(16).slice(2,10)};
-  if (api === "tools/uuid") return {uuid:crypto.randomUUID()};
+  if (api === "tools" && rest === "/reality-keypair") return {private_key:"demo-priv-"+Math.random().toString(16).slice(2,10),public_key:"demo-pub-"+Math.random().toString(16).slice(2,10)};
+  if (api === "tools" && rest === "/uuid") return {uuid:crypto.randomUUID()};
   if (api === "import") {
     if ((opts.body.mode||"external") === "external") {
       MDB.external.push({id:Math.max(0,...MDB.external.map(x=>x.id))+1, name:"新导入节点", raw_link:"vless://demo@node"+Math.ceil(Math.random()*99)+".example.com:443#新导入节点", created_at:new Date().toISOString().slice(0,19)});
@@ -1248,8 +1259,10 @@ async function mockRoute(path, opts) {
       {component:"xray",bin:"/usr/local/bin/xray",bin_set:true,version:"Xray 24.12.18 (Xray, Penetrates Everything.)",running:false,config_exists:true,backups:[]},
       {component:"mihomo",bin:"",bin_set:false,running:false,backups:[]}
     ]};
-  if (api === "updates/versions") return {component:q.component,source:"github",releases:[
-    {tag:"v1.10.0"},{tag:"v1.9.7"},{tag:"v1.9.5"},{tag:"v1.8.9"}]};
+  if (api === "updates" && rest.startsWith("/versions")) return {component:q.component,source:"github",releases:[
+    {tag:"v1.10.0",notes:"## 新功能\n- 支持 **Hysteria2** 混淆参数 `obfs`\n- 修复高并发下的内存占用\n\n### 修复\n- WS 路径含查询串时握手失败"},
+    {tag:"v1.9.7",notes:"稳定性修复版本。\n\n- 修复 TLS 证书热加载\n- 提升日志可读性"},
+    {tag:"v1.9.5"},{tag:"v1.8.9"}]};
   if (api.startsWith("cores/") && api.endsWith("/update")) { await new Promise(r=>setTimeout(r,900)); const c=api.split("/")[1];
     const installed = !MDB.settings["bin_"+c];
     if (installed) MDB.settings["bin_"+c] = "/opt/triune-panel/data/bin/"+c+"/"+(c==="singbox"?"sing-box":c);
@@ -3418,27 +3431,214 @@ function copySub(token) {
 }
 
 /* ---- 入站弹窗 ---- */
+/* ---- 入站规格矩阵（与各内核渲染器的支持范围保持同步）---- */
+const IB_SPECS = {
+  singbox: { protocols:["vless","vmess","trojan","shadowsocks","hysteria2","tuic","anytls","mixed","socks"],
+             transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
+  xray:    { protocols:["vless","vmess","trojan"],
+             transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
+  mihomo:  { protocols:["mixed","socks","http","shadowsocks","vmess","trojan","tuic","hysteria2"],
+             transports:["tcp"], tls:["none","tls"] }
+};
+const IB_PROTO_LABEL = {
+  vless:"VLESS（推荐，配 Reality 免域名）", vmess:"VMess", trojan:"Trojan（需域名+证书）",
+  shadowsocks:"Shadowsocks（单密码共享）", hysteria2:"Hysteria2（QUIC/UDP，弱网快）",
+  tuic:"TUIC（QUIC/UDP 低延迟）", anytls:"AnyTLS（新协议）",
+  mixed:"Mixed（HTTP+SOCKS 本机代理）", socks:"SOCKS5 本机代理", http:"HTTP 本机代理"
+};
+const IB_PROTO_HINT = {
+  vless:"最常用组合：Reality 传输 + 443 端口，无需域名和证书，客户端伪装成访问真实网站。",
+  vmess:"老牌协议；明文传输易被识别，建议配 WS+TLS 使用。",
+  trojan:"密码认证 + 标准 TLS 流量，必须有域名和证书（可在下方填入，或用面板 ACME 签发）。",
+  shadowsocks:"对称加密；注意多用户共享同一端口和加密方法。",
+  hysteria2:"基于 QUIC（UDP 端口），高丢包/移动网络下速度优势明显；确保防火墙/安全组放行的是 UDP。",
+  tuic:"基于 QUIC（UDP 端口），低延迟；确保放行 UDP。",
+  anytls:"TLS 伪装的新一代协议，仅 sing-box 支持。",
+  mixed:"给本机或局域网设备用的混合代理端口，公网机器建议配合强密码。",
+  socks:"本机 SOCKS5 代理端口。",
+  http:"本机 HTTP 代理端口。"
+};
+const IB_PORT_DEFAULT = { vless:443, vmess:10086, trojan:443, shadowsocks:8388,
+  hysteria2:36712, tuic:443, anytls:443, mixed:2080, socks:1080, http:8080 };
+
+function ibSpec() { return IB_SPECS[$("ib_core").value] || IB_SPECS.singbox; }
+function ibProto() { return $("ib_protocol").value; }
+function ibGetSettings() { try { return JSON.parse($("ib_settings").value||"{}") || {}; } catch(e){ return {}; } }
+function ibPutSettings(s) { $("ib_settings").value = JSON.stringify(s, null, 2); }
+
+function ibRecommendedTLS(core, proto) {
+  if (proto==="trojan"||proto==="hysteria2"||proto==="tuic"||proto==="anytls") return "tls";
+  if (proto==="vless") return IB_SPECS[core].tls.includes("reality") ? "reality" : "none";
+  return "none";
+}
+
+// ibFillSelects 按内核刷新 协议/传输/TLS 三个下拉的可选项
+function ibFillSelects() {
+  const sp = ibSpec();
+  $("ib_protocol").innerHTML = sp.protocols.map(p=>`<option value="${p}">${IB_PROTO_LABEL[p]||p}</option>`).join("");
+  $("ib_transport").innerHTML = sp.transports.map(t=>`<option>${t}</option>`).join("");
+  $("ib_tls").innerHTML = sp.tls.map(t=>`<option>${t}</option>`).join("");
+}
+
+// ibOnCore 内核切换：保留仍受支持的协议/传输/TLS，否则换成推荐值，再联动动态字段
+function ibOnCore(keepProto) {
+  const sp = ibSpec();
+  const cur = { proto: ibProto(), tr: $("ib_transport").value, tls: $("ib_tls").value };
+  ibFillSelects();
+  $("ib_protocol").value = sp.protocols.includes(cur.proto) ? cur.proto : sp.protocols[0];
+  $("ib_transport").value = sp.transports.includes(cur.tr) ? cur.tr : "tcp";
+  $("ib_tls").value = sp.tls.includes(cur.tls) ? cur.tls : ibRecommendedTLS($("ib_core").value, ibProto());
+  if (!keepProto) ibSuggestNamePort();
+  ibDynamic(true);
+}
+
+function ibOnProto() {
+  // 协议切换：重置为该协议推荐的 TLS，端口重推
+  $("ib_tls").value = ibRecommendedTLS($("ib_core").value, ibProto());
+  ibSuggestNamePort();
+  ibDynamic(true);
+}
+
+// ibSuggestNamePort 自动名称与推荐端口（端口冲突自动顺延）
+function ibSuggestNamePort() {
+  const used = new Set((window.__ibAll||[]).map(i=>+i.port));
+  let port = IB_PORT_DEFAULT[ibProto()] || 8443;
+  while (used.has(port)) port++;
+  $("ib_port").value = port;
+  const tls = $("ib_tls").value;
+  const suffix = tls==="reality" ? "-reality" : tls==="tls" ? "-tls" : $("ib_transport").value==="ws" ? "-ws" : "";
+  if (!$("ib_name").value || $("ib_name").dataset.auto === "1")
+    $("ib_name").value = ibProto() + suffix + "-" + port;
+  $("ib_name").dataset.auto = "1";
+}
+
+// ibDynamic 按协议/传输/TLS 渲染需要的动态字段；表单值写回 settings
+function ibDynamic(userTriggered) {
+  const core = $("ib_core").value, proto = ibProto(), tr = $("ib_transport").value, tls = $("ib_tls").value;
+  let s = ibGetSettings();
+  if (userTriggered) {
+    // 切换走后清理不再适用的键，避免残留脏配置
+    if (tr !== "ws") delete s.path;
+    if (tr !== "grpc") delete s.service_name;
+    if (tls !== "tls") { delete s.server_name; delete s.certificate_path; delete s.key_path; }
+    if (tls !== "reality") { delete s.handshake_server; delete s.server_names; delete s.private_key; delete s.pbk; delete s.short_id; }
+    if (proto !== "shadowsocks") delete s.method;
+    if (!(proto === "vless" && core === "xray")) delete s.flow;
+  }
+  const esc = v => String(v||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  let rows = "";
+
+  if (tr === "ws") {
+    const def = s.path || ("/ws-" + Math.random().toString(36).slice(2,6));
+    rows += `<div><label>WS 路径（自动生成）</label><input id="ib_f_path" class="input" value="${esc(def)}"></div>`;
+  }
+  if (tr === "grpc") {
+    rows += `<div><label>gRPC 服务名</label><input id="ib_f_svc" class="input" value="${esc(s.service_name)}" placeholder="可留空"></div>`;
+  }
+  if (proto === "vless" && core === "xray") {
+    const fv = s.flow || "";
+    rows += `<div><label>Flow（Reality 时推荐 vision）</label><select id="ib_f_flow" class="input">
+      <option value="" ${fv===""?"selected":""}>无</option>
+      <option value="xtls-rprx-vision" ${fv==="xtls-rprx-vision"?"selected":""}>xtls-rprx-vision</option></select></div>`;
+  }
+  if (proto === "shadowsocks") {
+    const mv = s.method || "aes-256-gcm";
+    const ms = ["aes-256-gcm","aes-128-gcm","chacha20-ietf-poly1305","2022-blake3-aes-256-gcm","2022-blake3-chacha20-poly1305"];
+    rows += `<div><label>加密方法</label><select id="ib_f_method" class="input">
+      ${ms.map(m=>`<option ${m===mv?"selected":""}>${m}</option>`).join("")}</select></div>`;
+  }
+  $("ib_dyn_row").style.display = rows ? "" : "none";
+  $("ib_dyn_inner").innerHTML = rows;
+
+  let tlsRows = "";
+  if (tls === "tls") {
+    tlsRows += `<div><label>TLS 域名 SNI（可选）</label><input id="ib_f_sni" class="input" value="${esc(s.server_name)}" placeholder="panel.example.com"></div>`;
+    tlsRows += `<div><label>证书路径（可选，留空可后补或用面板 ACME）</label><input id="ib_f_cert" class="input" value="${esc(s.certificate_path)}" placeholder="/opt/triune-panel/data/certs/fullchain.pem"></div>`;
+    tlsRows += `<div><label>私钥路径（可选）</label><input id="ib_f_key" class="input" value="${esc(s.key_path)}" placeholder="/opt/triune-panel/data/certs/privkey.pem"></div>`;
+  }
+  if (tls === "reality") {
+    tlsRows += `<div><label>Reality 握手目标网站</label><input id="ib_f_handshake" class="input" value="${esc(s.handshake_server||"www.apple.com")}" placeholder="www.apple.com"></div>`;
+    if (core === "xray") {
+      tlsRows += `<div><label>Reality 伪装域名（空格分隔多个）</label><input id="ib_f_snames" class="input" value="${esc(s.server_names||"www.apple.com")}" placeholder="www.apple.com"></div>`;
+    } else {
+      tlsRows += `<div><label>short_id（可选）</label><input id="ib_f_shortid" class="input" value="${esc(s.short_id)}" placeholder="留空或 0-8 位十六进制"></div>`;
+    }
+  }
+  $("ib_dyn_tls").style.display = tlsRows ? "" : "none";
+  $("ib_dyn_tls_inner").innerHTML = tlsRows;
+  $("ib_reality_row").style.display = tls === "reality" ? "" : "none";
+  $("ib_hint").textContent = IB_PROTO_HINT[proto] || "";
+
+  if (userTriggered) ibPutSettings(s);
+}
+
+// ibFormToSettings 保存时把动态表单值并入 settings（保留用户透传的其它键）
+function ibFormToSettings() {
+  const core = $("ib_core").value, proto = ibProto(), tr = $("ib_transport").value, tls = $("ib_tls").value;
+  const s = ibGetSettings();
+  const g = id => { const el = $(id); return el ? el.value.trim() : ""; };
+  const setIf = (k, v) => { if (v) s[k] = v; else delete s[k]; };
+  if (tr === "ws") setIf("path", g("ib_f_path"));
+  if (tr === "grpc") setIf("service_name", g("ib_f_svc"));
+  if (tls === "tls") {
+    setIf("server_name", g("ib_f_sni"));
+    setIf("certificate_path", g("ib_f_cert"));
+    setIf("key_path", g("ib_f_key"));
+  }
+  if (tls === "reality") {
+    setIf("handshake_server", g("ib_f_handshake"));
+    if (core === "xray") setIf("server_names", g("ib_f_snames"));
+    else setIf("short_id", g("ib_f_shortid"));
+    if (!s.private_key) { toast("Reality 需要密钥对，请点击「重新生成 Reality 密钥对」", "err"); throw new Error("need-reality-keys"); }
+  }
+  if (proto === "shadowsocks") setIf("method", $("ib_f_method") ? $("ib_f_method").value : "");
+  if (proto === "vless" && core === "xray") setIf("flow", $("ib_f_flow") ? $("ib_f_flow").value : "");
+  return s;
+}
+
 async function openInboundModal(id) {
   $("ibtitle").textContent = id ? "编辑入站" : "新增入站";
   $("ib_name").dataset.editing = id || "";
   $("ibkey").textContent = "";
-  let v = { name:"", core:"singbox", protocol:"", listen:"", port:"", transport:"tcp", tls:"none", settings:"{}" };
-  if (id) { const all = await req("/api/inbounds"); const i = all.find(x=>x.id===id); if (i) v = i; }
-  $("ib_name").value=v.name; $("ib_core").value=v.core; $("ib_protocol").value=v.protocol;
-  $("ib_listen").value=v.listen||""; $("ib_port").value=v.port; $("ib_transport").value=v.transport;
-  $("ib_tls").value=v.tls; $("ib_settings").value=v.settings||"{}";
+  $("ib_name").dataset.auto = id ? "0" : "1";
+  try { window.__ibAll = await req("/api/inbounds"); } catch(e){ window.__ibAll = []; }
+  let v = { name:"", core:"singbox", protocol:"vless", listen:"", port:"", transport:"tcp", tls:"none", settings:"{}" };
+  if (id) { const i = (window.__ibAll).find(x=>x.id===id); if (i) v = i; }
+  $("ib_core").value = v.core || "singbox";
+  ibFillSelects();
+  $("ib_protocol").value = v.protocol || ibSpec().protocols[0];
+  $("ib_transport").value = v.transport || "tcp";
+  $("ib_tls").value = v.tls || "none";
+  $("ib_name").value = v.name || "";
+  $("ib_listen").value = v.listen || "";
+  $("ib_port").value = v.port || "";
+  $("ib_settings").value = v.settings || "{}";
   // 运行中的入站改内核必须走安全切换流程，编辑弹窗里直接锁住内核选择
   const lockCore = id && v.enabled && !v.draft;
   $("ib_core").disabled = lockCore;
   $("ib_core").title = lockCore ? "运行中的入站请用「切换内核」按钮安全迁移" : "";
+  ibDynamic(false);
+  if (!id) {
+    // 新增：应用该协议在当前内核下的推荐 TLS，再自动名称/端口与动态字段
+    $("ib_tls").value = ibRecommendedTLS($("ib_core").value, ibProto());
+    ibSuggestNamePort();
+    ibPutSettings({}); // 新增：settings 从零开始，动态字段负责填充
+    ibDynamic(false);
+    // 默认组合自动生成 Reality 密钥（失败不阻塞，可后补）
+    if ($("ib_tls").value === "reality") genReality().catch(()=>{});
+  }
   openModal("mInbound");
   setTimeout(() => $("ib_name").focus(), 120);
 }
 async function saveInbound() {
   const editing = $("ib_name").dataset.editing;
-  const body = { name:$("ib_name").value, core:$("ib_core").value, protocol:$("ib_protocol").value,
+  let settings;
+  try { settings = JSON.stringify(ibFormToSettings()); }
+  catch(e){ if (e.message !== "need-reality-keys") toast("Settings JSON 无效: " + e.message, "err"); return; }
+  const body = { name:$("ib_name").value, core:$("ib_core").value, protocol:ibProto(),
     listen:$("ib_listen").value, port:+$("ib_port").value, transport:$("ib_transport").value,
-    tls:$("ib_tls").value, settings:$("ib_settings").value||"{}" };
+    tls:$("ib_tls").value, settings };
+  if (!body.name || !body.port) { toast("名称与端口不能为空", "err"); return; }
   try {
     if (editing) { await req("/api/inbounds/"+editing, { method:"PUT", body:Object.assign({},body,{id:+editing}) }); toast("入站已更新，如已启用请记得「应用配置」"); }
     else { await req("/api/inbounds", { method:"POST", body }); toast("入站已保存（未启用），确认无误后打开开关并应用"); }
@@ -4259,6 +4459,7 @@ async function fetchVersions(comp, install = false) {
     $("vs_select").innerHTML = opts;
     $("vs_url").value = ""; $("vs_sha").value = "";
     $("vs_confirm").disabled = false;
+    pickVersion(); // 默认选中最新版本并展示其 Release Notes
     openModal("mVersions");
   } catch(e){ toast(e.message, "err"); }
 }
@@ -4267,6 +4468,50 @@ function pickVersion() {
   if (!r) return;
   $("vs_url").value = r.url || ""; $("vs_sha").value = r.sha256 || "";
   if (!r.url) $("vs_url").placeholder = `将按官方地址自动下载 ${r.tag}`;
+  // Release Notes：轻量 markdown 渲染（标题/加粗/行内代码/列表/链接）
+  const wrap = $("vs_notes_wrap"), box = $("vs_notes");
+  if (r.notes && r.notes.trim()) {
+    box.innerHTML = mdLite(r.notes);
+    $("vs_notes_tag").textContent = r.tag;
+    wrap.style.display = "";
+  } else {
+    box.innerHTML = ""; wrap.style.display = "none";
+  }
+}
+// mdLite 极简 markdown → HTML（仅用于 Release Notes 展示，全部先做 HTML 转义）
+function mdLite(src) {
+  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = String(src).split(/\r?\n/);
+  let html = "", inUl = false, inCode = false, codeBuf = [];
+  const closeUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
+  for (const ln of lines) {
+    if (/^```/.test(ln.trim())) {
+      if (inCode) { html += "<pre>" + esc(codeBuf.join("\n")) + "</pre>"; codeBuf = []; inCode = false; }
+      else { closeUl(); inCode = true; }
+      continue;
+    }
+    if (inCode) { codeBuf.push(ln); continue; }
+    let m;
+    if ((m = ln.match(/^(#{1,4})\s+(.*)/))) {
+      closeUl();
+      html += `<div style="font-weight:600;margin:8px 0 2px">${inline(m[2])}</div>`;
+    } else if ((m = ln.match(/^\s*[-*]\s+(.*)/))) {
+      if (!inUl) { html += "<ul style=\"margin:4px 0 4px 18px;padding:0\">"; inUl = true; }
+      html += `<li>${inline(m[1])}</li>`;
+    } else if (ln.trim() === "") {
+      closeUl();
+    } else {
+      closeUl();
+      html += `<div style="margin:3px 0">${inline(ln)}</div>`;
+    }
+  }
+  if (inCode && codeBuf.length) html += "<pre>" + esc(codeBuf.join("\n")) + "</pre>";
+  closeUl();
+  return html;
 }
 async function confirmVersionUpdate() {
   const comp = $("vs_component").textContent;

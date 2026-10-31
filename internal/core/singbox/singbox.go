@@ -72,6 +72,8 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 			obj[k] = v
 		}
 	}
+	// 面板托管/客户端专用的键不透传到顶层（由下方结构化消费或剔除）
+	core.StripManagedKeys(obj)
 
 	var users []any
 	for _, c := range iw.Clients {
@@ -85,6 +87,8 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 			users = append(users, map[string]any{"name": c.Name, "password": c.Credential})
 		case "mixed", "socks":
 			users = append(users, map[string]any{"name": c.Name, "username": c.Name, "password": c.Credential})
+		case "shadowsocks":
+			// shadowsocks 的密码在入站级别（下方统一设置），不进 users 数组
 		default:
 			return nil, fmt.Errorf("protocol %q not supported by sing-box renderer", in.Protocol)
 		}
@@ -134,14 +138,15 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		}
 		obj["tls"] = tls
 	case "reality":
-		obj["tls"] = map[string]any{
-			"enabled": true,
-			"reality": map[string]any{
-				"enabled":     true,
-				"handshake":   map[string]any{"server": core.Field(in.Settings, "handshake_server"), "server_port": 443},
-				"private_key": core.Field(in.Settings, "private_key"),
-			},
+		reality := map[string]any{
+			"enabled":     true,
+			"handshake":   map[string]any{"server": core.Field(in.Settings, "handshake_server"), "server_port": 443},
+			"private_key": core.Field(in.Settings, "private_key"),
 		}
+		if sid := core.Field(in.Settings, "short_id"); sid != "" {
+			reality["short_id"] = []string{sid}
+		}
+		obj["tls"] = map[string]any{"enabled": true, "reality": reality}
 	}
 	return obj, nil
 }

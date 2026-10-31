@@ -80,6 +80,8 @@ func (m *Mihomo) renderListener(iw core.InboundWithClients) (map[string]any, err
 			l[k] = v
 		}
 	}
+	// 面板托管/客户端专用的键不透传到顶层（由下方结构化消费或剔除）
+	core.StripManagedKeys(l)
 
 	switch in.Protocol {
 	case "mixed":

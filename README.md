@@ -223,6 +223,24 @@ v0.8 已验证：
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
+v0.8.4 已验证：
+
+1. **新增入站智能化**（尽可能零手填）：
+   - 协议改为下拉框，只显示当前内核实际支持的协议（与渲染器同步：
+     sing-box 9 种 / xray 3 种 / mihomo 8 种），切换内核自动联动；
+   - 打开弹窗即自动填充：名称（协议-端口）、推荐端口（冲突自动顺延）、
+     推荐传输与 TLS（如 vless+sing-box 默认 Reality 并自动生成密钥对）；
+   - 按 协议 × 传输 × TLS 联动出需要的字段：WS 路径（自动生成）、gRPC 服务名、
+     TLS 域名与证书路径、Reality 握手目标 / short_id、SS 加密方法、
+     xray VLESS flow，保存时自动并入 Settings JSON（高级透传区保留）。
+2. **版本列表显示 Release Notes**：组件更新弹窗选中版本即显示该版本
+   GitHub Release 说明（轻量 markdown 渲染），更新前先看变更。
+3. **渲染安全修复**：面板托管 / 客户端专用的 settings 键（`pbk`、`short_id`、
+   `flow`、`private_key` 等）不再原样透传到内核配置顶层——sing-box 严格
+   校验未知字段，多余顶层键会导致配置校验失败；`short_id` 现按结构写入
+   sing-box `tls.reality.short_id` / xray `realitySettings.shortIds`；
+   同时修复 sing-box 渲染器不支持 shadowsocks 入站的问题。
+
 v0.8.2 已验证：
 
 1. **登录二次验证（2FA）**：在账号密码之外追加一道验证，两种方式二选一：

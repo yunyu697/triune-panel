@@ -83,6 +83,8 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 			obj[k] = v
 		}
 	}
+	// 面板托管/客户端专用的键不透传到顶层（由下方结构化消费或剔除）
+	core.StripManagedKeys(obj)
 
 	switch in.Protocol {
 	case "vless":
@@ -155,11 +157,15 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 		stream["tlsSettings"] = ts
 	case "reality":
 		stream["security"] = "reality"
-		stream["realitySettings"] = map[string]any{
-			"privateKey": core.Field(in.Settings, "private_key"),
-			"dest":       core.Field(in.Settings, "handshake_server"),
+		rs := map[string]any{
+			"privateKey":  core.Field(in.Settings, "private_key"),
+			"dest":        core.Field(in.Settings, "handshake_server"),
 			"serverNames": strings.Fields(core.Field(in.Settings, "server_names")),
 		}
+		if sid := core.Field(in.Settings, "short_id"); sid != "" {
+			rs["shortIds"] = []string{sid}
+		}
+		stream["realitySettings"] = rs
 	}
 	obj["streamSettings"] = stream
 	return obj, nil

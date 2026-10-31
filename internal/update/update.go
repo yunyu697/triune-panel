@@ -33,12 +33,14 @@ type Release struct {
 	Tag    string   `json:"tag"`
 	URL    string   `json:"url,omitempty"`
 	Sha256 string   `json:"sha256,omitempty"`
+	Notes  string   `json:"notes,omitempty"` // Release 说明正文（markdown 原文）
 	Assets []string `json:"assets,omitempty"`
 }
 
 // ghReleases GitHub API 的 releases 响应子集。
 type ghReleases []struct {
 	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
 	Assets  []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
@@ -78,7 +80,7 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(gh))
 	for _, r := range gh {
-		rel := Release{Tag: r.TagName}
+		rel := Release{Tag: r.TagName, Notes: r.Body}
 		for _, a := range r.Assets {
 			rel.Assets = append(rel.Assets, a.Name)
 		}
@@ -103,13 +105,14 @@ func ListIndexVersions(indexURL string) ([]Release, error) {
 		Version string `json:"version"`
 		URL     string `json:"url"`
 		Sha256  string `json:"sha256"`
+		Notes   string `json:"notes"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&idx); err != nil {
 		return nil, fmt.Errorf("解析版本索引失败: %w", err)
 	}
 	out := make([]Release, 0, len(idx))
 	for _, it := range idx {
-		out = append(out, Release{Tag: it.Version, URL: it.URL, Sha256: it.Sha256})
+		out = append(out, Release{Tag: it.Version, URL: it.URL, Sha256: it.Sha256, Notes: it.Notes})
 	}
 	return out, nil
 }
