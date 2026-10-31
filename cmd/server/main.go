@@ -86,6 +86,7 @@ func usage() {
   triune-panel status [--json]       只读汇总：版本/入站/用户/证书/上次应用
   triune-panel doctor                环境自检（数据目录、密码状态、内核、防火墙、端口）
   triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase]
+                     [--upload REMOTE] [--upload-keep N]
                                      打包数据目录到 backups/（默认保留 7 份）
   triune-panel restore <归档.tar.gz[.age]> [--yes]
                                      用备份覆盖数据目录（恢复前自动备份当前数据）
@@ -104,6 +105,13 @@ func usage() {
   TRIUNE_BACKUP_PASSPHRASE    环境变量，优先级低于上面两个参数
   口令至少 12 位；丢失口令 = 归档永久打不开（无后门、无法找回）。
   归档是标准 age 格式，可用 "age -d 归档.tar.gz.age > 还原.tar.gz" 独立解密。
+
+异地备份（可选，需要 rclone）:
+  backup --upload r2:triune-backups            上传到远端，传完回读校验字节数
+  backup --upload r2:triune-backups --upload-keep 7   同时清理远端旧归档（只删本包命名的）
+  backup --rclone /usr/local/bin/rclone        指定 rclone 路径（默认走 PATH）
+  远端写法即 rclone 的 "remote:path"，支持 S3 / R2 / B2 / WebDAV / SFTP / 网盘等。
+  上传失败时退出码 1，但本地归档仍然可用——不要把"没传上去"当成"已备份"。
 
 退出码: 0 成功 · 1 执行失败 · 2 用法错误
 `)

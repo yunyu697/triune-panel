@@ -662,15 +662,29 @@ if [[ "$SERVICE_STARTED" -eq 1 ]]; then
 # 想开启加密：把口令写进 $INSTALL_DIR/backup.pass 并 chmod 600 即可，
 # 本脚本检测到该文件非空就自动加 --passphrase-file。
 # 注意口令丢失 = 备份永久打不开，请另存一份到密码管理器。
+#
+# 想开启异地备份：装好 rclone 并 `sudo rclone config` 配好远端后，
+# 在 $INSTALL_DIR/backup.env 里写 TRIUNE_BACKUP_REMOTE=r2:triune-backups 即可。
 set -euo pipefail
 INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
 BIN="$INSTALL_DIR/triune-panel"
 PASS_FILE="${TRIUNE_BACKUP_PASS_FILE:-$INSTALL_DIR/backup.pass}"
 KEEP=7
 
+# 可选的环境变量文件（远端地址等），不存在就跳过
+if [[ -f "$INSTALL_DIR/backup.env" ]]; then
+  # shellcheck disable=SC1091
+  . "$INSTALL_DIR/backup.env"
+fi
+
 ARGS=(backup --data "$INSTALL_DIR/data" --out "$INSTALL_DIR/backups" --keep "$KEEP")
 if [[ -s "$PASS_FILE" ]]; then
   ARGS+=(--passphrase-file "$PASS_FILE")
+fi
+if [[ -n "${TRIUNE_BACKUP_REMOTE:-}" ]]; then
+  ARGS+=(--upload "$TRIUNE_BACKUP_REMOTE")
+  # 远端默认保留 7 份；设 0 可关掉远端清理
+  ARGS+=(--upload-keep "${TRIUNE_BACKUP_REMOTE_KEEP:-7}")
 fi
 exec "$BIN" "${ARGS[@]}"
 BKSH
@@ -702,6 +716,7 @@ BKTMR
   $SUDO systemctl enable --now triune-panel-backup.timer 2>/dev/null || true
   echo "  ✔ 备份目录: $INSTALL_DIR/backups（手动备份: sudo bash $INSTALL_DIR/backup.sh）"
   echo "    加密备份: 写入 $INSTALL_DIR/backup.pass 后 chmod 600，之后自动加密"
+  echo "    异地备份: 装好 rclone 并在 $INSTALL_DIR/backup.env 写 TRIUNE_BACKUP_REMOTE=<remote:path>"
 else
   echo "→ 未检测到 systemd，跳过每日自动备份（可手动: tar czf backup.tar.gz -C $INSTALL_DIR data）"
 fi
@@ -878,6 +893,7 @@ if systemctl is-active --quiet "$SERVICE"; then
   print_login_info
   echo "  自动备份:  每日 03:30 → $INSTALL_DIR/backups（保留 7 份；手动: sudo bash $INSTALL_DIR/backup.sh）"
   echo "  备份加密:  写入 $INSTALL_DIR/backup.pass 并 chmod 600 后自动启用（age 口令加密）"
+  echo "  异地备份:  装 rclone + 在 $INSTALL_DIR/backup.env 写 TRIUNE_BACKUP_REMOTE=<remote:path>"
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  查看日志:  journalctl -u triune-panel -f"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网；或 curl -fsSL $RAW_BASE/deploy/install.sh | sudo bash -s -- --uninstall）"

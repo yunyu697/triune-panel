@@ -71,7 +71,7 @@ echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --pass
 ```bash
 triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证书/上次应用/最近登录
 triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
-triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
+triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase] [--upload REMOTE]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
 triune-panel restore <归档.tar.gz[.age]> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
 triune-panel reset-password      # 见上一节
 triune-panel version
@@ -148,6 +148,69 @@ WAL 模式的一个提醒：面板运行中 `triune.db-wal` 里可能还有未�
 `backup` 会把它们一起打包（恢复时 SQLite 自动重放），但直接拷运行中的库
 理论上可能拿到不一致快照。`backup` 检测到未合并 WAL 会打印提示——
 要严格一致就先停服再备份。
+
+### 异地备份（可选）
+
+加密解决的是「备份被人看到」，异地解决的是「备份跟着磁盘一起没」。
+两者独立，建议都开——备份和数据库躺在同一块盘上，磁盘坏、VPS 被回收、
+误删整机，加密再强也救不回来。
+
+走 [rclone](https://rclone.org)，它已经处理好 S3 / R2 / B2 / WebDAV / SFTP /
+各类网盘的签名与分片差异，不用为每家对象存储写一套客户端：
+
+```bash
+# 一次性：装 rclone 并配好远端（以 root 身份，systemd 也用它）
+curl https://rclone.org/install.sh | sudo bash
+sudo rclone config
+
+# 之后每次备份加 --upload
+sudo triune-panel backup --upload r2:triune-backups
+```
+
+远端写法就是 rclone 的 `remote:path`：
+
+| 远端 | 写法 |
+|---|---|
+| Cloudflare R2 | `r2:triune-backups` |
+| Backblaze B2 | `b2:my-bucket/triune` |
+| S3 / MinIO / 阿里云 OSS | `s3:my-bucket/backups` |
+| 任意 SSH 机器 | `myserver:/srv/backups/triune` |
+| WebDAV / 坚果云 | `webdav:triune` |
+| Google Drive / OneDrive | `gdrive:triune` |
+
+**上传后会回读校验**：传完再用 `rclone lsjson` 读回远端对象的字节数，
+与本地归档比对，不一致直接报错。备份最怕"看起来传上去了"——
+网络抖动导致的截断在 rclone 退出码里不一定体现。
+
+远端轮转要显式开：
+
+```bash
+sudo triune-panel backup --upload r2:triune-backups --upload-keep 7
+```
+
+`--upload-keep` 为 0（默认）时**不动远端任何文件**。设了之后只删
+`triune-data-*.tar.gz[.age]` 这类本包命名的归档，远端目录里别的文件一律不碰——
+你很可能把备份传进一个共用目录，误删别人的东西是不可接受的。
+
+上传失败时退出码为 1（systemd timer 会报红），但会明确告诉你
+**本地归档仍然可用**——不要把"没传上去"当成"已备份"。
+
+每日自动备份开启异地只需一步：在安装目录写一个 `backup.env`
+
+```bash
+# /opt/triune-panel/backup.env
+TRIUNE_BACKUP_REMOTE=r2:triune-backups
+TRIUNE_BACKUP_REMOTE_KEEP=7
+```
+
+`backup.sh` 会自动读取（配合 `backup.pass` 就是「加密 + 异地」全套）。
+
+从远端恢复：先拉回来再按普通流程恢复，`restore` 不需要知道远端的存在。
+
+```bash
+rclone copy r2:triune-backups/triune-data-20261101-030000.tar.gz.age ./
+sudo triune-panel restore ./triune-data-20261101-030000.tar.gz.age --passphrase-file /etc/triune-panel/backup.pass
+```
 
 
 - **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
@@ -460,6 +523,20 @@ v0.8 已验证：
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
+v0.9.2 已验证：
+
+1. **异地备份**（`internal/backup/upload.go`）：`backup --upload <remote:path>`
+   经 rclone 把归档传到 S3 / R2 / B2 / WebDAV / SFTP / 网盘等，覆盖
+   「备份跟着磁盘一起没」这个加密解决不了的风险。
+   **上传后必回读校验**——传完用 `rclone lsjson` 读回远端字节数与本地比对，
+   不一致直接报错（网络截断不一定体现在 rclone 退出码里）。
+2. **远端轮转是显式开关**：`--upload-keep N` 默认 0（不动远端任何文件）；
+   开启后只删 `triune-data-*.tar.gz[.age]`，远端目录里的其他文件一律不碰。
+3. **失败语义明确**：上传失败退出码 1（systemd timer 会报红），但输出会写明
+   「本地归档仍可用」，避免把"没传上去"误当成"已备份"。
+4. 安装脚本的每日备份支持 `backup.env` 里写 `TRIUNE_BACKUP_REMOTE`，
+   与 `backup.pass` 组合即「加密 + 异地」全套。
+
 v0.9.1 已验证：
 
 1. **安全响应头**（`internal/api/security.go`）：CSP、`X-Frame-Options`、`nosniff`、
@@ -695,6 +772,13 @@ v0.8.1 已验证：
 11. **会话只能在「全部」和「当前一个」之间吊销**：没有会话列表页，看不到
     「哪些设备正在登录」，也不能挑一个踢掉。要踢掉某个不明会话只能改密
     （会踢掉所有设备）。
+12. **异地备份依赖外部 rclone**：没有内置 S3 客户端，`--upload` 要求系统里装了
+    rclone。这是刻意的取舍——各家对象存储的签名/分片差异太多，自己实现一遍
+    等于重造 rclone 且更难验证。没装 rclone 时 `--upload` 会明确报错并给出安装提示，
+    本地备份不受影响。
+13. **上传校验只比对字节数**：`--upload` 传完会读回远端对象大小与本地比对，
+    但不比对内容哈希（那要再拉一遍全量数据，成本翻倍）。要更强的一致性保证，
+    可以在 `backup.sh` 里追加 `rclone check`。
 
 ## 部署到 VPS
 

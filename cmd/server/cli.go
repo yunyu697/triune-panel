@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -678,6 +679,9 @@ func cmdBackup(args []string) {
 	passStdin := fs.Bool("passphrase-stdin", false, "从标准输入读取加密口令")
 	encrypt := fs.Bool("encrypt", false, "交互式输入口令并加密归档")
 	genPass := fs.Bool("gen-passphrase", false, "生成随机口令并用它加密（口令只显示一次）")
+	upload := fs.String("upload", "", "上传到异地（rclone 远端，如 r2:triune-backups）")
+	uploadKeep := fs.Int("upload-keep", 0, "远端保留份数（0 = 不在远端清理）")
+	rcloneBin := fs.String("rclone", "", "rclone 可执行文件路径（默认走 PATH）")
 	_ = fs.Parse(args)
 
 	dir := resolveDataDir(*dataDir)
@@ -722,6 +726,26 @@ func cmdBackup(args []string) {
 		fmt.Printf("\n  提示: triune.db-wal 里还有 %s 未合并的事务，已一并打包（恢复时会自动重放）。\n", humanSize(res.WALBytes))
 		fmt.Println("        若面板正在运行，建议停服后再备份一次，避免拿到不一致的快照：")
 		fmt.Println("        sudo systemctl stop triune-panel && sudo triune-panel backup")
+	}
+
+	// 异地落地：本地归档已经写完且可用，上传失败不能让人以为备份没做
+	if strings.TrimSpace(*upload) != "" {
+		fmt.Println()
+		fmt.Printf("  上传中 → %s\n", *upload)
+		up, upErr := backup.Upload(context.Background(), res.Path, backup.UploadOptions{
+			Remote: *upload, RcloneBin: *rcloneBin, Keep: *uploadKeep,
+		})
+		if upErr != nil {
+			fmt.Fprintf(os.Stderr, "\n✘ 异地备份失败: %v\n", upErr)
+			fmt.Fprintf(os.Stderr, "  本地归档仍可用: %s\n", res.Path)
+			fmt.Fprintln(os.Stderr, "  异地副本不存在或未通过校验——别把它当作已备份。")
+			os.Exit(1)
+		}
+		fmt.Printf("  %s%s\n", padLabel("远端", 10), up.RemotePath)
+		fmt.Printf("  %s%s（已回读校验）\n", padLabel("已上传", 10), humanSize(up.Bytes))
+		if len(up.Removed) > 0 {
+			fmt.Printf("  %s%d 份远端旧归档已清理\n", padLabel("远端清理", 10), len(up.Removed))
+		}
 	}
 }
 
