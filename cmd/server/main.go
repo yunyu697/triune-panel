@@ -29,7 +29,8 @@ import (
 	"triune/internal/webui"
 )
 
-// 构建时注入：go build -ldflags "-X main.version=v1.0.0"
+// 构建时注入（注意需写完整导入路径）：
+//   go build -ldflags "-X triune/cmd/server.version=v0.8.5"
 var version = "dev"
 
 func main() {
