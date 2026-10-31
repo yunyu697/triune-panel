@@ -1,5 +1,7 @@
 # Triune Panel
 
+[![CI](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml)
+
 三内核（**mihomo / sing-box / xray**）统一管理面板，Go 单二进制 + 内置 Web UI。
 
 > 下载：[Releases](https://github.com/yunyu697/triune-panel/releases) ·
@@ -70,9 +72,33 @@ echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --pass
 triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证书/上次应用/最近登录
 triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
 triune-panel backup [--out DIR] [--keep N]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
+triune-panel restore <归档.tar.gz> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
 triune-panel reset-password      # 见上一节
 triune-panel version
 ```
+
+### 备份与恢复
+
+`backup` 与 `restore` 是一对，建议在动配置前先手动备份一次：
+
+```bash
+sudo triune-panel backup                       # → data/backups/triune-data-<时间>.tar.gz
+sudo systemctl stop triune-panel               # 恢复前必须停服务
+sudo triune-panel restore data/backups/triune-data-20261031-205341.tar.gz
+sudo systemctl start triune-panel
+```
+
+`restore` 有四道保险：
+
+| 保险 | 说明 |
+|---|---|
+| 拒绝运行中恢复 | 检测 10010 端口是否仍在监听——daemon 持有旧 db 句柄，替换后它会继续写被移走的旧 inode，造成"数据分裂"；确认无误可 `--force` 跳过 |
+| 恢复前自动备份 | 先把当前数据打一份到 `backups/`，恢复错了还能回去（`--no-backup` 可关） |
+| schema 版本校验 | 只读解析归档里的 `triune.db`；归档比当前二进制**新**就拒绝（旧二进制打开新库会缺列）；更旧则允许，启动时自动迁移 |
+| 路径穿越防护 | 归档里的绝对路径与 `..` 条目直接拒绝；`backups/` 不参与替换，历史备份不会被恢复清掉 |
+
+失败会自动回滚到恢复前状态（旧数据先移到 `.pre-restore-<时间>`，成功后才删除）。
+
 
 - **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
   所以 `sudo triune-panel status` 在任意目录下都能找到 systemd 安装的实例。
@@ -80,6 +106,9 @@ triune-panel version
   （`doctor` 有 `fail` 项时返回 1，可直接接告警）。
 - **刻意不做** `apply` / 切换内核这类命令：内核进程由 daemon 托管，CLI 裸跑会抢端口、
   让 daemon 的内存状态与磁盘不一致，必须走面板的 API（`/api/apply`、`/api/switch-core`）。
+- **CI**（`.github/workflows/ci.yml`）：每次推送跑 `go vet` + `go test` + 三平台交叉编译
+  + 二进制 `-version` 格式校验（install.sh 靠 `awk '{print $2}'` 取版本做终检，
+  格式一变安装脚本就会误判"装到旧版本"）+ shellcheck 扫 `deploy/` 脚本。
 
 ## 反向导入现有链接（迁移不失效）
 
@@ -287,6 +316,11 @@ v0.8.7 已验证：
    不需要重启面板；CLI 在另一个进程改库也能被运行中的 daemon 立刻感知。
 5. **前端**：改密后强制回登录页（旧会话已失效，避免"保存成功但下一步 401"的困惑）；
    登录页直接给出忘记密码的命令提示。
+6. **`restore` 恢复命令**：`backup` 的另一半。四道保险——拒绝运行中恢复（端口探测）、
+   恢复前自动备份当前数据、归档 schema 版本不得高于当前二进制、拒绝路径穿越；
+   失败自动回滚，`backups/` 不参与替换。
+7. **CI**：GitHub Actions 跑 vet/test/三平台交叉编译/`-version` 格式校验/shellcheck，
+   堵住"推坏代码"与"版本字段格式被改坏导致安装脚本误判"两类事故。
 
 v0.8.6 已验证：
 

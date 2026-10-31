@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -618,18 +619,29 @@ func execVersion(bin string) (string, error) {
 	return line, err
 }
 
-// portListening 判断端口是否已在监听：能成功绑定说明没人监听（随即释放）。
+// portListening 判断端口是否已被监听。
+//
+// 先拨号：能连上 127.0.0.1:port 就说明有服务在听（面板默认监听全部网卡，
+// 一定包含回环）。拨号失败再退回绑定探测——绑不上说明被别的进程占着，
+// 同样算"有人在用"。
+//
+// 为什么不只用绑定探测：Go 的 listener 带 SO_REUSEADDR，在 macOS 上
+// 「127.0.0.1:port 已被占用」时绑 ":port"（0.0.0.0）仍可能成功，
+// 于是检测不到只监听回环的面板（TRIUNE_LISTEN=local 就是这种）。
 func portListening(port int, proto string) bool {
-	addr := fmt.Sprintf(":%d", port)
 	if proto == "udp" {
-		pc, err := net.ListenPacket("udp", addr)
+		pc, err := net.ListenPacket("udp", fmt.Sprintf(":%d", port))
 		if err != nil {
 			return true
 		}
 		pc.Close()
 		return false
 	}
-	ln, err := net.Listen("tcp", addr)
+	if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond); err == nil {
+		c.Close()
+		return true
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return true
 	}
@@ -666,4 +678,112 @@ func cmdBackup(args []string) {
 	if len(res.Removed) > 0 {
 		fmt.Printf("  %s%d 份旧归档已轮转删除\n", padLabel("清理", 10), len(res.Removed))
 	}
+}
+
+// ---- restore ----
+
+// cmdRestore 用备份归档替换数据目录——backup 的另一半。
+//
+// 三道保险：① 恢复前自动备份当前数据；② 校验归档 schema 版本不比二进制新
+// （新版面板写的库拿旧二进制打开会缺列）；③ 交互确认，避免手滑覆盖生产数据。
+func cmdRestore(args []string) {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	dataDir := fs.String("data", "", "数据目录（默认自动探测）")
+	yes := fs.Bool("yes", false, "跳过交互确认")
+	noBackup := fs.Bool("no-backup", false, "恢复前不备份当前数据（不推荐）")
+	force := fs.Bool("force", false, "面板可能仍在运行时也继续（危险）")
+	_ = fs.Parse(args)
+
+	// Go 的 flag 解析到第一个非 flag 参数就停（`restore <归档> --yes` 里的
+	// --yes 会被当成位置参数）。这里解析两轮：先吃掉前置 flag，再把归档
+	// 之后的参数当 flag 解析，两种书写顺序都能用。
+	_ = fs.Parse(args)
+	var archive string
+	if pos := fs.Args(); len(pos) > 0 {
+		archive = pos[0]
+		_ = fs.Parse(pos[1:])
+	}
+	if archive == "" || fs.NArg() > 0 {
+		die(2, "用法: triune-panel restore <归档.tar.gz> [--data DIR] [--yes]")
+	}
+	if _, err := os.Stat(archive); err != nil {
+		die(1, "归档不存在: %s", archive)
+	}
+	dir := resolveDataDir(*dataDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		die(1, "无法创建数据目录 %s: %v", dir, err)
+	}
+
+	// ① 面板必须停掉：daemon 持有旧 db 句柄，替换后它会继续写被移走的旧 inode
+	if !*force && portListening(10010, "tcp") {
+		die(1, "检测到 10010 端口仍在监听，面板可能还在运行。\n"+
+			"  请先停止服务: sudo systemctl stop triune-panel\n"+
+			"  （确认没有面板在跑，或端口不是 10010 时，可加 --force 跳过此检查）")
+	}
+
+	// ② schema 兼容性：只解出 triune.db 做只读检查
+	tmpDir, err := os.MkdirTemp("", "triune-restore-check-*")
+	if err != nil {
+		die(1, "创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	dbPath, err := backup.ExtractDB(archive, tmpDir)
+	if err != nil {
+		die(1, "归档不可用: %v", err)
+	}
+	archVer, err := store.PeekSchemaVersion(dbPath)
+	if err != nil {
+		die(1, "归档内的数据库无法读取: %v", err)
+	}
+	binVer := store.SchemaVersion()
+	if archVer > binVer {
+		die(1, "归档由更新版本的面板创建（schema %d > 当前二进制 %d）。\n"+
+			"  请先把面板升级到不低于备份来源的版本，再执行恢复。", archVer, binVer)
+	}
+
+	hasCurrentDB := false
+	if _, err := os.Stat(filepath.Join(dir, "triune.db")); err == nil {
+		hasCurrentDB = true
+	}
+
+	fmt.Println("即将用备份覆盖数据目录：")
+	fmt.Printf("  %s%s\n", padLabel("归档", 10), archive)
+	fmt.Printf("  %s%s\n", padLabel("数据目录", 10), dir)
+	fmt.Printf("  %s%d（当前二进制 %d）\n", padLabel("库版本", 10), archVer, binVer)
+	if archVer < binVer {
+		fmt.Println("  提示: 归档版本较旧，首次启动会自动迁移到当前 schema（只增列，不丢数据）")
+	}
+	if hasCurrentDB {
+		if *noBackup {
+			fmt.Println("  ⚠ 已指定 --no-backup：当前数据不会备份，直接覆盖")
+		} else {
+			fmt.Println("  当前数据会先自动备份到 backups/，可随时回滚")
+		}
+	}
+	fmt.Println("  backups/ 目录不会被覆盖")
+
+	if !*yes {
+		fmt.Print("\n确认继续请输入 yes: ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.TrimSpace(line) != "yes" {
+			die(2, "已取消，未做任何修改")
+		}
+	}
+
+	// ③ 恢复前备份当前数据
+	if hasCurrentDB && !*noBackup {
+		pre, err := backup.Create(backup.Options{DataDir: dir, Keep: backup.DefaultKeep})
+		if err != nil {
+			die(1, "恢复前备份失败，已中止（当前数据未改动）: %v", err)
+		}
+		fmt.Printf("\n✔ 已备份当前数据: %s（%s）\n", pre.Path, humanSize(pre.Size))
+	}
+
+	res, err := backup.Restore(backup.RestoreOptions{Archive: archive, DataDir: dir})
+	if err != nil {
+		die(1, "恢复失败: %v", err)
+	}
+	fmt.Printf("✔ 恢复完成：写入 %d 个文件，保留 %d 份历史备份\n", res.Files, res.Preserved)
+	fmt.Println("\n下一步：启动面板并确认入站/用户正常")
+	fmt.Println("  sudo systemctl start triune-panel && sudo triune-panel status")
 }

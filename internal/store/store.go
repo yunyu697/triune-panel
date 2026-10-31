@@ -607,3 +607,24 @@ func (s *Store) IntegrityCheck() error {
 	}
 	return nil
 }
+
+// PeekSchemaVersion 只读读取指定数据库文件的 schema 版本。
+//
+// 用途：恢复备份前先确认归档里的库版本与本二进制是否兼容——
+// 用新版面板写的库拿旧二进制打开会缺列、甚至写坏数据，必须提前拦住。
+// 以 mode=ro 打开，不会触发迁移、也不会修改归档内容。
+func PeekSchemaVersion(dbPath string) (int, error) {
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var ver int
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key='schema_version'`).Scan(&ver); err != nil {
+		return 0, fmt.Errorf("读取 schema_version 失败: %w", err)
+	}
+	return ver, nil
+}
+
+// SchemaVersion 返回当前二进制期望的 schema 版本（migrations 条数）。
+func SchemaVersion() int { return len(migrations) }

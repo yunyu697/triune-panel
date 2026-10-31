@@ -54,6 +54,8 @@ func main() {
 			cmdDoctor(os.Args[2:])
 		case "backup":
 			cmdBackup(os.Args[2:])
+		case "restore":
+			cmdRestore(os.Args[2:])
 		case "version":
 			printVersion()
 		case "help":
@@ -84,6 +86,8 @@ func usage() {
   triune-panel doctor                环境自检（数据目录、密码状态、内核、防火墙、端口）
   triune-panel backup [--out DIR] [--keep N]
                                      打包数据目录到 backups/（默认保留 7 份）
+  triune-panel restore <归档.tar.gz> [--yes]
+                                     用备份覆盖数据目录（恢复前自动备份当前数据）
   triune-panel version               打印版本
   triune-panel help                  本帮助
 
