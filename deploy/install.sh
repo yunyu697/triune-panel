@@ -20,8 +20,18 @@
 # 自定义面板监听端口（默认 10010）:
 #   curl -fsSL .../install.sh | sudo TRIUNE_PANEL_PORT=10010 bash
 #
+# 仅本机监听（不暴露公网，用 SSH 隧道访问）:
+#   curl -fsSL .../install.sh | sudo TRIUNE_LISTEN=local bash
+#   访问方式: ssh -L 10010:127.0.0.1:10010 user@server 后打开 http://127.0.0.1:10010
+#
 # 安装时自动放行防火墙端口（ufw / firewalld / iptables 有则自动配，
 # 云服务器还需在厂商控制台安全组放行同一端口）。
+#
+# 全新安装自动生成随机管理密码（替代默认 admin/admin，安装完成时打印一次）。
+# 每日 03:30 自动备份数据目录到 backups/（保留最近 7 份，需 systemd）。
+#
+# 直接卸载（免下载卸载脚本）:
+#   curl -fsSL .../install.sh | sudo bash -s -- --uninstall
 #
 # 下载源 = GitHub 原始地址 + 多个加速镜像，写在同一个候选池里；
 # 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优。
@@ -45,8 +55,39 @@ INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
 SYSTEMD_DIR="${TRIUNE_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE=triune-panel.service
 PANEL_PORT="${TRIUNE_PANEL_PORT:-10010}"   # 面板监听端口，可用环境变量覆盖
+LISTEN_MODE="${TRIUNE_LISTEN:-all}"        # all=监听全部网卡；local=仅 127.0.0.1（SSH 隧道访问）
 GH_PROXY="${GH_PROXY:-}"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
+
+# ---- --uninstall 直通：免下载卸载脚本，优先用本地已落地的那份 ----
+if [[ "${1:-}" == "--uninstall" || "${1:-}" == "uninstall" ]]; then
+  shift
+  if [[ -f "$INSTALL_DIR/uninstall.sh" ]]; then
+    echo "→ 使用本地卸载脚本: $INSTALL_DIR/uninstall.sh"
+    exec bash "$INSTALL_DIR/uninstall.sh" "$@"
+  fi
+  echo "→ 本地无卸载脚本，尝试在线获取…"
+  TMP_UN="$(mktemp)"
+  UN_OK=0
+  for src in "$RAW_BASE/deploy/uninstall.sh" \
+             "https://ghfast.top/$RAW_BASE/deploy/uninstall.sh" \
+             "https://gh-proxy.com/$RAW_BASE/deploy/uninstall.sh"; do
+    if curl -fsSL --connect-timeout 8 --max-time 30 "$src" -o "$TMP_UN" 2>/dev/null \
+       && grep -q "Triune Panel 卸载" "$TMP_UN" 2>/dev/null; then
+      UN_OK=1; break
+    fi
+  done
+  if [[ "$UN_OK" -eq 1 ]]; then
+    bash "$TMP_UN" "$@"
+    RC=$?
+    rm -f "$TMP_UN"
+    exit "$RC"
+  fi
+  rm -f "$TMP_UN"
+  echo "✘ 无法获取卸载脚本：本地未安装过（或卸载脚本已删除）且在线下载失败。"
+  echo "  可手动清理：sudo systemctl disable --now triune-panel.service && sudo rm -rf $INSTALL_DIR"
+  exit 1
+fi
 
 # ---- 权限处理：特权步骤单独用 sudo 执行，脚本主体可在普通用户下运行 ----
 # 背景：常见踩坑是「目录已存在但属主是 root，普通用户重装时
@@ -100,7 +141,7 @@ if [[ -z "$ARCH" ]]; then
   case "$MACHINE" in
     x86_64|amd64)  ARCH=amd64 ;;
     aarch64|arm64) ARCH=arm64 ;;
-    *) echo "✘ 不支持的架构: $MACHINE，可用参数指定 amd64/arm64"; exit 1 ;;
+    *) echo "✘ 不支持的架构: ${MACHINE}，可用参数指定 amd64/arm64"; exit 1 ;;
   esac
 fi
 case "$ARCH" in amd64|arm64) ;; *) echo "✘ 架构参数只能是 amd64 或 arm64"; exit 1 ;; esac
@@ -306,7 +347,7 @@ echo "→ 下载完成: $BIN_VER_OUT"
 # ---- 版本必须等于目标 tag —— 挡住"镜像返回旧版本"的最后一道闸 ----
 if [[ -n "${TAG:-}" && -n "$GOT_VER" && "$GOT_VER" != "$TAG" ]]; then
   echo ""
-  echo "✘ 版本校验失败：期望 $TAG，实际 $GOT_VER"
+  echo "✘ 版本校验失败：期望 ${TAG}，实际 $GOT_VER"
   echo "  该源返回的是旧版本（可能是镜像缓存未更新），请重试或指定其它镜像："
   echo "    GH_PROXY=https://ghfast.top bash install.sh $ARCH $TAG"
   echo ""
@@ -386,6 +427,27 @@ if ! $SUDO install -m 755 "$TMP_BIN" "$INSTALL_DIR/triune-panel"; then
 fi
 rm -f "$TMP_BIN"
 
+# ---- 全新安装：生成随机管理密码，落地 bootstrap.creds 由面板首次启动消费 ----
+# 面板安全规则：仅当管理密码仍是出厂默认时应用；用户改过密码则该文件被忽略并删除，
+# 因此升级安装（data/triune.db 已存在）不会生成，也不影响已有凭据。
+PANEL_PASS=""
+if [[ ! -f "$INSTALL_DIR/data/triune.db" ]]; then
+  need_root
+  echo "→ 全新安装：生成随机管理密码（替代默认 admin/admin）"
+  # 注意：不能 tr 直接读 /dev/urandom 无限流——head 取够字节退出后 tr 收到
+  # SIGPIPE，在 set -o pipefail 下整条管线判失败且输出可能为空。
+  # 先 head 限量读 256 字节，再 base64 → 过滤字母数字 → 取 16 位。
+  PANEL_PASS="$(head -c 256 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16 || true)"
+  if [[ ${#PANEL_PASS} -lt 12 ]]; then
+    echo "✘ 随机密码生成失败（系统缺少 /dev/urandom？），中止以免回落到默认密码"
+    exit 1
+  fi
+  $SUDO mkdir -p "$INSTALL_DIR/data"
+  printf 'admin_user=admin\nadmin_pass=%s\n' "$PANEL_PASS" \
+    | $SUDO tee "$INSTALL_DIR/data/bootstrap.creds" >/dev/null
+  $SUDO chmod 600 "$INSTALL_DIR/data/bootstrap.creds"
+fi
+
 need_root
 # systemd 单元目录通常已存在，但自定义 SYSTEMD_DIR 时可能缺失 —— 先确保存在，
 # 否则 tee 写不进去会因 set -e 静默退出，用户看不到原因。
@@ -409,7 +471,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=@EXEC@ -addr :@PORT@ -data @DATA@
+ExecStart=@EXEC@ -addr @ADDR@ -data @DATA@
 Restart=on-failure
 RestartSec=3
 User=root
@@ -420,10 +482,15 @@ PrivateTmp=false
 [Install]
 WantedBy=multi-user.target
 UNIT
+# 监听地址：all=全部网卡；local=仅 127.0.0.1（配合 SSH 隧道使用）
+case "$LISTEN_MODE" in
+  local) BIND_ADDR="127.0.0.1:$PANEL_PORT" ;;
+  *)     BIND_ADDR=":$PANEL_PORT" ;;
+esac
 sed -i.bak \
   -e "s|@EXEC@|$(exec_prefix "$INSTALL_DIR/triune-panel")|g" \
   -e "s|@DATA@|$(exec_prefix "$INSTALL_DIR/data")|g" \
-  -e "s|@PORT@|$PANEL_PORT|g" "$UNIT_TMP" && rm -f "$UNIT_TMP.bak"
+  -e "s|@ADDR@|$BIND_ADDR|g" "$UNIT_TMP" && rm -f "$UNIT_TMP.bak"
 if ! $SUDO tee "${SYSTEMD_DIR%/}/$SERVICE" >/dev/null < "$UNIT_TMP"; then
   echo ""
   echo "✘ 写入 systemd 单元失败: ${SYSTEMD_DIR%/}/$SERVICE"
@@ -454,6 +521,7 @@ $SUDO tee "$INSTALL_DIR/uninstall.sh" >/dev/null <<'UNINSTALL'
 set -euo pipefail
 
 INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
+SYSTEMD_DIR="${TRIUNE_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE=triune-panel.service
 PURGE=0
 [[ "${1:-}" == "--purge" ]] && PURGE=1
@@ -472,9 +540,25 @@ fi
 
 echo "=== Triune Panel 卸载 ==="
 
+# ---- 0. 停用并删除每日自动备份任务 ----
+for U in triune-panel-backup.timer triune-panel-backup.service; do
+  if [[ -f "${SYSTEMD_DIR%/}/$U" ]]; then
+    $SUDO systemctl disable --now "$U" 2>/dev/null || true
+    $SUDO rm -f "${SYSTEMD_DIR%/}/$U"
+    echo "→ 已删除 $U"
+  fi
+done
+if systemctl list-unit-files 2>/dev/null | grep -q triune-panel-backup; then
+  $SUDO systemctl daemon-reload
+fi
+if [[ -f "$INSTALL_DIR/backup.sh" ]]; then
+  $SUDO rm -f "$INSTALL_DIR/backup.sh"
+  echo "→ 已删除 $INSTALL_DIR/backup.sh"
+fi
+
 # ---- 1. 停止并禁用服务（面板退出时会一并停止其托管的内核进程）----
 if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then
-  echo "→ 停止服务 $SERVICE（含其托管的 sing-box / xray / mihomo 内核进程）"
+  echo "→ 停止服务 ${SERVICE}（含其托管的 sing-box / xray / mihomo 内核进程）"
   $SUDO systemctl disable --now "$SERVICE" 2>/dev/null || $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
   sleep 1
 else
@@ -489,10 +573,10 @@ if pgrep -f "$INSTALL_DIR/triune-panel" >/dev/null 2>&1; then
 fi
 
 # ---- 2. 删除服务单元与二进制 ----
-if [[ -f "/etc/systemd/system/$SERVICE" ]]; then
-  $SUDO rm -f "/etc/systemd/system/$SERVICE"
+if [[ -f "${SYSTEMD_DIR%/}/$SERVICE" ]]; then
+  $SUDO rm -f "${SYSTEMD_DIR%/}/$SERVICE"
   $SUDO systemctl daemon-reload
-  echo "→ 已删除服务单元 /etc/systemd/system/$SERVICE"
+  echo "→ 已删除服务单元 ${SYSTEMD_DIR%/}/$SERVICE"
 fi
 if [[ -f "$INSTALL_DIR/triune-panel" ]]; then
   $SUDO rm -f "$INSTALL_DIR/triune-panel"
@@ -503,7 +587,7 @@ fi
 DATA_DIR="$INSTALL_DIR/data"
 if [[ -d "$DATA_DIR" ]]; then
   if [[ $PURGE -eq 1 ]]; then
-    echo "→ --purge 模式：删除数据目录 $DATA_DIR（含数据库/证书/内核副本/备份）"
+    echo "→ --purge 模式：删除数据目录 ${DATA_DIR}（含数据库/证书/内核副本/备份）"
     $SUDO rm -rf "$DATA_DIR"
   elif [[ -t 0 ]]; then
     printf "是否同时删除数据目录 %s（数据库、证书、自动备份等，删除后不可恢复）？[y/N] " "$DATA_DIR"
@@ -512,10 +596,10 @@ if [[ -d "$DATA_DIR" ]]; then
       $SUDO rm -rf "$DATA_DIR"
       echo "→ 数据目录已删除"
     else
-      echo "→ 数据目录已保留: $DATA_DIR（重装脚本会自动复用）"
+      echo "→ 数据目录已保留: ${DATA_DIR}（重装脚本会自动复用）"
     fi
   else
-    echo "→ 数据目录已保留: $DATA_DIR（默认保留，重装可恢复全部数据）"
+    echo "→ 数据目录已保留: ${DATA_DIR}（默认保留，重装可恢复全部数据）"
     echo "  确认不再需要可手动执行: sudo rm -rf $DATA_DIR"
   fi
 fi
@@ -528,6 +612,55 @@ echo ""
 echo "✔ Triune Panel 卸载完成"
 UNINSTALL
 $SUDO chmod 755 "$INSTALL_DIR/uninstall.sh"
+
+# ---- 每日自动备份（需 systemd；无 systemd 的环境跳过）----
+# 数据目录打包到 backups/，保留最近 7 份。面板停止不影响备份（tar 读 SQLite
+# WAL 文件以一致性快照方式拷贝，且备份在凌晨低峰执行）。
+if [[ "$SERVICE_STARTED" -eq 1 ]]; then
+  echo "→ 部署每日自动备份（03:30，保留最近 7 份）"
+  $SUDO tee "$INSTALL_DIR/backup.sh" >/dev/null <<'BKSH'
+#!/usr/bin/env bash
+# Triune Panel 数据目录自动备份（由 systemd timer 每日触发）
+set -euo pipefail
+INSTALL_DIR="${TRIUNE_INSTALL_DIR:-/opt/triune-panel}"
+KEEP=7
+BK_DIR="$INSTALL_DIR/backups"
+mkdir -p "$BK_DIR"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+tar czf "$BK_DIR/triune-data-$STAMP.tar.gz" -C "$INSTALL_DIR" data 2>/dev/null || true
+# 清理超出保留数量的旧备份
+ls -1t "$BK_DIR"/triune-data-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+BKSH
+  $SUDO chmod 755 "$INSTALL_DIR/backup.sh"
+
+  $SUDO tee "${SYSTEMD_DIR%/}/triune-panel-backup.service" >/dev/null <<'BKSVC'
+[Unit]
+Description=Triune Panel data backup (daily)
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL@/backup.sh
+BKSVC
+  $SUDO sed -i "s|@INSTALL@|$(exec_prefix "$INSTALL_DIR")|g" "${SYSTEMD_DIR%/}/triune-panel-backup.service"
+
+  $SUDO tee "${SYSTEMD_DIR%/}/triune-panel-backup.timer" >/dev/null <<'BKTMR'
+[Unit]
+Description=Triune Panel daily data backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+BKTMR
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now triune-panel-backup.timer 2>/dev/null || true
+  echo "  ✔ 备份目录: $INSTALL_DIR/backups（手动备份: sudo bash $INSTALL_DIR/backup.sh）"
+else
+  echo "→ 未检测到 systemd，跳过每日自动备份（可手动: tar czf backup.tar.gz -C $INSTALL_DIR data）"
+fi
 
 # ---- 健康检查 ----
 sleep 1.5
@@ -572,6 +705,18 @@ is_private_ip() {
     ""|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# print_login_info 输出登录凭据信息：
+#   全新安装 → 随机密码（打印一次，提醒保存）；
+#   升级安装 → 密码保持不变。
+print_login_info() {
+  if [[ -n "$PANEL_PASS" ]]; then
+    echo "  管理员账号: admin / $PANEL_PASS"
+    echo "             ↑ 随机生成的初始密码，仅此一次显示，请立即保存并登录修改"
+  else
+    echo "  管理员账号: 与之前安装一致（升级不改动已有密码）"
+  fi
 }
 
 # ensure_port_open 安装时检查面板端口是否已放行，未放行则自动放行。
@@ -638,44 +783,62 @@ if [[ "$SERVICE_STARTED" -eq 0 ]]; then
   echo ""
   echo "✔ Triune Panel 已安装完成（当前环境无 systemd，未注册开机自启）"
   echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
-  echo "  手动启动: $INSTALL_DIR/triune-panel -addr :$PANEL_PORT -data $INSTALL_DIR/data"
-  echo "  后台启动: nohup $INSTALL_DIR/triune-panel -addr :$PANEL_PORT -data $INSTALL_DIR/data >/var/log/triune-panel.log 2>&1 &"
-  ensure_port_open "$PANEL_PORT"
-  IP=$(detect_ip)
-  if is_private_ip "$IP" || [[ -z "$IP" ]]; then
-    echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
-    echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
-    echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+  echo "  手动启动: $INSTALL_DIR/triune-panel -addr $BIND_ADDR -data $INSTALL_DIR/data"
+  echo "  后台启动: nohup $INSTALL_DIR/triune-panel -addr $BIND_ADDR -data $INSTALL_DIR/data >/var/log/triune-panel.log 2>&1 &"
+  if [[ "$LISTEN_MODE" == "local" ]]; then
+    echo "  访问:      仅监听 127.0.0.1:${PANEL_PORT}（local 模式，不暴露公网）"
+    echo "             本机执行: ssh -L $PANEL_PORT:127.0.0.1:$PANEL_PORT user@server"
+    echo "             然后浏览器打开 http://127.0.0.1:$PANEL_PORT"
   else
-    echo "  访问:      http://$IP:$PANEL_PORT"
+    ensure_port_open "$PANEL_PORT"
+    IP=$(detect_ip)
+    if is_private_ip "$IP" || [[ -z "$IP" ]]; then
+      echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
+      echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
+      echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+    else
+      echo "  访问:      http://$IP:$PANEL_PORT"
+    fi
   fi
-  echo "  默认账号:  admin / admin（请立即在设置中修改）"
+  print_login_info
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网）"
   exit 0
 fi
 
-ensure_port_open "$PANEL_PORT"
+# local 模式不监听公网，无需放行防火墙
+if [[ "$LISTEN_MODE" != "local" ]]; then
+  ensure_port_open "$PANEL_PORT"
+fi
 
 if systemctl is-active --quiet "$SERVICE"; then
   IP=$(detect_ip)
   echo ""
   echo "✔ Triune Panel 安装并启动成功"
   echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
-  if is_private_ip "$IP" || [[ -z "$IP" ]]; then
-    echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
-    echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
-    echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+  if [[ "$LISTEN_MODE" == "local" ]]; then
+    echo "  访问:      仅监听 127.0.0.1:${PANEL_PORT}（local 模式，不暴露公网）"
+    echo "             本机执行: ssh -L $PANEL_PORT:127.0.0.1:$PANEL_PORT user@server"
+    echo "             然后浏览器打开 http://127.0.0.1:$PANEL_PORT"
+    echo "  （local 模式无需放行防火墙/安全组；如需公网访问改用 TRIUNE_LISTEN=all 重装）"
   else
-    echo "  访问:      http://$IP:$PANEL_PORT"
+    if is_private_ip "$IP" || [[ -z "$IP" ]]; then
+      echo "  访问:      http://<服务器公网IP>:$PANEL_PORT"
+      echo "  （未能自动取得公网 IP。内网网卡地址: ${IP:-未检测到}；"
+      echo "    可手动执行 'curl -4 ip.3322.net' 查询，或在云控制台查看公网 IP）"
+    else
+      echo "  访问:      http://$IP:$PANEL_PORT"
+    fi
+    echo "  云服务器请在控制台安全组放行 $PANEL_PORT/tcp（机器内无法代改）"
   fi
-  echo "  云服务器请在控制台安全组放行 $PANEL_PORT/tcp（机器内无法代改）"
-  echo "  默认账号:  admin / admin（请立即在设置中修改）"
+  print_login_info
+  echo "  自动备份:  每日 03:30 → $INSTALL_DIR/backups（保留 7 份；手动: sudo bash $INSTALL_DIR/backup.sh）"
   echo "  数据目录:  $INSTALL_DIR/data"
   echo "  查看日志:  journalctl -u triune-panel -f"
-  echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网）"
+  echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网；或 curl -fsSL $RAW_BASE/deploy/install.sh | sudo bash -s -- --uninstall）"
   echo ""
   echo "  下一步：设置 → 组件更新与版本管理 → 一键安装内核（sing-box / xray / mihomo）"
+  echo "          设置 → ACME 证书 → 一键启用 HTTPS（有域名时强烈建议）"
 else
   echo "✘ 启动失败，最近日志:"
   journalctl -u "$SERVICE" --no-pager -n 20 2>/dev/null || echo "  (无法读取 journalctl，请手动执行: journalctl -u $SERVICE -n 50)"

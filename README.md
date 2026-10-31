@@ -22,7 +22,7 @@
 # 编译（需 Go 1.23+，国内加速：export GOPROXY=https://goproxy.cn,direct）
 go build -o triune-panel ./cmd/server
 
-# 运行（默认端口 10010，默认账号 admin/admin）
+# 运行（默认端口 10010；默认账号 admin/admin，首次登录会强制要求修改）
 ./triune-panel -addr :10010 -data ./data
 
 # 交叉编译 Linux 服务器
@@ -281,14 +281,19 @@ GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地�
 
 安装完成后：
 
-- 访问 `http://<服务器IP>:10010`（默认 `admin/admin`，**立即改密码**）
+- 访问 `http://<服务器IP>:10010`。**全新安装会自动生成随机管理密码并在安装完成时打印一次**（不再使用默认 admin/admin），请立即保存；首次用默认密码登录时会强制要求修改
 - 端口：面板默认监听 **10010**（安装时可用 `TRIUNE_PANEL_PORT=端口` 覆盖）；
   安装脚本会自动检测并放行本机防火墙（ufw / firewalld / iptables），
   **云服务器还需在厂商控制台安全组放行同一端口**（机器内无法代改）
+- 仅本机监听：`TRIUNE_LISTEN=local` 安装后面板只绑定 `127.0.0.1`，不暴露公网，
+  本机 `ssh -L 10010:127.0.0.1:10010 user@server` 后访问 `http://127.0.0.1:10010`
+- 自动备份：安装时自动部署 systemd timer，**每日 03:30 打包数据目录到
+  `backups/`（保留最近 7 份）**；手动备份 `sudo bash /opt/triune-panel/backup.sh`
 - 公网 IP：安装完成时自动探测显示（全部 `--noproxy` 直连探测，绝不会被
   系统代理污染显示成代理 IP）；探测失败时会给出自查指引
 - 日志：`journalctl -u triune-panel -f`
-- 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
+- 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）；
+  有域名时建议 **设置 → ACME 证书 → 一键启用 HTTPS**
 
 > 注意：在线安装依赖匿名访问 GitHub，要求仓库为 **Public**；私有仓库所有源（含镜像）都会返回 404，请将仓库设为 Public，或改用「手动部署」离线安装。
 
@@ -324,6 +329,9 @@ curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/i
 # 首选：安装时卸载脚本已落地在服务器本地，直接执行（无需联网，不受仓库可见性影响）
 sudo bash /opt/triune-panel/uninstall.sh            # 默认卸载，保留数据目录（可随时重装恢复全部数据）
 sudo bash /opt/triune-panel/uninstall.sh --purge    # 连数据一起彻底删除（不可恢复）
+
+# 直通：用安装脚本一行卸载（本地有卸载脚本用本地的，没有则自动在线拉取）
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash -s -- --uninstall
 
 # 备用：本地脚本已丢时在线拉取（原始地址+镜像写在同一条命令里，逐个尝试自动择优）
 for u in \

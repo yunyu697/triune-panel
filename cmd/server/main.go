@@ -12,7 +12,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"triune/internal/api"
 	"triune/internal/certmgr"
@@ -46,6 +49,8 @@ func main() {
 	}
 	defer st.Close()
 
+	applyBootstrapCreds(*dataDir, st)
+
 	pm := proc.NewManager()
 	pipe := &core.PipelineManager{DataDir: *dataDir, ProcMgr: pm, Settings: st}
 
@@ -70,8 +75,62 @@ func main() {
 	go certMgr.Run()
 
 	log.Printf("triune-panel %s listening on %s, data dir %s", version, *addr, *dataDir)
-	log.Printf("默认账号 admin/admin，登录后请立即修改")
+	if p, _ := st.GetSetting("admin_pass"); p == "" {
+		log.Printf("管理密码仍为出厂默认，首次登录将要求修改；新装可用 data/bootstrap.creds 设置初始凭据")
+	}
 	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// applyBootstrapCreds 消费安装脚本落地的初始凭据文件 data/bootstrap.creds
+// （key=value 逐行，如 admin_user=... / admin_pass=...，权限 0600）。
+//
+// 安全规则：只在管理密码仍是出厂默认（admin_pass 设置为空）时应用——
+// 用户一旦改过密码，文件里的旧初始值一律忽略，直接删除，绝不覆盖真实密码。
+func applyBootstrapCreds(dataDir string, st *store.Store) {
+	path := filepath.Join(dataDir, "bootstrap.creds")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return // 没有该文件是常态（升级/手动安装）
+	}
+	defer func() {
+		if rmErr := os.Remove(path); rmErr != nil {
+			log.Printf("remove bootstrap.creds: %v", rmErr)
+		}
+	}()
+
+	creds := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok {
+			creds[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	user, pass := creds["admin_user"], creds["admin_pass"]
+	if pass == "" {
+		log.Printf("bootstrap.creds 缺少 admin_pass，忽略")
+		return
+	}
+	cur, _ := st.GetSetting("admin_pass")
+	if cur != "" {
+		// 管理密码已被修改过（或此前已消费过初始凭据）：不覆盖
+		log.Printf("bootstrap.creds 已忽略（管理密码已自定义）")
+		return
+	}
+	if user == "" {
+		user = "admin"
+	}
+	if err := st.SetSetting("admin_user", user); err != nil {
+		log.Printf("bootstrap admin_user: %v", err)
+		return
+	}
+	if err := st.SetSetting("admin_pass", pass); err != nil {
+		log.Printf("bootstrap admin_pass: %v", err)
+		return
+	}
+	log.Printf("已应用安装时生成的初始管理凭据（用户 %s），bootstrap.creds 已删除", user)
 }

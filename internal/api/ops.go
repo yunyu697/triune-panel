@@ -180,6 +180,12 @@ func (a *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"version": Version})
 }
 
+// GET /api/public/info：免认证，仅暴露面板版本号（登录页展示用）。
+// 不返回任何用户数据、路径或配置信息。
+func (a *Server) handlePublicInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]string{"version": Version})
+}
+
 // POST /api/self-update {"url":"https://.../triune-panel","sha256":"可选"}
 //
 // 流程：下载 → 校验 → 备份旧二进制 → 原子替换 → exec 重启。

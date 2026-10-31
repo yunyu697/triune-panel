@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -452,7 +452,9 @@ canvas{display:block;width:100%}
     </div>
     <div style="height:18px"></div>
     <button class="btn primary" style="width:100%;justify-content:center;padding:9px" onclick="login()">登 录</button>
-    <p class="muted" style="text-align:center;margin-top:14px">默认 admin/admin，登录后请立即修改</p>
+    <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">
+      <span id="login_ver">Triune Panel</span><span id="login_last" class="hide"></span>
+    </p>
   </div>
 </div>
 
@@ -501,6 +503,7 @@ canvas{display:block;width:100%}
             <h1>Triune Panel · <span class="grad-text">三内核统一控制台</span></h1>
             <p>mihomo · sing-box · xray 统一纳管。配置渲染 → 内核校验 → 原子替换 → 备份 → 回滚，
                任一环节失败都不影响现网运行；升级与切换全程可回滚。</p>
+            <p id="last_login_line" class="hide" style="font-size:12.5px;margin-top:6px;opacity:.75"></p>
           </div>
           <div class="hero-act">
             <button class="btn primary" onclick="openInboundModal()">+ 新增入站</button>
@@ -758,7 +761,8 @@ canvas{display:block;width:100%}
         <div class="radio-row" style="margin:0">
           <label><input type="checkbox" id="s_acme"> 启用（签发期间临时占用 :80，需域名解析到本机）</label>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn primary sm" onclick="openHttpsModal()">一键启用 HTTPS</button>
           <button class="btn sm" onclick="issueCert()">立即签发 / 续期检查</button>
           <span class="muted" id="certmsg"></span>
         </div>
@@ -962,6 +966,39 @@ canvas{display:block;width:100%}
   </div>
 </div>
 
+<!-- 首次登录强制改密弹窗（不可点击遮罩关闭） -->
+<div class="overlay" id="mMustChange">
+  <div class="modal" style="max-width:420px">
+    <h3>请先修改默认密码</h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">检测到管理密码仍是出厂默认。为防止公网扫描爆破，请设置新密码后继续使用。</p>
+    <div class="frm">
+      <div class="full"><label>新密码（至少 8 位）</label><input id="mc_pass" class="input" type="password" autocomplete="new-password"></div>
+      <div class="full"><label>确认新密码</label><input id="mc_pass2" class="input" type="password" autocomplete="new-password"
+        onkeydown="if(event.key==='Enter')submitMustChange()"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="logout()">取消登录</button>
+      <button class="btn primary" onclick="submitMustChange()">保存并进入面板</button>
+    </div>
+  </div>
+</div>
+
+<!-- HTTPS 一键引导弹窗 -->
+<div class="overlay" id="mHttps" onclick="if(event.target===this)closeModal('mHttps')">
+  <div class="modal" style="max-width:480px">
+    <h3>一键启用 HTTPS</h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">通过 Let's Encrypt 自动签发证书（HTTP-01 验证）。要求：<b>域名已解析到本服务器</b>，且面板能临时占用 <b>:80</b> 端口（验证完成后释放）。签发结果稍后可在证书卡片查看。</p>
+    <div class="frm">
+      <div class="full"><label>面板域名</label><input id="hs_domain" class="input" placeholder="panel.example.com"></div>
+      <div class="full"><label>邮箱（证书通知）</label><input id="hs_email" class="input" placeholder="you@example.com"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mHttps')">取消</button>
+      <button class="btn primary" onclick="submitHTTPS()">保存并开始签发</button>
+    </div>
+  </div>
+</div>
+
 <!-- 确认弹窗 -->
 <div class="overlay" id="mConfirm" onclick="if(event.target===this)closeModal('mConfirm')">
   <div class="modal" style="max-width:400px">
@@ -1115,7 +1152,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.2-demo",
+    version:"v0.8.3-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -1138,7 +1175,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com"}
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",login_last_ip:"203.0.113.7",login_last_time:"2026-10-31 09:24:17"}
   };
 }
 async function mockRoute(path, opts) {
@@ -1150,7 +1187,7 @@ async function mockRoute(path, opts) {
     // 演示 TOTP 两步登录：任意账密 → 返回 need_2fa，输入 123456 放行
     if (!opts.body?.code) return { need_2fa: "totp" };
     if (opts.body.code !== "123456") throw new Error("动态口令不正确（演示模式请输入 123456）");
-    return { token: "demo" };
+    return { token: "demo", last_ip: "203.0.113.7", last_time: "2026-10-31 09:24:17" };
   }
   if (api === "auth2fa") {
     if (m === "GET") return { mode:"off", totp_ready:false, email:"admin@example.com", smtp_ready:true };
@@ -1253,13 +1290,44 @@ async function login() {
       $("lcode").focus();
       return;
     }
-    TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); resetLoginUI(); showApp();
+    TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); resetLoginUI();
+    // 上次登录来源提示（本次之前的那次），便于发现异常访问
+    if (j.last_ip) {
+      toast(`上次登录：${j.last_ip}${j.last_time ? " · " + j.last_time : ""}`);
+      $("login_last").classList.remove("hide");
+      $("login_last").textContent = ` · 上次登录 ${j.last_ip}`;
+    }
+    // 默认密码未改：强制改密后才能使用
+    if (j.must_change) { $("mMustChange").classList.add("show"); $("mc_pass").focus(); return; }
+    showApp();
   } catch (e) {
     toast(String(e.message).includes("fetch")
       ? "无法连接面板服务：请确认面板已启动；离线演示请打开 demo.html"
       : e.message, "err");
   }
 }
+/* 首次登录强制改密 */
+async function submitMustChange() {
+  const p1 = $("mc_pass").value, p2 = $("mc_pass2").value;
+  if (p1.length < 8) { toast("新密码至少 8 位", "err"); return; }
+  if (p1 !== p2) { toast("两次输入的密码不一致", "err"); return; }
+  try {
+    await req("/api/settings", { method:"PUT", body:{ admin_pass: p1 } });
+    $("mc_pass").value = ""; $("mc_pass2").value = "";
+    closeModal("mMustChange");
+    toast("密码已更新，欢迎使用 Triune Panel");
+    showApp();
+  } catch (e) { toast("修改失败：" + e.message, "err"); }
+}
+/* 登录页版本号（/api/public/info 免认证，仅返回版本字符串） */
+(async function loadLoginVer() {
+  const el = $("login_ver");
+  if (DEMO) { el.textContent = "Triune Panel · 演示版"; return; }
+  try {
+    const j = await req("/api/public/info");
+    if (j.version) el.textContent = `Triune Panel ${j.version}`;
+  } catch (e) {}
+})();
 /* 重发邮箱验证码：重新提交账密即可触发服务端重发 */
 async function loginResend() {
   $("lcode").value = "";
@@ -4030,6 +4098,28 @@ async function issueCert() {
     setTimeout(() => { $("certmsg").textContent = ""; }, 10000);
   } catch(e){ toast(e.message, "err"); }
 }
+/* HTTPS 一键引导 */
+function openHttpsModal() {
+  $("hs_domain").value = $("s_acme_domain").value || $("s_host").value || "";
+  $("hs_email").value = $("s_acme_email").value || "";
+  $("mHttps").classList.add("show");
+  $("hs_domain").focus();
+}
+async function submitHTTPS() {
+  const domain = $("hs_domain").value.trim(), email = $("hs_email").value.trim();
+  if (!domain) { toast("请填写面板域名", "err"); return; }
+  if (!email) { toast("请填写邮箱（用于证书到期通知）", "err"); return; }
+  try {
+    await req("/api/settings", { method:"PUT", body:{
+      acme_enabled:"1", acme_domain:domain, acme_email:email } });
+    // 同步回设置卡片，避免状态不一致
+    $("s_acme").checked = true; $("s_acme_domain").value = domain; $("s_acme_email").value = email;
+    closeModal("mHttps");
+    toast("已启用 HTTPS 并触发签发：HTTP-01 验证通常几秒到一分钟，稍后刷新证书卡片查看结果", "info");
+    await issueCert();
+    $("certmsg").textContent = "正在为 " + domain + " 签发证书…";
+  } catch (e) { toast("启用失败：" + e.message, "err"); }
+}
 async function selfUpdate() {
   if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
   toast("下载中…", "info");
@@ -4050,6 +4140,12 @@ async function loadSettings() {
     $("s_auth_email").value = j.auth_email || "";
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
     $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
+    // 概览页展示最近一次登录（便于发现异常访问）
+    if (j.login_last_ip) {
+      const el = $("last_login_line");
+      el.textContent = `上次登录：${j.login_last_ip}${j.login_last_time ? " · " + j.login_last_time : ""}`;
+      el.classList.remove("hide");
+    }
   } catch(e){}
 }
 

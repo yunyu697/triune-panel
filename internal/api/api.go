@@ -48,6 +48,7 @@ func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", a.handleLogin)
+	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
 	mux.HandleFunc("POST /api/auth2fa/totp/enable", a.auth(a.handleAuth2FATotpEnable))
@@ -257,9 +258,25 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.loginFails.Delete(key) // 登录成功，清零失败计数
+
+	// 最近一次成功登录的来源与时间：先读旧值（随本次响应返回给用户，
+	// 便于发现异常访问），再写入本次的（概览页常驻展示）。
+	prevIP, _ := a.Store.GetSetting("login_last_ip")
+	prevTime, _ := a.Store.GetSetting("login_last_time")
+	_ = a.Store.SetSetting("login_last_ip", key)
+	_ = a.Store.SetSetting("login_last_time", time.Now().Format("2006-01-02 15:04:05"))
+
 	t := token()
 	a.sessions.Store(t, time.Now().Add(24*time.Hour))
-	writeJSON(w, 200, map[string]string{"token": t})
+	// 管理密码仍是出厂默认（admin_pass 为空）→ 要求首次登录后强制改密
+	mustChange := false
+	if stored, _ := a.Store.GetSetting("admin_pass"); stored == "" {
+		mustChange = true
+	}
+	writeJSON(w, 200, map[string]any{
+		"token": t, "must_change": mustChange,
+		"last_ip": prevIP, "last_time": prevTime,
+	})
 }
 
 // ---- status ----
@@ -714,7 +731,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
 		"auth_2fa_mode", "auth_email",
-		"smtp_host", "smtp_port", "smtp_user", "smtp_from"} {
+		"smtp_host", "smtp_port", "smtp_user", "smtp_from",
+		// 最近一次成功登录（只读展示，PUT 白名单不含）
+		"login_last_ip", "login_last_time"} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
