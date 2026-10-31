@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,7 @@ func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", a.handleLogin)
+	mux.HandleFunc("GET /healthz", a.handleHealthz)           // 免认证探活，供 systemd / 监控使用
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
@@ -93,6 +95,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", a.auth(a.handleLogs))
 	mux.HandleFunc("GET /api/settings", a.auth(a.getSettings))
 	mux.HandleFunc("PUT /api/settings", a.auth(a.putSettings))
+	mux.HandleFunc("GET /api/audit", a.auth(a.handleAuditList))
+	mux.HandleFunc("DELETE /api/audit", a.auth(a.handleAuditClear))
 	mux.HandleFunc("GET /api/traffic", a.auth(a.handleTraffic))
 	mux.HandleFunc("GET /api/traffic/daily", a.auth(a.handleTrafficDaily))
 	mux.HandleFunc("GET /api/traffic/live", a.auth(a.handleTrafficLive))
@@ -213,6 +217,7 @@ func (a *Server) recordLoginFail(key string) {
 func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	key := a.loginKey(r)
 	if remain := a.loginLocked(key); remain > 0 {
+		a.auditFail(r, AuditLogin, "", fmt.Sprintf("来源处于锁定期，拒绝登录（剩余约 %d 分钟）", remain/60+1))
 		fail(w, http.StatusTooManyRequests,
 			fmt.Sprintf("登录失败次数过多，已临时锁定，请约 %d 分钟后再试", remain/60+1))
 		return
@@ -234,6 +239,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.User != authn.User(a.Store) || !ok {
 		a.recordLoginFail(key)
+		a.auditFail(r, AuditLogin, req.User, "用户名或密码错误")
 		fail(w, 401, "用户名或密码错误")
 		return
 	}
@@ -257,6 +263,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			if !verifyTOTP(secret, req.Code) {
 				a.recordLoginFail(key)
+				a.auditFail(r, AuditLogin, req.User, "动态口令不正确")
 				fail(w, 401, "动态口令不正确")
 				return
 			}
@@ -275,6 +282,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := a.checkEmailCode(req.Code); err != nil {
 				a.recordLoginFail(key)
+				a.auditFail(r, AuditLogin, req.User, "邮箱验证码校验失败")
 				fail(w, 401, err.Error())
 				return
 			}
@@ -294,6 +302,11 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	a.sessions.Store(t, session{exp: time.Now().Add(24 * time.Hour), epoch: authn.Epoch(a.Store)})
 	// 管理密码仍是出厂默认 → 要求首次登录后强制改密
 	mustChange := authn.IsFactoryDefault(a.Store)
+	detail := "登录成功"
+	if mode != "" {
+		detail += "（已通过 " + mode + " 二次验证）"
+	}
+	a.auditOK(r, AuditLogin, req.User, detail)
 	writeJSON(w, 200, map[string]any{
 		"token": t, "must_change": mustChange,
 		"last_ip": prevIP, "last_time": prevTime,
@@ -367,11 +380,15 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[fw] 开放入站端口 %d/%s 失败: %v", in.Port, proto, err)
 		}
 	}
+	detail := fmt.Sprintf("%s/%s 端口 %d", in.Core, in.Protocol, in.Port)
+	if in.Draft {
+		detail += "（草稿）"
+	}
+	a.auditOK(r, AuditInboundCreate, in.Name, detail)
 	writeJSON(w, 200, in)
 }
 
-func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
-	var in model.Inbound
+func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {	var in model.Inbound
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		fail(w, 400, err.Error())
 		return
@@ -417,6 +434,11 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	detail := fmt.Sprintf("%s/%s 端口 %d", in.Core, in.Protocol, in.Port)
+	if old != nil && old.Draft && !in.Draft {
+		detail += "（草稿转正）"
+	}
+	a.auditOK(r, AuditInboundUpdate, in.Name, detail)
 	writeJSON(w, 200, in)
 }
 
@@ -426,8 +448,7 @@ func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.DeleteInbound(id); err != nil {
 		fail(w, 500, err.Error())
 		return
-	}
-	// 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
+	}	// 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
 	if fwAuto(a) && in != nil && !in.Draft {
 		proto := firewall.ProtoOf(in.Protocol, in.Transport)
 		if !a.portInUseByOthers(id, in.Port, proto) {
@@ -436,6 +457,11 @@ func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	name := fmt.Sprintf("#%d", id)
+	if in != nil {
+		name = in.Name
+	}
+	a.auditOK(r, AuditInboundDelete, name, fmt.Sprintf("删除入站 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -532,6 +558,8 @@ func (a *Server) createClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.Store.SetClientInbounds(req.Client.ID, req.InboundIDs)
+	a.auditOK(r, AuditClientCreate, req.Client.Name,
+		fmt.Sprintf("新建用户 #%d，绑定 %d 个入站", req.Client.ID, len(req.InboundIDs)))
 	writeJSON(w, 200, req.Client)
 }
 
@@ -546,14 +574,17 @@ func (a *Server) updateClient(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditClientUpdate, c.Name, fmt.Sprintf("修改用户 #%d", c.ID))
 	writeJSON(w, 200, c)
 }
 
 func (a *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.DeleteClient(pathID(r)); err != nil {
+	id := pathID(r)
+	if err := a.Store.DeleteClient(id); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditClientDelete, fmt.Sprintf("#%d", id), fmt.Sprintf("删除用户 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -565,10 +596,13 @@ func (a *Server) setClientInbounds(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if err := a.Store.SetClientInbounds(pathID(r), req.InboundIDs); err != nil {
+	id := pathID(r)
+	if err := a.Store.SetClientInbounds(id, req.InboundIDs); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditClientUpdate, fmt.Sprintf("#%d", id),
+		fmt.Sprintf("调整用户 #%d 的入站绑定，共 %d 个", id, len(req.InboundIDs)))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -600,14 +634,17 @@ func (a *Server) addExternal(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditExternal, n.Name, "新增外部节点")
 	writeJSON(w, 200, n)
 }
 
 func (a *Server) deleteExternal(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.DeleteExternalNode(pathID(r)); err != nil {
+	id := pathID(r)
+	if err := a.Store.DeleteExternalNode(id); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditExternal, fmt.Sprintf("#%d", id), fmt.Sprintf("删除外部节点 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -667,6 +704,10 @@ func (a *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"created": created, "failed": failed, "parse_errors": errStrings(errs)})
+	if len(created) > 0 {
+		a.auditOK(r, AuditImport, req.Mode,
+			fmt.Sprintf("导入 %d 条（模式 %s，失败 %d）", len(created), req.Mode, len(failed)))
+	}
 }
 
 // nodeToInbound 把解析出的节点映射为本地入站草稿。
@@ -766,12 +807,14 @@ func (a *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	res, err := a.Pipe.Apply(req.Core, input, req.Note)
 	if err != nil {
 		_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevFailed, err.Error())
+		a.auditFail(r, AuditApply, req.Core, "应用失败（运行中配置未变）："+err.Error())
 		// 运行中配置未受影响 —— 这是本系统的安全保证
 		writeJSON(w, 422, map[string]any{"error": err.Error(), "revision_id": rev.ID, "hint": "运行中的配置未被修改；可用 rollback 恢复历史备份"})
 		return
 	}
 	_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevApplied, "")
 	res.RevisionID = rev.ID
+	a.auditOK(r, AuditApply, req.Core, fmt.Sprintf("应用成功，修订 #%d", rev.ID))
 	writeJSON(w, 200, res)
 }
 
@@ -809,9 +852,11 @@ func (a *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	bak, err := a.Pipe.Rollback(req.Core)
 	if err != nil {
+		a.auditFail(r, AuditRollback, req.Core, "回滚失败："+err.Error())
 		fail(w, 422, err.Error())
 		return
 	}
+	a.auditOK(r, AuditRollback, req.Core, "回滚到备份 "+bak)
 	writeJSON(w, 200, map[string]string{"restored_from": bak})
 }
 
@@ -908,13 +953,24 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var changed []string
 	for k, v := range m {
 		if allowed[k] {
 			if err := a.Store.SetSetting(k, v); err != nil {
 				fail(w, 500, err.Error())
 				return
 			}
+			changed = append(changed, k)
 		}
+	}
+	// 审计只记「改了哪些键」，不记值——smtp_pass / stats_secret 这类敏感项
+	// 一旦进了日志就等于明文落盘，比不记更糟。
+	if len(changed) > 0 {
+		sort.Strings(changed)
+		a.auditOK(r, AuditSettings, strings.Join(changed, ","), "修改设置")
+	}
+	if relogin {
+		a.auditOK(r, AuditPassword, authn.User(a.Store), "管理密码已修改，全部会话失效")
 	}
 	// ACME 设置变更后立即触发一次签发/续期检查，无需等下一个检查周期
 	if m["acme_enabled"] == "1" && a.CertMgr != nil {

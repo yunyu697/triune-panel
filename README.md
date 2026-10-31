@@ -148,6 +148,28 @@ location / {
 
 Caddy 默认就会带 `X-Forwarded-For`，同样把 `127.0.0.1` 填进可信网段即可。
 
+## 审计日志
+
+面板里 **审计** 页记录关键操作，用于事后追查「谁在什么时候动了什么」：
+
+| 类别 | 记录内容 |
+|---|---|
+| 登录 | 成功 / 失败 / 锁定期拒绝，含**真实来源 IP**（反代下按 `trusted_proxies` 解析） |
+| 账号安全 | 改密（含 CLI `reset-password`）、启用/关闭 2FA |
+| 配置变更 | 设置项改动（**只记键名不记值**）、入站与用户的增删改、订阅令牌重置 |
+| 发布动作 | 应用配置（成功/失败）、回滚、内核切换、版本更新、数据恢复 |
+
+设计取舍：
+
+- **只记动作，不记值**。`smtp_pass` / `stats_secret` / 密码一旦进日志就等于明文落盘，
+  比不记更糟。审计里的设置条目长这样：`target: public_host,smtp_pass`，
+  只说明改了哪几个键。
+- **旁路**。写审计失败只打日志，不会让主操作失败——审计用于追查，不用于拦截。
+- **清空也留痕**。点「清空审计」后列表里会剩一条 `audit.clear`，说明是谁在什么时候清的。
+- **保留 90 天**，面板启动后每 12 小时清理一次过期记录，避免长期运行把库撑大。
+
+接口：`GET /api/audit?prefix=login&result=fail&limit=100&offset=0`、`DELETE /api/audit`。
+
 ## 反向导入现有链接（迁移不失效）
 
 **导入链接** 页支持粘贴 `vless://` `vmess://` `trojan://` `ss://` `hysteria2://` `tuic://`
@@ -337,6 +359,24 @@ v0.8 已验证：
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
+v0.8.9 已验证：
+
+1. **审计日志**（`internal/store/audit.go` + `internal/api/audit.go`）：新增 `audit_log`
+   表（schema v3）与「审计」页。记录登录（含失败与真实来源 IP）、改密、设置变更、
+   入站/用户增删改、应用与回滚、内核切换、版本更新、CLI 重置密码与数据恢复。
+   只记键名不记值；清空动作本身留痕；保留 90 天自动清理。
+2. **`/healthz` 免认证探活**：返回 `status/version/uptime_sec/db`，DB 打不开时
+   返回 **503 + degraded**（而不是 200），避免「进程活着但服务坏了」被监控当成健康。
+3. **证书到期 UI 标红**：证书卡片显示剩余天数并按 30 天/14 天分级上色，
+   14 天内与已过期直接标红并提示「自动续期可能已失败」，卡片标题旁给状态徽章。
+4. **systemd 加固**：`NoNewPrivileges` / `ProtectSystem` / `PrivateTmp` / `ProtectHome`
+   / `ProtectKernelTunables` / `RestrictSUIDSGID` / `UMask=0027` 等，
+   并用 `ReadWritePaths` 放开安装目录、数据目录与 `/usr/local/bin`（自更新与内核更新要用）。
+   同时修正模板里过时的 `-addr :2087` → `:10010`。
+5. **apply 流水线单测**（`internal/core/pipeline_test.go`）：覆盖未配二进制跳过校验、
+   **校验失败时运行配置零改动**（含临时文件不残留）、成功替换前自动备份、
+   dry-run 不落盘、回滚取最新备份、无备份时报错、未知内核报错。
+
 v0.8.8 已验证：
 
 1. **反向代理 IP 识别**（`internal/api/clientip.go`）：新增设置 `trusted_proxies`
@@ -496,6 +536,10 @@ v0.8.1 已验证：
 6. **订阅与导出依赖 `public_host`**：未设置时回退为「当前请求的 Host（剥掉面板端口）」，
    所以用内网 IP 或 localhost 访问面板时，生成的节点地址会不可用。
    请在设置页填域名或公网 IP（安装脚本会把探测到的公网 IP 打印在安装结果里，可直接填进去）。
+7. **systemd 加固项未在真实 systemd 上逐条验证**：`NoNewPrivileges` / `ProtectSystem`
+   等是沙箱化手段，开发环境是 macOS 无法实测。若升级后出现「能启动但写配置失败」
+   「防火墙不放行」「自更新失败」这类症状，先按 `deploy/triune-panel.service`
+   里的注释逐条放开（最可能是 `ReadWritePaths` 少了你的安装目录）。
 
 ## 部署到 VPS
 
@@ -598,3 +642,30 @@ chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local
 # 2. 运行（也可自行编写 systemd unit，参考 deploy/triune-panel.service）
 sudo triune-panel -addr :10010 -data /opt/triune-panel/data
 ```
+
+### 健康检查
+
+`GET /healthz` 免认证、极轻量（一次 `SELECT 1`），供 systemd、uptime 监控、
+负载均衡或云厂商健康探针使用：
+
+```bash
+$ curl -s http://127.0.0.1:10010/healthz
+{"db":"ok","status":"ok","time":"2026-10-31T21:20:00+08:00","uptime_sec":3600,"version":"v0.8.8"}
+```
+
+- **200 + `status:ok`**：进程与数据库都正常。
+- **503 + `status:degraded`**：进程活着但数据库打不开（盘满、库被删、权限不对），
+  此时面板的每个接口都会报错，探针应当报警而不是显示健康。
+- 只暴露「是否可用 / 版本号 / 运行时长」，不含任何配置或用户数据；
+  版本号本来就在 `/api/public/info` 公开。
+
+systemd 部署时可在启动后自检一次（可选，`deploy/triune-panel.service` 默认不启用）：
+
+```ini
+[Service]
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do curl -fsS --noproxy "*" http://127.0.0.1:10010/healthz >/dev/null && exit 0; sleep 1; done; exit 1'
+```
+
+外部监控（Uptime Kuma / 云监控 / Prometheus blackbox）直接探 `/healthz`，
+按 HTTP 状态码判活即可，不用带 token。注意 `--noproxy '*'`：本机配了
+`http_proxy` 时 curl 会绕道代理，探活结果会骗人。

@@ -170,6 +170,16 @@ func cmdResetPassword(args []string) {
 			fmt.Fprintf(os.Stderr, "警告: 关闭二次验证失败: %v\n", err)
 		}
 	}
+	// 审计：CLI 重置密码绕过了网页登录，若不记一笔，面板里就看不到
+	// 「密码什么时候被谁改过」——这恰恰是最需要留痕的操作。
+	detail := "命令行重置管理密码，所有会话失效"
+	if !*keep2FA {
+		detail += "，并关闭二次验证"
+	}
+	_ = st.AddAudit(store.AuditEntry{
+		Actor: "cli", IP: "local", Action: "settings.password",
+		Target: authn.User(st), Result: store.AuditOK, Detail: detail,
+	})
 
 	fmt.Println("✔ 已重置管理密码")
 	fmt.Printf("  %s%s\n", padLabel("数据目录", 10), dir)
@@ -782,6 +792,16 @@ func cmdRestore(args []string) {
 	res, err := backup.Restore(backup.RestoreOptions{Archive: archive, DataDir: dir})
 	if err != nil {
 		die(1, "恢复失败: %v", err)
+	}
+	// 恢复会整体替换数据库（连审计表一起），所以这条留痕要写在恢复之后，
+	// 否则会被覆盖掉。恢复动作本身必须留痕——它是能一键抹掉全部数据的操作。
+	if st, e := store.Open(dir); e == nil {
+		_ = st.AddAudit(store.AuditEntry{
+			Actor: "cli", IP: "local", Action: "restore",
+			Target: filepath.Base(archive), Result: store.AuditOK,
+			Detail: fmt.Sprintf("命令行恢复数据：写入 %d 个文件", res.Files),
+		})
+		_ = st.Close()
 	}
 	fmt.Printf("✔ 恢复完成：写入 %d 个文件，保留 %d 份历史备份\n", res.Files, res.Preserved)
 	fmt.Println("\n下一步：启动面板并确认入站/用户正常")

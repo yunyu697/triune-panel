@@ -489,6 +489,8 @@ cat > "$UNIT_TMP" <<'UNIT'
 Description=Triune Panel (mihomo/sing-box/xray 管理面板)
 After=network.target
 Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -497,8 +499,21 @@ Restart=on-failure
 RestartSec=3
 User=root
 LimitNOFILE=65535
-NoNewPrivileges=false
-PrivateTmp=false
+# 加固：面板必须以 root 跑（绑 :80/:443、改防火墙、fork 内核），
+# 所以这里限制的是「它能碰到什么」，而不是降权。
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+UMask=0027
+# 安装目录（自更新替换自身）、数据目录（库/配置/证书/备份）、
+# /usr/local/bin（内核二进制默认安装位置）必须可写，否则写入会失败。
+ReadWritePaths=@RW@
 
 [Install]
 WantedBy=multi-user.target
@@ -511,6 +526,7 @@ esac
 sed -i.bak \
   -e "s|@EXEC@|$(exec_prefix "$INSTALL_DIR/triune-panel")|g" \
   -e "s|@DATA@|$(exec_prefix "$INSTALL_DIR/data")|g" \
+  -e "s|@RW@|$(exec_prefix "$INSTALL_DIR") $(exec_prefix "$INSTALL_DIR/data") /usr/local/bin|g" \
   -e "s|@ADDR@|$BIND_ADDR|g" "$UNIT_TMP" && rm -f "$UNIT_TMP.bak"
 if ! $SUDO tee "${SYSTEMD_DIR%/}/$SERVICE" >/dev/null < "$UNIT_TMP"; then
   echo ""

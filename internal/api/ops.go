@@ -184,6 +184,7 @@ func (a *Server) handleCertsIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go a.CertMgr.CheckNow()
+	a.auditOK(r, AuditCert, "", "手动触发证书签发 / 续期检查")
 	writeJSON(w, 200, map[string]string{
 		"ok":  "1",
 		"msg": "已触发签发检查；HTTP-01 验证通常几秒到一分钟完成，稍后刷新可查看状态",
@@ -294,6 +295,7 @@ func (a *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	os.Chmod(exe, 0o755)
 
 	// 4. 重启（exec 替换进程映像，监听与数据无缝衔接）
+	a.auditOK(r, AuditUpdate, "panel", "面板自更新到 "+newVer)
 	writeJSON(w, 200, map[string]string{"ok": "1", "sha256": got, "new_version": newVer, "msg": "更新完成，正在重启..."})
 	go func() {
 		time.Sleep(500 * time.Millisecond)

@@ -1,4 +1,8 @@
-# Triune Panel systemd 服务单元
+# Triune Panel systemd 服务单元（手动部署参考模板）
+#
+# 注意：一键安装脚本（install.sh）会自己生成一份等价单元并按实际安装目录
+# 替换路径，**不需要**用这个文件。本文件仅供手动部署 / 对照阅读。
+#
 # 安装：
 #   sudo cp triune-panel /opt/triune-panel/triune-panel
 #   sudo cp triune-panel.service /etc/systemd/system/
@@ -6,22 +10,55 @@
 
 [Unit]
 Description=Triune Panel (mihomo/sing-box/xray 管理面板)
+Documentation=https://github.com/yunyu697/triune-panel
 After=network.target
 Wants=network.target
+# 崩溃节流：配置写坏导致反复退出时不要无限重启刷日志
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-# 面板监听 :2087，数据目录 /opt/triune-panel/data
-# 内核二进制建议放 /usr/local/bin/{sing-box,xray,mihomo}，路径在面板"设置"里填
-ExecStart=/opt/triune-panel/triune-panel -addr :2087 -data /opt/triune-panel/data
+# 面板监听 :10010，数据目录 /opt/triune-panel/data
+# 内核二进制建议放 /usr/local/bin/{sing-box,xray,mihomo}，路径在面板「设置」里填
+ExecStart=/opt/triune-panel/triune-panel -addr :10010 -data /opt/triune-panel/data
 Restart=on-failure
 RestartSec=3
 User=root
 LimitNOFILE=65535
 
-# 加固（内核进程由面板 fork，保留网络与进程权限）
-NoNewPrivileges=false
-PrivateTmp=false
+# ---- 加固 ----
+# 面板本身必须以 root 跑：要绑 :80/:443（ACME HTTP-01）、改防火墙、
+# fork 内核进程。所以这里做的是「限制它能碰到什么」，不是降权。
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+UMask=0027
+
+# ProtectSystem=yes 会把 /usr 与 /boot 变成只读，下面这些必须可写，否则
+# 面板自更新、内核二进制更新、写配置会全部失败：
+#   /opt/triune-panel          面板自更新要替换自身二进制
+#   /opt/triune-panel/data     数据库、渲染后的配置、证书、备份
+#   /usr/local/bin             内核二进制默认安装位置（面板可一键更新）
+# 改了安装目录或 -data 路径时，务必同步修改这一行。
+ReadWritePaths=/opt/triune-panel /opt/triune-panel/data /usr/local/bin
+
+# 以下几个刻意**不**开启，开了会打断正常功能：
+#   PrivateDevices=yes  → 隐藏 /dev/net/tun，TUN 模式与部分内核功能失效
+#   ProtectSystem=full/strict → /etc 变只读，ufw 写 /etc/ufw 失败，
+#                          防火墙自动放行会静默失效
+#   MemoryDenyWriteExecute=yes → 内核可能用 JIT/插件，有风险
+#   CapabilityBoundingSet 收紧 → 面板要 CAP_NET_ADMIN 改防火墙、建 TUN，
+#                          收紧时容易漏掉某一项，收益小于排查成本
+#
+# 可选：启动后自检一次（需 curl，非必需，失败会让 unit 起不来）
+# ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do curl -fsS --noproxy "*" http://127.0.0.1:10010/healthz >/dev/null && exit 0; sleep 1; done; exit 1'
 
 [Install]
 WantedBy=multi-user.target

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"triune/internal/api"
 	"triune/internal/authn"
@@ -134,6 +135,17 @@ func serve(args []string) {
 	if err := webui.EmbedIfNeeded(*dataDir); err != nil {
 		log.Printf("embed web ui: %v", err)
 	}
+
+	// 审计日志保留期清理：启动跑一次，之后每 12 小时一次。
+	// 不清理的话长期运行会把库撑大（每条登录失败都记一条）。
+	go func() {
+		for {
+			if n, err := st.PruneAudit(store.AuditKeepDays); err == nil && n > 0 {
+				log.Printf("[audit] 清理超过 %d 天的审计记录 %d 条", store.AuditKeepDays, n)
+			}
+			time.Sleep(12 * time.Hour)
+		}
+	}()
 
 	// 后台运维循环：流量采样 + 到期/配额自动禁用（同时供实时速率查询）
 	coll := ops.NewCollector(st, pipe)

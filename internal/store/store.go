@@ -100,8 +100,22 @@ var migrations = []string{
 		PRIMARY KEY (client_id, day)
 	);
 	`,
-	// 后续版本在此追加，例如：
-	// v3: `ALTER TABLE inbounds ADD COLUMN remark TEXT NOT NULL DEFAULT '';`
+	// 后续版本在此追加，永远 append，不改历史条目。
+	// v3: 审计日志（谁在什么时候改了什么）
+	`
+	CREATE TABLE IF NOT EXISTS audit_log (
+		id     INTEGER PRIMARY KEY AUTOINCREMENT,
+		ts     TEXT NOT NULL DEFAULT '',
+		actor  TEXT NOT NULL DEFAULT '',
+		ip     TEXT NOT NULL DEFAULT '',
+		action TEXT NOT NULL DEFAULT '',
+		target TEXT NOT NULL DEFAULT '',
+		result TEXT NOT NULL DEFAULT 'ok',
+		detail TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+	CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+	`,
 }
 
 func Open(dataDir string) (*Store, error) {
@@ -594,6 +608,13 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// Ping 轻量探活：只确认连接与查询通路可用，不做任何写操作或校验，
+// 供 /healthz 这类高频探测使用（quick_check 太重，不能挂在探活上）。
+func (s *Store) Ping() error {
+	var one int
+	return s.db.QueryRow(`SELECT 1`).Scan(&one)
 }
 
 // IntegrityCheck 执行 SQLite 的 quick_check，供 `triune-panel doctor` 自检使用。

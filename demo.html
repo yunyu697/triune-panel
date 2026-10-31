@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -777,7 +777,7 @@ canvas{display:block;width:100%}
         <div style="margin-top:14px"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
       <div class="card">
-        <h3>ACME 证书（Let's Encrypt · HTTP-01）</h3>
+        <h3>ACME 证书（Let's Encrypt · HTTP-01）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
         <div class="frm">
           <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="panel.example.com"></div>
           <div><label>邮箱</label><input id="s_acme_email" class="input"></div>
@@ -861,6 +861,47 @@ canvas{display:block;width:100%}
         </div>
         <button class="btn sm" onclick="saveUpdateSettings()">保存更新设置</button>
         <span class="muted" id="updsetmsg"></span>
+      </div>
+    </section>
+
+    <!-- 审计日志 -->
+    <section id="v-audit" class="view">
+      <div class="card">
+        <h3>操作审计<span class="spacer"></span>
+          <select id="au_prefix" class="input" style="width:130px" onchange="loadAudit()">
+            <option value="">全部动作</option>
+            <option value="login">登录</option>
+            <option value="settings">设置 / 密码</option>
+            <option value="inbound">入站</option>
+            <option value="client">用户</option>
+            <option value="apply">应用 / 回滚</option>
+            <option value="switch-core">内核切换</option>
+            <option value="import">导入</option>
+            <option value="external">外部节点</option>
+            <option value="auth2fa">二次验证</option>
+            <option value="update">版本更新</option>
+          </select>
+          <select id="au_result" class="input" style="width:110px" onchange="loadAudit()">
+            <option value="">全部结果</option>
+            <option value="ok">成功</option>
+            <option value="fail">失败</option>
+          </select>
+          <button class="btn sm" onclick="loadAudit()">刷新</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          记录登录（含失败与来源 IP）、改密、设置变更、入站/用户增删改、应用与回滚、内核切换、版本更新等关键操作。
+          只记「改了什么」不记「值是什么」——密码、密钥、SMTP 口令不会出现在这里。
+          超过 90 天的记录由面板自动清理。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th style="width:150px">时间</th><th style="width:130px">动作</th><th>对象</th><th style="width:130px">来源</th><th style="width:70px">结果</th><th>详情</th></tr></thead>
+          <tbody id="autbody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn sm" id="au_more" onclick="loadAudit(true)">加载更多</button>
+          <button class="btn sm danger" onclick="clearAudit()">清空审计</button>
+          <span class="muted" id="au_msg"></span>
+        </div>
       </div>
     </section>
 
@@ -3421,7 +3462,8 @@ const ICONS = {
   traffic:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   apply:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  audit:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/>'
 };
 const VIEWS = [
   ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
@@ -3431,7 +3473,8 @@ const VIEWS = [
   ["import","导入链接","配置","反向解析订阅链接为节点或入站"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
   ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
-  ["settings","设置","系统","内核路径、证书、版本管理与主题"]
+  ["settings","设置","系统","内核路径、证书、版本管理与主题"],
+  ["audit","审计","系统","登录、配置变更与关键操作留痕"]
 ];
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
@@ -3457,6 +3500,7 @@ function goto(v) {
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
   if (v === "overview") setTimeout(loadOverview, 30);
+  if (v === "audit") loadAudit();
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -3532,7 +3576,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.8-demo",
+    version:"v0.8.9-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -3655,8 +3699,33 @@ async function mockRoute(path, opts) {
   }
   if (api === "external-nodes" && m === "GET") return MDB.external;
   if (api === "external-nodes" && m === "DELETE") { MDB.external = MDB.external.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
-  if (api === "certs") return [];
+  if (api === "certs") {
+    // 演示两条：一条健康、一条仅剩 9 天，便于看到到期标红效果
+    const day = n => new Date(Date.now() + n * 86400000).toISOString();
+    return [
+      { domain:"panel.example.com", issuer:"R11", not_before:day(-30), not_after:day(62),
+        file:"data/certs/panel.example.com/fullchain.pem" },
+      { domain:"node.example.com", issuer:"R11", not_before:day(-81), not_after:day(9),
+        file:"data/certs/node.example.com/fullchain.pem" }
+    ];
+  }
   if (api === "certs/issue") return {ok:1, msg:"已触发签发检查（演示）"};
+  if (api === "audit" && m === "DELETE") return {ok:1};
+  if (api === "audit") {
+    const t = n => new Date(Date.now() - n * 60000).toISOString().slice(0, 19).replace("T", " ");
+    const ip = "203.0.113.24";
+    return [
+      { id:9, time:t(1),   actor:"admin", ip, action:"login",             target:"admin",           result:"ok",   detail:"登录成功（已通过 totp 二次验证）" },
+      { id:8, time:t(8),   actor:"admin", ip, action:"apply",             target:"singbox",         result:"ok",   detail:"应用成功，修订 #37" },
+      { id:7, time:t(26),  actor:"admin", ip, action:"inbound.update",    target:"香港-01 · VLESS", result:"ok",   detail:"vless/reality 端口 443" },
+      { id:6, time:t(41),  actor:"admin", ip, action:"client.create",     target:"张三",            result:"ok",   detail:"新建用户 #5，绑定 2 个入站" },
+      { id:5, time:t(95),  actor:"admin", ip, action:"settings.update",   target:"quota_warn_pct,stats_enabled", result:"ok", detail:"修改设置" },
+      { id:4, time:t(140), actor:"admin", ip, action:"client.reset-token",target:"李四",            result:"ok",   detail:"重置用户 #4 的订阅令牌（旧链接失效）" },
+      { id:3, time:t(210), actor:"admin", ip, action:"rollback",          target:"xray",            result:"ok",   detail:"回滚到备份 20261031-101500.bak" },
+      { id:2, time:t(320), actor:"admin", ip:"45.9.9.9", action:"login",  target:"admin",           result:"fail", detail:"用户名或密码错误" },
+      { id:1, time:t(325), actor:"admin", ip:"45.9.9.9", action:"login",  target:"",                result:"fail", detail:"来源处于锁定期，拒绝登录（剩余约 10 分钟）" }
+    ];
+  }
   if (api === "components") return {
     panel:{component:"panel",version:"v0.5.0-demo"},
     cores:[
@@ -6840,13 +6909,55 @@ async function loadLogs() {
 }
 
 /* ---- 设置 ---- */
+/* 证书剩余天数：ACME 续期是后台自动跑的，一旦续期失败（80 端口被占、
+   DNS 变了、Let's Encrypt 限流），证书会静默到期，等到浏览器报错就晚了。
+   所以这里按剩余天数分级上色，14 天内直接标红——那时续期早该成功了。 */
+function certDaysLeft(notAfter) {
+  const t = Date.parse(notAfter);
+  if (!t) return null;
+  return Math.floor((t - Date.now()) / 86400000);
+}
 async function loadCerts() {
   try {
     const j = await req("/api/certs");
-    const el = $("certinfo");
-    if (!j.length) { el.classList.add("hide"); return; }
+    const el = $("certinfo"), badge = $("cert_badge");
+    if (!j.length) {
+      el.classList.add("hide"); el.innerHTML = "";
+      badge.classList.add("hide");
+      return;
+    }
     el.classList.remove("hide");
-    el.textContent = j.map(c => `${c.domain}: ${c.error ? "错误: " + c.error : "有效期至 " + String(c.not_after).replace("T"," ").slice(0,16)} · ${c.file}`).join("\n");
+    let worst = 0; // 0 正常 / 1 即将到期 / 2 需要处理
+    el.innerHTML = j.map(c => {
+      const dom = escHtml(c.domain || "?");
+      if (c.error) {
+        worst = 2;
+        return `<span style="color:var(--err)">✕ ${dom}：签发 / 续期失败 — ${escHtml(c.error)}</span>`;
+      }
+      const d = certDaysLeft(c.not_after);
+      const until = String(c.not_after || "").replace("T", " ").slice(0, 16);
+      let tail;
+      if (d === null) {
+        worst = Math.max(worst, 1);
+        tail = `<span style="color:var(--warn)">到期时间未知</span>`;
+      } else if (d < 0) {
+        worst = 2;
+        tail = `<span style="color:var(--err)">已过期 ${-d} 天</span>`;
+      } else if (d <= 14) {
+        worst = 2;
+        tail = `<span style="color:var(--err)">仅剩 ${d} 天 · 自动续期可能已失败</span>`;
+      } else if (d <= 30) {
+        worst = Math.max(worst, 1);
+        tail = `<span style="color:var(--warn)">剩余 ${d} 天</span>`;
+      } else {
+        tail = `<span style="color:var(--ok)">剩余 ${d} 天</span>`;
+      }
+      return `✓ ${dom}：有效期至 ${escHtml(until)} · ${tail} · ${escHtml(c.file || "")}`;
+    }).join("\n");
+    badge.classList.remove("hide", "b-ok", "b-warn", "b-err", "b-idle");
+    if (worst === 2) { badge.classList.add("b-err"); badge.textContent = "证书需要处理"; }
+    else if (worst === 1) { badge.classList.add("b-warn"); badge.textContent = "证书即将到期"; }
+    else { badge.classList.add("b-ok"); badge.textContent = "证书正常"; }
   } catch(e){}
 }
 async function issueCert() {
@@ -7172,6 +7283,62 @@ async function saveSettings() {
     toast("设置已保存（统计开关需应用后生效）");
   }
   catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 审计日志 ================= */
+const AU_LABEL = {
+  "login":"登录","logout":"登出",
+  "settings.password":"修改密码","settings.update":"修改设置",
+  "inbound.create":"新增入站","inbound.update":"修改入站","inbound.delete":"删除入站",
+  "client.create":"新增用户","client.update":"修改用户","client.delete":"删除用户",
+  "client.reset-token":"重置订阅令牌",
+  "apply":"应用配置","apply.dry-run":"预检","rollback":"回滚配置","switch-core":"切换内核",
+  "import":"导入链接","external":"外部节点","auth2fa":"二次验证",
+  "cert.issue":"证书签发","update":"版本更新","restore":"数据恢复","audit.clear":"清空审计"
+};
+// 未登记的动作名退化为前缀标签（如 foo.bar → foo 的标签），不至于显示成一串英文
+function auLabel(a) {
+  if (AU_LABEL[a]) return AU_LABEL[a];
+  const p = String(a || "").split(".")[0];
+  return AU_LABEL[p] || a || "—";
+}
+let auOffset = 0;
+async function loadAudit(more) {
+  const body = $("autbody");
+  if (!more) { auOffset = 0; body.innerHTML = `<tr><td colspan="6" class="muted">加载中…</td></tr>`; }
+  try {
+    const q = new URLSearchParams({ limit: 100, offset: auOffset });
+    if ($("au_prefix").value) q.set("prefix", $("au_prefix").value);
+    if ($("au_result").value) q.set("result", $("au_result").value);
+    const j = await req("/api/audit?" + q.toString());
+    const rows = j.map(e => {
+      const badge = e.result === "ok"
+        ? `<span class="badge b-ok">成功</span>`
+        : `<span class="badge b-err">失败</span>`;
+      return `<tr>
+        <td class="muted" style="white-space:nowrap">${escHtml(e.time)}</td>
+        <td>${escHtml(auLabel(e.action))}<div class="muted" style="font-size:11px">${escHtml(e.action)}</div></td>
+        <td>${e.target ? escHtml(e.target) : '<span class="muted">—</span>'}</td>
+        <td class="muted">${e.ip ? escHtml(e.ip) : "—"}</td>
+        <td>${badge}</td>
+        <td class="muted">${escHtml(e.detail)}</td></tr>`;
+    }).join("");
+    if (!more) body.innerHTML = rows || `<tr><td colspan="6" class="muted">暂无记录</td></tr>`;
+    else body.insertAdjacentHTML("beforeend", rows);
+    auOffset += j.length;
+    $("au_more").classList.toggle("hide", j.length < 100);
+    $("au_msg").textContent = auOffset ? `已显示 ${auOffset} 条` : "";
+  } catch(e) {
+    body.innerHTML = `<tr><td colspan="6" style="color:var(--err)">加载失败：${escHtml(e.message)}</td></tr>`;
+  }
+}
+async function clearAudit() {
+  if (!confirm("确定清空全部审计记录？\n\n清空动作本身会留下一条记录，说明是谁在什么时候清的。")) return;
+  try {
+    await req("/api/audit", { method: "DELETE" });
+    toast("审计记录已清空");
+    loadAudit();
+  } catch(e) { toast(e.message, "err"); }
 }
 
 /* ================= 启动 ================= */

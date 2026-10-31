@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"triune/internal/core"
@@ -240,6 +241,9 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 		"revision_id": applyRes.RevisionID,
 		"warnings":    warnings,
 	})
+	a.auditOK(r, AuditSwitchCore, req.To,
+		fmt.Sprintf("%d 个入站由 %s 切换到 %s（修订 #%d）",
+			len(targets), strings.Join(fromList, "/"), req.To, applyRes.RevisionID))
 }
 
 // applyWithRevision 在标准 apply 流水线外补上修订记录（与 handleApply 同构），

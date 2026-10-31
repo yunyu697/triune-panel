@@ -266,6 +266,7 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 		"was_running": wasRunning,
 		"restarted":   len(input) > 0,
 	})
+	a.auditOK(r, AuditUpdate, name, fmt.Sprintf("内核更新到 %s（备份 %s）", verOut, backup))
 }
 
 // POST /api/cores/{name}/rollback {"backup":"20260102-150405.bak"}
@@ -309,6 +310,7 @@ func (a *Server) handleCoreRollback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "restored": req.Backup})
+	a.auditOK(r, AuditUpdate, name, "内核回滚到备份 "+req.Backup)
 }
 
 func (a *Server) backupDirFor(component string) string {
@@ -368,6 +370,7 @@ func (a *Server) handlePanelRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "msg": "回滚完成，正在重启..."})
+	a.auditOK(r, AuditUpdate, "panel", "面板回滚到备份 "+req.Backup)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		syscall.Exec(exe, os.Args, os.Environ())

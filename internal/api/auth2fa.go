@@ -103,6 +103,7 @@ func (a *Server) handleAuth2FATotpEnable(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	log.Printf("[auth] 已启用 TOTP 二次验证")
+	a.auditOK(r, AuditAuth2FA, "totp", "启用 TOTP 二次验证")
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -162,6 +163,7 @@ func (a *Server) handleAuth2FAEmailEnable(w http.ResponseWriter, r *http.Request
 		return
 	}
 	log.Printf("[auth] 已启用邮箱验证码二次验证（%s）", maskEmail(req.Email))
+	a.auditOK(r, AuditAuth2FA, "email", "启用邮箱验证码二次验证（"+maskEmail(req.Email)+"）")
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -190,6 +192,7 @@ func (a *Server) handleAuth2FADisable(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.SetSetting("totp_secret_staged", "")
 	log.Printf("[auth] 已关闭二次验证")
+	a.auditOK(r, AuditAuth2FA, "off", "关闭二次验证")
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 

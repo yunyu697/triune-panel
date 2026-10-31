@@ -45,6 +45,7 @@ func (a *Server) resetSubToken(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	a.auditOK(r, AuditClientToken, target.Name, fmt.Sprintf("重置用户 #%d 的订阅令牌（旧链接失效）", target.ID))
 	writeJSON(w, 200, map[string]any{"ok": "1", "sub_token": target.SubToken,
 		"msg": "订阅令牌已重置，旧链接立即失效"})
 }
@@ -144,6 +145,10 @@ func (a *Server) importSubURL(w http.ResponseWriter, r *http.Request) {
 		created = append(created, name+"（"+n.Protocol+"）")
 	}
 	writeJSON(w, 200, map[string]any{"created": created, "skipped": skipped, "failed": failed, "parse_errors": errStrings(errs)})
+	if len(created) > 0 {
+		a.auditOK(r, AuditExternal, req.URL,
+			fmt.Sprintf("拉取远端订阅，新增 %d 个节点（跳过 %d，失败 %d）", len(created), len(skipped), len(failed)))
+	}
 }
 
 // decodeSubBody 尽力把订阅响应还原成明文链接列表：
