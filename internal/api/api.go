@@ -31,6 +31,7 @@ type Server struct {
 	Coll     *ops.Collector // 流量采样器（实时速率查询用），可为 nil
 	sessions sync.Map       // token -> expiry
 	loginFails sync.Map     // ip -> *loginFail（防爆破）
+	emailCode emailCodeState // 登录邮箱验证码（2FA）
 }
 
 // CertManager ACME 证书管理器接口（internal/certmgr 实现）。
@@ -47,6 +48,12 @@ func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", a.handleLogin)
+	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
+	mux.HandleFunc("POST /api/auth2fa/totp/setup", a.auth(a.handleAuth2FATotpSetup))
+	mux.HandleFunc("POST /api/auth2fa/totp/enable", a.auth(a.handleAuth2FATotpEnable))
+	mux.HandleFunc("POST /api/auth2fa/email/enable", a.auth(a.handleAuth2FAEmailEnable))
+	mux.HandleFunc("POST /api/auth2fa/email/test", a.auth(a.handleAuth2FAEmailTest))
+	mux.HandleFunc("POST /api/auth2fa/disable", a.auth(a.handleAuth2FADisable))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
 	mux.HandleFunc("POST /api/inbounds", a.auth(a.createInbound))
@@ -168,6 +175,21 @@ func (a *Server) loginLocked(key string) int {
 	return 0
 }
 
+// recordLoginFail 记录一次登录失败，达到阈值锁定该来源。
+func (a *Server) recordLoginFail(key string) {
+	f := &loginFail{}
+	if v, ok := a.loginFails.Load(key); ok {
+		f = v.(*loginFail)
+	}
+	f.count++
+	if f.count >= maxLoginFails {
+		f.until = time.Now().Add(loginLockPeriod)
+		f.count = 0
+		log.Printf("[auth] 来源 %s 连续登录失败已达 %d 次，锁定 %s", key, maxLoginFails, loginLockPeriod)
+	}
+	a.loginFails.Store(key, f)
+}
+
 func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	key := loginKey(r)
 	if remain := a.loginLocked(key); remain > 0 {
@@ -178,6 +200,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		User string `json:"user"`
 		Pass string `json:"pass"`
+		Code string `json:"code"` // 2FA 第二步：动态口令 / 邮箱验证码
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, "bad request")
@@ -192,20 +215,47 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		p = "admin" // 首次登录后请立即修改
 	}
 	if req.User != u || req.Pass != p {
-		f := &loginFail{}
-		if v, ok := a.loginFails.Load(key); ok {
-			f = v.(*loginFail)
-		}
-		f.count++
-		if f.count >= maxLoginFails {
-			f.until = time.Now().Add(loginLockPeriod)
-			f.count = 0
-			log.Printf("[auth] 来源 %s 连续登录失败已达 %d 次，锁定 %s", key, maxLoginFails, loginLockPeriod)
-		}
-		a.loginFails.Store(key, f)
+		a.recordLoginFail(key)
 		fail(w, 401, "用户名或密码错误")
 		return
 	}
+
+	// 二次验证：账密正确后按 auth_2fa_mode 进入第二步。
+	mode, _ := a.Store.GetSetting("auth_2fa_mode")
+	switch mode {
+	case "totp":
+		secret, _ := a.Store.GetSetting("totp_secret")
+		if secret != "" {
+			if strings.TrimSpace(req.Code) == "" {
+				writeJSON(w, 200, map[string]any{"need_2fa": "totp"})
+				return
+			}
+			if !verifyTOTP(secret, req.Code) {
+				a.recordLoginFail(key)
+				fail(w, 401, "动态口令不正确")
+				return
+			}
+		}
+	case "email":
+		to, _ := a.Store.GetSetting("auth_email")
+		if to != "" {
+			if strings.TrimSpace(req.Code) == "" {
+				masked, err := a.sendLoginCode(to)
+				if err != nil {
+					fail(w, 500, "验证码发送失败："+err.Error())
+					return
+				}
+				writeJSON(w, 200, map[string]any{"need_2fa": "email", "email": masked})
+				return
+			}
+			if err := a.checkEmailCode(req.Code); err != nil {
+				a.recordLoginFail(key)
+				fail(w, 401, err.Error())
+				return
+			}
+		}
+	}
+
 	a.loginFails.Delete(key) // 登录成功，清零失败计数
 	t := token()
 	a.sessions.Store(t, time.Now().Add(24*time.Hour))
@@ -661,7 +711,10 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
 		"acme_enabled", "acme_domain", "acme_email",
-		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index"} {
+		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
+		// 2FA 状态展示（totp_secret 不下发前端）
+		"auth_2fa_mode", "auth_email",
+		"smtp_host", "smtp_port", "smtp_user", "smtp_from"} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -681,6 +734,10 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
+		// 2FA 邮箱通道（auth_2fa_mode / totp_secret 由专用端点管理，不接受直接写）
+		"auth_email": true,
+		"smtp_host": true, "smtp_port": true, "smtp_user": true,
+		"smtp_pass": true, "smtp_from": true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -438,7 +438,18 @@ canvas{display:block;width:100%}
     <input id="lu" class="input" value="admin" autocomplete="username">
     <div style="height:10px"></div>
     <label>密码</label>
-    <input id="lp" class="input" type="password" autocomplete="current-password">
+    <input id="lp" class="input" type="password" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')login()">
+    <div id="l2fa_row" class="hide" style="margin-top:12px">
+      <label id="l2fa_label">二次验证</label>
+      <div style="display:flex;gap:8px">
+        <input id="lcode" class="input mono" inputmode="numeric" maxlength="6" placeholder="6 位验证码"
+               style="flex:1;text-align:center;letter-spacing:6px;font-size:16px"
+               onkeydown="if(event.key==='Enter')login()">
+        <button class="btn sm hide" id="l2fa_resend" onclick="loginResend()">重发</button>
+      </div>
+      <p class="muted" id="l2fa_hint" style="margin:6px 0 0;font-size:12px"></p>
+    </div>
     <div style="height:18px"></div>
     <button class="btn primary" style="width:100%;justify-content:center;padding:9px" onclick="login()">登 录</button>
     <p class="muted" style="text-align:center;margin-top:14px">默认 admin/admin，登录后请立即修改</p>
@@ -655,11 +666,14 @@ canvas{display:block;width:100%}
 
       <div class="card">
         <h3>规则集<span class="spacer"></span>
+          <button class="btn sm" onclick="selectSets(true)" title="勾选当前筛选下所有可用规则集">全选</button>
+          <button class="btn sm" onclick="selectSets(false)" title="取消勾选全部规则集">清空</button>
           <span class="hint" id="gen_sets_count"></span>
           <input id="gen_set_search" class="input" style="width:180px;padding:5px 10px;font-size:12.5px"
                  placeholder="搜索规则集…" oninput="filterSets()">
         </h3>
         <p class="muted" style="margin-bottom:12px">勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
+           「全选 / 清空」只作用于当前搜索结果，且自动跳过本内核不可用的规则集；
            标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
         <div id="gen_sets"></div>
       </div>
@@ -749,6 +763,47 @@ canvas{display:block;width:100%}
           <span class="muted" id="certmsg"></span>
         </div>
         <pre class="log hide" id="certinfo" style="margin-top:12px"></pre>
+      </div>
+      <div class="card">
+        <h3>登录二次验证（2FA）<span class="spacer"></span><span class="hint" id="fa_mode"></span></h3>
+        <p class="muted" style="margin-bottom:12px">在账号密码之外追加一道验证。开启后登录需输入第二步凭据，验证失败同样计入防爆破锁定。两种方式二选一。</p>
+        <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
+          <div style="flex:1;min-width:300px">
+            <b style="font-size:13px">方式一：验证器 App（TOTP 动态口令）</b>
+            <p class="muted" style="font-size:12.5px;margin:6px 0">Google / Microsoft Authenticator、1Password、FreeOTP 等均支持。绑定：验证器 App → 手动输入密钥（需设备时间准确）。</p>
+            <div id="fa_totp_box" class="hide" style="margin:8px 0">
+              <div class="frm">
+                <div class="full"><label>密钥（base32，手动输入到验证器 App）</label><input id="fa_secret" class="input mono" readonly></div>
+                <div class="full"><label>绑定 URI（otpauth，可导入支持的应用）</label><input id="fa_uri" class="input mono" readonly style="font-size:11.5px"></div>
+                <div><label>输入 App 当前显示的 6 位口令确认绑定</label><input id="fa_totp_code" class="input mono" maxlength="6" placeholder="123456" style="letter-spacing:4px"></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn sm primary" onclick="faTotpEnable()">确认并启用 TOTP</button>
+                <button class="btn sm" onclick="faTotpSetup()">重新生成密钥</button>
+              </div>
+            </div>
+            <button class="btn sm" id="fa_totp_start" onclick="faTotpSetup()">生成密钥并绑定</button>
+          </div>
+          <div style="flex:1;min-width:300px">
+            <b style="font-size:13px">方式二：邮箱验证码</b>
+            <p class="muted" style="font-size:12.5px;margin:6px 0">登录时向下方邮箱发送 6 位验证码（5 分钟有效）。需配置可发信的 SMTP 通道。</p>
+            <div class="frm">
+              <div><label>收件邮箱</label><input id="s_auth_email" class="input" placeholder="me@example.com"></div>
+              <div><label>SMTP 服务器</label><input id="s_smtp_host" class="input" placeholder="smtp.qq.com"></div>
+              <div><label>端口（465=SSL 直连，587=STARTTLS）</label><input id="s_smtp_port" class="input" placeholder="587"></div>
+              <div><label>SMTP 用户名</label><input id="s_smtp_user" class="input"></div>
+              <div><label>SMTP 密码 / 授权码（留空保持已保存值）</label><input id="s_smtp_pass" class="input" type="password" autocomplete="new-password"></div>
+              <div><label>发件人（留空同用户名）</label><input id="s_smtp_from" class="input"></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <button class="btn sm primary" onclick="faEmailEnable()">保存并启用（自动发测试邮件）</button>
+              <button class="btn sm" onclick="faEmailTest()">发送测试邮件</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <button class="btn danger sm hide" id="fa_off" onclick="faDisable()">关闭二次验证</button>
+        </div>
       </div>
       <div class="card">
         <h3>面板自更新</h3>
@@ -1060,7 +1115,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.1-demo",
+    version:"v0.8.2-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -1083,7 +1138,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",acme_enabled:"0",acme_domain:"",acme_email:""}
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com"}
   };
 }
 async function mockRoute(path, opts) {
@@ -1091,7 +1146,21 @@ async function mockRoute(path, opts) {
   const m = opts.method || "GET";
   const [, api, rest] = path.match(/\/api\/([^/?]*)(.*)?/) || [];
   const q = Object.fromEntries(new URLSearchParams(path.split("?")[1] || ""));
-  if (api === "login") return { token: "demo" };
+  if (api === "login") {
+    // 演示 TOTP 两步登录：任意账密 → 返回 need_2fa，输入 123456 放行
+    if (!opts.body?.code) return { need_2fa: "totp" };
+    if (opts.body.code !== "123456") throw new Error("动态口令不正确（演示模式请输入 123456）");
+    return { token: "demo" };
+  }
+  if (api === "auth2fa") {
+    if (m === "GET") return { mode:"off", totp_ready:false, email:"admin@example.com", smtp_ready:true };
+    if (rest.includes("totp/setup")) return { secret:"JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", uri:"otpauth://totp/TriunePanel:admin?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=TriunePanel&algorithm=SHA1&digits=6&period=30" };
+    if (rest.includes("totp/enable")) { if (opts.body?.code !== "123456") throw new Error("动态口令不正确（演示模式请输入 123456）"); return { ok:"1" }; }
+    if (rest.includes("email/test")) return { ok:"1" };
+    if (rest.includes("email/enable")) { if (!opts.body?.email?.includes("@")) throw new Error("收件邮箱格式无效"); return { ok:"1" }; }
+    if (rest.includes("disable")) return { ok:"1" };
+    return {};
+  }
   if (api === "version") return { version: MDB.version };
   if (api === "status") return { cores: ["singbox","xray","mihomo"].map(c => ({
     core:c, running:c!=="mihomo", config_exists:c!=="mihomo", bin_set:!!MDB.settings["bin_"+c], bin_found:!!MDB.settings["bin_"+c] })) };
@@ -1158,21 +1227,49 @@ async function mockRoute(path, opts) {
 if (DEMO) $("demoTag").classList.remove("hide");
 function showLogin(){ $("login").classList.remove("hide"); $("app").classList.add("hide"); }
 function showApp(){ $("login").classList.add("hide"); $("app").classList.remove("hide"); loadAll(); }
+
+/* 二次验证：第一步提交账密，服务端返回 need_2fa 后展示验证码输入行 */
+let LOGIN_2FA = ""; // "totp" | "email" | ""
+function resetLoginUI() {
+  LOGIN_2FA = "";
+  $("l2fa_row").classList.add("hide");
+  $("l2fa_resend").classList.add("hide");
+  $("lcode").value = "";
+  $("l2fa_hint").textContent = "";
+}
 async function login() {
   try {
-    const j = await req("/api/login", { method:"POST", body:{ user:$("lu").value, pass:$("lp").value } });
-    TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); showApp();
+    const body = { user:$("lu").value, pass:$("lp").value };
+    if (LOGIN_2FA) body.code = $("lcode").value.trim();
+    const j = await req("/api/login", { method:"POST", body });
+    if (j.need_2fa) {
+      LOGIN_2FA = j.need_2fa;
+      $("l2fa_row").classList.remove("hide");
+      $("l2fa_resend").classList.toggle("hide", j.need_2fa !== "email");
+      $("l2fa_label").textContent = j.need_2fa === "email" ? "邮箱验证码" : "动态口令（验证器 App）";
+      $("l2fa_hint").textContent = j.need_2fa === "email"
+        ? (j.email ? `验证码已发送至 ${j.email}，5 分钟内有效` : "验证码已发送")
+        : (DEMO ? "演示模式：输入 123456" : "请输入验证器 App 中的 6 位动态口令");
+      $("lcode").focus();
+      return;
+    }
+    TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); resetLoginUI(); showApp();
   } catch (e) {
     toast(String(e.message).includes("fetch")
       ? "无法连接面板服务：请确认面板已启动；离线演示请打开 demo.html"
       : e.message, "err");
   }
 }
-function logout(){ TOKEN=""; localStorage.removeItem("triune_token"); showLogin(); }
+/* 重发邮箱验证码：重新提交账密即可触发服务端重发 */
+async function loginResend() {
+  $("lcode").value = "";
+  await login();
+}
+function logout(){ TOKEN=""; localStorage.removeItem("triune_token"); resetLoginUI(); showLogin(); }
 
 /* ================= 数据加载 ================= */
 async function loadAll() {
-  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(), loadGen(), loadOverview()]);
+  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(), loadGen(), loadOverview(), loadAuth2FA()]);
 }
 function fmtBytes(b) {
   if (!b) return "0";
@@ -3018,6 +3115,23 @@ function toggleSet(id, on) {
   filterSets();
 }
 
+/* 全选 / 清空：只作用于当前搜索过滤结果，跳过本内核不可用的规则集（新勾选默认 PROXY） */
+function selectSets(on) {
+  if (!genCatalog) return;
+  const q = ($("gen_set_search").value || "").trim().toLowerCase();
+  (genCatalog.sets || []).forEach(s => {
+    if (!coreHasSet(s)) return;
+    if (q) {
+      const hay = ((s.name || "") + " " + (s.id || "")).toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+    if (on) { genChecked[s.id] = true; if (!genPolicies[s.id]) genPolicies[s.id] = "PROXY"; }
+    else delete genChecked[s.id];
+  });
+  renderSets();
+  filterSets();
+}
+
 function filterSets() {
   const q = ($("gen_set_search").value || "").trim().toLowerCase();
   document.querySelectorAll("#gen_sets .set-row").forEach(r => {
@@ -3933,7 +4047,76 @@ async function loadSettings() {
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
+    $("s_auth_email").value = j.auth_email || "";
+    $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
+    $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
   } catch(e){}
+}
+
+/* ================= 登录二次验证（2FA 管理） ================= */
+async function loadAuth2FA() {
+  try {
+    const j = await req("/api/auth2fa");
+    const names = { off:"状态：未开启", totp:"状态：TOTP 动态口令", email:"状态：邮箱验证码" };
+    $("fa_mode").textContent = names[j.mode] || ("状态：" + (j.mode || "off"));
+    $("fa_off").classList.toggle("hide", !j.mode || j.mode === "off");
+  } catch(e){}
+}
+async function faTotpSetup() {
+  try {
+    const j = await req("/api/auth2fa/totp/setup", { method:"POST", body:{} });
+    $("fa_totp_box").classList.remove("hide");
+    $("fa_totp_start").classList.add("hide");
+    $("fa_secret").value = j.secret;
+    $("fa_uri").value = j.uri;
+    $("fa_totp_code").value = "";
+    toast("密钥已生成：在验证器 App 中「手动输入密钥」绑定，再输入当前口令确认", "info");
+  } catch(e){ toast(e.message, "err"); }
+}
+async function faTotpEnable() {
+  const code = $("fa_totp_code").value.trim();
+  if (!code) { toast("请先输入验证器 App 显示的 6 位口令", "warn"); return; }
+  try {
+    await req("/api/auth2fa/totp/enable", { method:"POST", body:{ code } });
+    toast("TOTP 二次验证已启用，下次登录需要输入动态口令");
+    $("fa_totp_box").classList.add("hide");
+    $("fa_totp_start").classList.remove("hide");
+    loadAuth2FA();
+  } catch(e){ toast(e.message, "err"); }
+}
+function faEmailBody() {
+  return { email:$("s_auth_email").value.trim(), smtp_host:$("s_smtp_host").value.trim(),
+    smtp_port:$("s_smtp_port").value.trim(), smtp_user:$("s_smtp_user").value.trim(),
+    smtp_pass:$("s_smtp_pass").value, smtp_from:$("s_smtp_from").value.trim() };
+}
+async function faEmailEnable() {
+  const b = faEmailBody();
+  if (!b.email.includes("@")) { toast("请填写有效的收件邮箱", "warn"); return; }
+  if (!b.smtp_host) { toast("请填写 SMTP 服务器地址", "warn"); return; }
+  try {
+    await req("/api/auth2fa/email/enable", { method:"POST", body:b });
+    $("s_smtp_pass").value = "";
+    toast("邮箱验证码二次验证已启用，测试邮件已发送到 " + b.email);
+    loadAuth2FA();
+  } catch(e){ toast(e.message, "err"); }
+}
+async function faEmailTest() {
+  const b = faEmailBody();
+  try {
+    // 先保存表单（不含密码——留空即保持已保存值），再用已保存配置发测试邮件
+    await req("/api/settings", { method:"PUT", body:{ auth_email:b.email, smtp_host:b.smtp_host,
+      smtp_port:b.smtp_port, smtp_user:b.smtp_user, smtp_from:b.smtp_from } });
+    await req("/api/auth2fa/email/test", { method:"POST", body:{} });
+    toast("测试邮件已发送，请查收");
+  } catch(e){ toast(e.message, "err"); }
+}
+async function faDisable() {
+  if (!(await ask("关闭二次验证", "关闭后登录仅需账号密码，安全性将降低。确认关闭？"))) return;
+  try {
+    await req("/api/auth2fa/disable", { method:"POST", body:{} });
+    toast("二次验证已关闭");
+    loadAuth2FA();
+  } catch(e){ toast(e.message, "err"); }
 }
 
 /* ================= 组件更新与版本管理 ================= */
