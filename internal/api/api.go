@@ -58,6 +58,7 @@ func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", a.handleLogin)
+	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /healthz", a.handleHealthz)           // 免认证探活，供 systemd / 监控使用
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
@@ -120,7 +121,9 @@ func (a *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(a.DataDir, "web", "index.html"))
 	})
-	return mux
+	// 安全响应头包在最外层：连 401/404 这类错误响应也要带上，
+	// 否则错误页仍可能被浏览器按 HTML 嗅探执行。
+	return a.securityHeaders(mux)
 }
 
 // ---- helpers ----
@@ -311,6 +314,21 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"token": t, "must_change": mustChange,
 		"last_ip": prevIP, "last_time": prevTime,
 	})
+}
+
+// ---- logout ----
+
+// handleLogout 注销当前会话。
+//
+// 会话是服务端内存里的 token，登出必须由服务端删除。前端只清 localStorage
+// 只是"自己看不见了"——token 在剩余有效期（24h）内仍可被任何拿到它的人使用。
+// 这也是「怀疑 token 泄漏」时唯一的止血手段（改密会踢掉所有会话，
+// 代价是所有设备都要重新登录）。
+func (a *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	t := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	a.sessions.Delete(t)
+	a.auditOK(r, AuditLogout, "", "主动登出")
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 // ---- status ----

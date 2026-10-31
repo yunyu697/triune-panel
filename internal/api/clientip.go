@@ -127,13 +127,23 @@ func clientIPFrom(r *http.Request, trusted []*net.IPNet) string {
 	return peer.String()
 }
 
+// trustedProxies 读设置里的可信代理网段。
+//
+// 解析失败时返回 nil（= 不信任任何代理）：宁可把来源记成代理地址，
+// 也不能因为配置写错就采信可伪造的请求头。
+func (a *Server) trustedProxies() []*net.IPNet {
+	raw, err := a.Store.GetSetting(TrustedProxiesSetting)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	trusted, err := parseTrustedProxies(raw)
+	if err != nil {
+		return nil
+	}
+	return trusted
+}
+
 // clientIP 返回本次请求的真实来源 IP（读设置里的可信代理网段）。
 func (a *Server) clientIP(r *http.Request) string {
-	var trusted []*net.IPNet
-	if raw, err := a.Store.GetSetting(TrustedProxiesSetting); err == nil && strings.TrimSpace(raw) != "" {
-		// 解析失败时按「不信任任何代理」处理：宁可把来源记成代理地址，
-		// 也不能因为配置写错就采信可伪造的请求头。
-		trusted, _ = parseTrustedProxies(raw)
-	}
-	return clientIPFrom(r, trusted)
+	return clientIPFrom(r, a.trustedProxies())
 }

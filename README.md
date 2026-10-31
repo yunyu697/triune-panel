@@ -200,6 +200,55 @@ location / {
 
 Caddy 默认就会带 `X-Forwarded-For`，同样把 `127.0.0.1` 填进可信网段即可。
 
+## 安全响应头
+
+面板对所有响应统一下发一组浏览器侧防护头（`internal/api/security.go`），
+不依赖你在 nginx 上另配：
+
+| 响应头 | 值 | 作用 |
+|---|---|---|
+| `Content-Security-Policy` | 见下 | 禁止加载外部资源、禁止跨源外发数据、禁止被 iframe 套用 |
+| `X-Frame-Options` | `DENY` | 防点击劫持（老浏览器兜底） |
+| `X-Content-Type-Options` | `nosniff` | 禁止 MIME 嗅探，避免回显内容被当 HTML 执行 |
+| `Referrer-Policy` | `no-referrer` | 不把面板地址通过 Referer 泄漏给外部站点 |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` | 面板不需要任何设备能力 |
+| `Cross-Origin-Opener-Policy` | `same-origin` | 跨源打开时不给 `window.opener` |
+| `Strict-Transport-Security` | `max-age=15552000` | **仅在确实走 HTTPS 时下发**（见下） |
+
+CSP 的实际内容：
+
+```
+default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none';
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+**关于 `'unsafe-inline'`——这里没有假装能挡 XSS。** UI 是单文件，用了 126 处内联
+`onclick="..."` 事件属性，只能靠 `'unsafe-inline'` 放行；也不能改用 nonce：
+按 CSP3，`script-src` 里一旦出现 nonce 或 hash，浏览器会**忽略** `'unsafe-inline'`，
+126 个内联事件会全部失效、界面直接瘫掉。
+
+所以策略是「不挡内联执行，但掐死变现路径」：`connect-src 'self'` 让注入脚本
+连 `fetch`/`XHR`/`WebSocket` 都发不到外部域名（token 偷出去也没地方送），
+`form-action 'self'` 堵表单外发，`base-uri 'none'` 防 `<base>` 改写相对 URL，
+`frame-ancestors 'none'` 防点击劫持。这比什么都不加实质性强得多。
+
+**HSTS 的下发条件**：直连看 `r.TLS`；反代后看 `X-Forwarded-Proto`，但**只采信
+可信代理发来的值**——否则攻击者随手加一个 `X-Forwarded-Proto: https` 就能让面板
+给纯 HTTP 连接下发 HSTS，把用户后续访问顶到 https 而彻底打不开。
+
+刻意**不下发** `Cross-Origin-Resource-Policy`：`/sub/<token>` 会被各种订阅客户端
+拉取，其中一些是浏览器里的 Web 面板，CORP 会把它们挡掉，收益小于风险。
+
+## 登出与会话
+
+`POST /api/logout` 会**在服务端销毁会话**（前端登出按钮会先调它再清 localStorage）。
+只清本地存储是假登出——token 在剩余有效期（24 小时）内仍可被任何拿到它的人使用。
+
+会话存在内存里，面板重启即全部失效；改密会让「会话纪元」变化，所有旧会话立刻失效
+（这也是密码泄漏后踢掉攻击者会话的手段，代价是所有设备都要重新登录）。
+登出只销毁当前这一个会话，同一账号在其他设备上的会话不受影响。登出会记一条审计。
+
 ## 审计日志
 
 面板里 **审计** 页记录关键操作，用于事后追查「谁在什么时候动了什么」：
@@ -411,6 +460,23 @@ v0.8 已验证：
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
 
+v0.9.1 已验证：
+
+1. **安全响应头**（`internal/api/security.go`）：CSP、`X-Frame-Options`、`nosniff`、
+   `Referrer-Policy`、`Permissions-Policy`、COOP 统一下发，连 401/404 响应也带
+   （中间件包在最外层）。HSTS 只在确实走 HTTPS 时下发，且反代场景下只采信
+   **可信代理**发来的 `X-Forwarded-Proto`——否则公网伪造一个头就能让面板给
+   HTTP 连接下发 HSTS，把用户锁死。
+2. **服务端登出**（`POST /api/logout`）：此前只有前端清 localStorage，token 在
+   剩余 24 小时内仍然有效，且没有任何单独吊销手段（只能改密踢掉全部会话）。
+   现在登出会真正删除会话并记审计，其他设备的会话不受影响。
+3. **鉴权矩阵测试**（`internal/api/auth_test.go`）：52 个受保护端点逐一断言
+   匿名访问必须 401（新增路由忘了包 `a.auth()` 会被这条测试逮住），外加
+   过期会话、改密后旧会话失效、伪造 token、401 不回显 token、登出只影响当前会话。
+4. **浏览器实测**：Chrome 真实跑「登录 → 强制改密 → 重新登录 → 切页 → 登出」，
+   控制台**零 CSP 违规、零 JS 报错**，界面完整渲染（证明 `'unsafe-inline'`
+   确实放行了 126 处内联事件），登出后旧 token 立即 401。
+
 v0.9.0 已验证：
 
 1. **备份加密**（`internal/backup/crypt.go` + `cmd/server/passphrase.go`）：age 口令模式
@@ -621,6 +687,14 @@ v0.8.1 已验证：
 9. **备份口令丢失无法找回**：age 是端到端加密，没有后门也没有恢复密钥。
    `--gen-passphrase` 生成的口令只打印一次，务必当场存进密码管理器。
    面板不会把口令写进任何配置或日志。
+10. **CSP 挡不住内联脚本注入**：UI 有 126 处内联 `onclick="..."`，只能启用
+    `'unsafe-inline'`，所以注入的 `<script>` 仍会执行。当前防线是「掐死变现路径」
+    （`connect-src 'self'` 让偷到的 token 发不出去）。**根治办法**是把内联事件
+    全部改成 `addEventListener` + 用 nonce，工作量在单文件 UI 上不小，
+    目前没做——知道这是已知短板，不假装它不存在。
+11. **会话只能在「全部」和「当前一个」之间吊销**：没有会话列表页，看不到
+    「哪些设备正在登录」，也不能挑一个踢掉。要踢掉某个不明会话只能改密
+    （会踢掉所有设备）。
 
 ## 部署到 VPS
 
