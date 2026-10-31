@@ -759,14 +759,18 @@ canvas{display:block;width:100%}
           <div><label>mihomo 二进制路径</label><input id="s_binmihomo" class="input"></div>
           <p class="muted" style="margin:0">留空可前往下方「组件更新与版本管理」一键安装面板专用副本到 <code>data/bin/</code>，与系统其他服务互不影响。</p>
           <div><label>节点公开地址（订阅生成用）</label><input id="s_host" class="input" placeholder="如 vps.example.com"></div>
-          <div><label>可信反向代理网段<span class="muted" style="font-weight:400">（面板挂在 nginx / Caddy 后面时必填，否则登录来源一律是 127.0.0.1）</span></label>
-            <input id="s_trusted_proxies" class="input" placeholder="如 127.0.0.1 或 127.0.0.1,10.0.0.0/8；留空 = 不信任任何代理"></div>
-          <p class="muted" style="margin:0">仅当请求的直连对端落在这些网段内，才会采信 <code>X-Forwarded-For</code> / <code>X-Real-IP</code>。这样登录来源、防爆破计数才是真实客户端 IP；不配或配错时退化为「所有访问都算代理那一个 IP」，一个人输错五次会把所有人一起锁住。</p>
+          <div><label>可信反向代理网段</label>
+            <input id="s_trusted_proxies" class="input" placeholder="如 127.0.0.1 或 10.0.0.0/8"></div>
           <div><label>统计 API 密钥</label><input id="s_stats_secret" class="input"></div>
           <div><label>流量告警阈值（%）<span class="muted" style="font-weight:400">（越过后发邮件，需在下方配置 SMTP 与收件邮箱）</span></label>
             <input id="s_warn_pct" class="input" type="number" min="1" max="100" value="80"></div>
           <div><label>新密码</label><input id="s_pass" class="input" type="password" placeholder="留空不修改"></div>
         </div>
+        <p class="muted" style="margin:0">
+          可信反向代理网段：面板挂在 nginx / Caddy 后面时<b>必填</b>（同机填 <code>127.0.0.1</code>），
+          否则登录来源一律是代理 IP，防爆破会变成「一个人输错五次，所有人一起被锁」。
+          仅当直连对端落在这些网段内才采信 <code>X-Forwarded-For</code> / <code>X-Real-IP</code>；留空 = 不信任任何代理。
+        </p>
         <div class="radio-row" style="margin:0">
           <label><input type="checkbox" id="s_stats"> 开启流量统计（应用后生效，仅监听 127.0.0.1）</label>
         </div>
