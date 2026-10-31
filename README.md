@@ -1,7 +1,5 @@
 # Triune Panel
 
-[![CI](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml)
-
 三内核（**mihomo / sing-box / xray**）统一管理面板，Go 单二进制 + 内置 Web UI。
 
 > 下载：[Releases](https://github.com/yunyu697/triune-panel/releases) ·
