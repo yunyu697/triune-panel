@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,7 +24,7 @@ func execCmd(bin string, args ...string) *exec.Cmd { return exec.Command(bin, ar
 
 // ---- traffic ----
 
-// GET /api/traffic：每用户累计流量（含配额判断所需字段）。
+// GET /api/traffic：每用户累计流量（按用量降序排行，含配额百分比与告警标记）。
 func (a *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	cs, err := a.Store.ListClients()
 	if err != nil {
@@ -44,6 +45,16 @@ func (a *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		QuotaGB  float64 `json:"quota_gb"`
 		Enabled  bool    `json:"enabled"`
 		Exceeded bool    `json:"exceeded"`
+		Warn     bool    `json:"warn"`     // 越过告警阈值（未达配额）
+		Pct      float64 `json:"pct"`      // 配额使用百分比（无限额为 0）
+		Expiring bool    `json:"expiring"` // 3 天内到期
+		Expired  bool    `json:"expired"`
+	}
+	warnPctD := 80
+	if v, err := a.Store.GetSetting("quota_warn_pct"); err == nil {
+		if n := atoiDefault(strings.TrimSpace(v), 0); n > 0 && n <= 100 {
+			warnPctD = n
+		}
 	}
 	out := []row{}
 	for _, c := range cs {
@@ -52,12 +63,25 @@ func (a *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 			up, down = t.UpBytes, t.DownBytes
 		}
 		total := up + down
+		pct := 0.0
+		exceeded := false
+		if c.QuotaGB > 0 {
+			pct = float64(total) / (c.QuotaGB * 1024 * 1024 * 1024) * 100
+			exceeded = pct >= 100
+		}
+		var expiring, expired bool
+		if c.ExpiresAt != nil {
+			expired = c.ExpiresAt.Before(timeNow())
+			expiring = !expired && c.ExpiresAt.Before(timeNow().Add(72*time.Hour))
+		}
 		out = append(out, row{
 			ID: c.ID, Name: c.Name, Up: up, Down: down, Total: total,
-			QuotaGB: c.QuotaGB, Enabled: c.Enabled,
-			Exceeded: c.QuotaGB > 0 && float64(total) >= c.QuotaGB*1024*1024*1024,
+			QuotaGB: c.QuotaGB, Enabled: c.Enabled, Exceeded: exceeded,
+			Warn: !exceeded && c.QuotaGB > 0 && pct >= float64(warnPctD),
+			Pct: pct, Expiring: expiring, Expired: expired,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Total > out[j].Total })
 	writeJSON(w, 200, out)
 }
 

@@ -70,6 +70,8 @@ func main() {
 	// 后台运维循环：流量采样 + 到期/配额自动禁用（同时供实时速率查询）
 	coll := ops.NewCollector(st, pipe)
 	srv.Coll = coll
+	// 流量告警：越过阈值/配额时经 SMTP 发邮件（ops 不能反向依赖 api，注入回调）
+	coll.Alert = func(subject, body string) { api.SendPanelAlert(st, subject, body) }
 	go coll.Run()
 	// ACME 证书自动签发/续期
 	go certMgr.Run()

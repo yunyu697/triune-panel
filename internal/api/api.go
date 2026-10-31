@@ -68,6 +68,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/clients/{id}", a.auth(a.updateClient))
 	mux.HandleFunc("DELETE /api/clients/{id}", a.auth(a.deleteClient))
 	mux.HandleFunc("PUT /api/clients/{id}/inbounds", a.auth(a.setClientInbounds))
+	mux.HandleFunc("POST /api/clients/{id}/reset-token", a.auth(a.resetSubToken))
+	mux.HandleFunc("GET /api/inbounds/{id}/check", a.auth(a.checkInbound))
+	mux.HandleFunc("POST /api/config/diff", a.auth(a.handleConfigDiff))
+	mux.HandleFunc("POST /api/external-nodes/import-url", a.auth(a.importSubURL))
 	mux.HandleFunc("GET /api/external-nodes", a.auth(a.listExternal))
 	mux.HandleFunc("POST /api/external-nodes", a.auth(a.addExternal))
 	mux.HandleFunc("DELETE /api/external-nodes/{id}", a.auth(a.deleteExternal))
@@ -727,6 +731,7 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		out["bin_"+c.Name()] = v
 	}
 	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
+		"quota_warn_pct",
 		"acme_enabled", "acme_domain", "acme_email",
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
@@ -748,6 +753,7 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed := map[string]bool{
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
+		"quota_warn_pct": true,
 		"acme_enabled": true, "acme_domain": true, "acme_email": true,
 		"admin_user": true, "admin_pass": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）

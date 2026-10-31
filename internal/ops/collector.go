@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,11 +25,15 @@ type Collector struct {
 	Store    *store.Store
 	Pipe     *core.PipelineManager
 	Interval time.Duration
+	// Alert 流量告警回调（由 main 注入 api.SendPanelAlert），
+	// 用户用量越过告警阈值/配额时触发；nil 表示不告警。
+	Alert func(subject, body string)
 
 	mu        sync.Mutex
 	connLast  map[string][2]int64       // clash 连接计数基线: connID -> [up,down]
 	userLast  map[string]map[string]int // xray 计数基线: core -> "name:dir" -> total
 	disabled  map[int64]bool            // 本轮已处理，避免重复
+	notified  map[int64]int             // clientID -> 已告警级别（0 无 / 1 阈值 / 2 超额）
 	tickUp    int64                     // 本采样周期累计上行增量（实时速率用）
 	tickDown  int64                     // 本采样周期累计下行增量
 	liveUp    float64                   // 实时上行速率（字节/秒）
@@ -45,6 +50,7 @@ func NewCollector(st *store.Store, pipe *core.PipelineManager) *Collector {
 		connLast: map[string][2]int64{},
 		userLast: map[string]map[string]int{},
 		disabled: map[int64]bool{},
+		notified: map[int64]int{},
 		stopCh:   make(chan struct{}),
 	}
 }
@@ -268,6 +274,9 @@ func (c *Collector) enforceLimits() {
 		if !cl.Enabled || c.disabled[cl.ID] {
 			continue
 		}
+		// 流量阈值告警（越过阈值或配额时邮件提醒，同一级别只发一次）
+		c.alertQuota(cl, traffic)
+
 		reason := ""
 		if cl.ExpiresAt != nil && cl.ExpiresAt.Before(time.Now()) {
 			reason = "已到期"
@@ -328,6 +337,55 @@ func (c *Collector) enforceLimits() {
 func shortHash(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
+}
+
+// alertQuota 用量越过告警阈值（默认 80%，可由设置 quota_warn_pct 调整）
+// 或配额时触发一次告警回调。用户配额上调、占比回落到阈值以下后级别复位。
+func (c *Collector) alertQuota(cl *model.Client, traffic map[int64]*store.TrafficRow) {
+	if c.Alert == nil || cl.QuotaGB <= 0 {
+		return
+	}
+	var used int64
+	if t, ok := traffic[cl.ID]; ok {
+		used = t.UpBytes + t.DownBytes
+	}
+	quotaBytes := cl.QuotaGB * 1024 * 1024 * 1024
+	pct := int(float64(used) / quotaBytes * 100)
+	warnPct := quotaWarnPct(c.Store)
+	exceeded := pct >= 100
+	level := 1
+	if exceeded {
+		level = 2
+	} else if pct < warnPct {
+		if c.notified[cl.ID] > 0 {
+			delete(c.notified, cl.ID) // 回落到阈值以下：复位，允许下次再告警
+		}
+		return
+	}
+	if c.notified[cl.ID] >= level {
+		return
+	}
+	c.notified[cl.ID] = level
+	verb := "超过告警阈值，请关注"
+	if exceeded {
+		verb = "已达配额上限，该用户将被自动停用"
+	}
+	subject := fmt.Sprintf("【Triune Panel】用户 %s 流量已达 %d%%", cl.Name, pct)
+	body := fmt.Sprintf("用户 %s 已用流量 %.2f GB / %.2f GB（%d%%），%s。",
+		cl.Name, float64(used)/1073741824, cl.QuotaGB, pct, verb)
+	log.Printf("[ops] 用户 %s 流量 %d%%（%s），已发送告警邮件", cl.Name, pct,
+		map[bool]string{true: "已达配额", false: "超阈值"}[exceeded])
+	c.Alert(subject, body)
+}
+
+// quotaWarnPct 读取告警阈值（百分比），默认 80。
+func quotaWarnPct(st *store.Store) int {
+	v, _ := st.GetSetting("quota_warn_pct")
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 || n > 100 {
+		return 80
+	}
+	return n
 }
 
 // buildRenderInput 与 api 层同逻辑（避免循环依赖独立实现）。
