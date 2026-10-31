@@ -45,7 +45,7 @@ func (a *Server) resetSubToken(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	a.auditOK(r, AuditClientToken, target.Name, fmt.Sprintf("重置用户 #%d 的订阅令牌（旧链接失效）", target.ID))
+	a.changed(r, AuditClientToken, target.Name, fmt.Sprintf("重置用户 #%d 的订阅令牌（旧链接失效）", target.ID))
 	writeJSON(w, 200, map[string]any{"ok": "1", "sub_token": target.SubToken,
 		"msg": "订阅令牌已重置，旧链接立即失效"})
 }

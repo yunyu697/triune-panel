@@ -368,7 +368,7 @@ func (a *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.sessions.Delete(target.Token)
-	a.auditOK(r, AuditSession, u.Username,
+	a.changed(r, AuditSession, u.Username,
 		"吊销登录会话 "+target.SID[:8]+"（IP "+orDefault(target.IP, "?")+"，"+describeUA(target.UA)+"）")
 	writeJSON(w, 200, map[string]any{"ok": 1})
 }
@@ -384,7 +384,7 @@ func (a *Server) handleSessionsRevokeOthers(w http.ResponseWriter, r *http.Reque
 	}
 	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	n := a.sessions.DeleteOthers(me.ID, tok)
-	a.auditOK(r, AuditSession, me.Username, "退出其他设备，吊销 "+strconv.Itoa(n)+" 个会话")
+	a.changed(r, AuditSession, me.Username, "退出其他设备，吊销 "+strconv.Itoa(n)+" 个会话")
 	writeJSON(w, 200, map[string]any{"ok": 1, "revoked": n})
 }
 

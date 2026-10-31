@@ -104,7 +104,7 @@ func (a *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 	// 主动清掉该账号的全部会话（含当前这个）：指纹校验本来就会让它们失效，
 	// 但内存里不该留着已经无效的条目，「登录设备」页也要立刻准确。
 	revoked := a.sessions.DeleteByUID(u.ID)
-	a.auditOK(r, AuditPassword, u.Username,
+	a.changed(r, AuditPassword, u.Username,
 		"本账号密码已修改，吊销 "+strconv.Itoa(revoked)+" 个会话")
 	// 会话因密码指纹变化立即失效，前端收到 relogin 后回登录页
 	writeJSON(w, 200, map[string]any{"ok": 1, "relogin": true})
@@ -163,7 +163,7 @@ func (a *Server) handleAdminCreate(w http.ResponseWriter, r *http.Request) {
 	if fresh, err := a.Store.GetAdmin(u.ID); err == nil {
 		u = fresh
 	}
-	a.auditOK(r, AuditAdmin, u.Username, "新建管理员，角色 "+u.Role)
+	a.changed(r, AuditAdmin, u.Username, "新建管理员，角色 "+u.Role)
 	resp := map[string]any{"ok": 1, "admin": toAdminView(u)}
 	if generated != "" {
 		// 只在这一次响应里出现；前端必须提示用户立刻保存
@@ -285,7 +285,7 @@ func (a *Server) handleAdminUpdate(w http.ResponseWriter, r *http.Request) {
 			detail += "，吊销 " + strconv.Itoa(n) + " 个会话"
 		}
 	}
-	a.auditOK(r, AuditAdmin, u.Username, detail)
+	a.changed(r, AuditAdmin, u.Username, detail)
 	writeJSON(w, 200, map[string]any{"ok": 1, "admin": toAdminView(u)})
 }
 
@@ -314,6 +314,6 @@ func (a *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 	if n > 0 {
 		detail = "删除管理员，吊销 " + strconv.Itoa(n) + " 个会话"
 	}
-	a.auditOK(r, AuditAdmin, u.Username, detail)
+	a.changed(r, AuditAdmin, u.Username, detail)
 	writeJSON(w, 200, map[string]any{"ok": 1})
 }

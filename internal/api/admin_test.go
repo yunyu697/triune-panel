@@ -75,7 +75,7 @@ func TestRoleMatrix(t *testing.T) {
 		{name: "只读入站", method: "GET", path: "/api/inbounds"},
 		{name: "只读流量", method: "GET", path: "/api/traffic"},
 		{name: "新建入站", method: "POST", path: "/api/inbounds", body: map[string]any{}, denied: []string{"guest"}},
-		{name: "客户端列表", method: "GET", path: "/api/clients", denied: []string{"guest"}},
+		{name: "客户端列表", method: "GET", path: "/api/clients"},
 		{name: "设置", method: "GET", path: "/api/settings", denied: []string{"guest"}},
 		{name: "审计", method: "GET", path: "/api/audit", denied: []string{"guest"}},
 		{name: "导出目录", method: "GET", path: "/api/export/catalog", denied: []string{"guest"}},

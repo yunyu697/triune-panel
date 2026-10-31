@@ -226,3 +226,64 @@ func TestUpdateClientNotFound(t *testing.T) {
 		t.Fatalf("应 404，实际 %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestViewerSeesMaskedClients 只读账号能看用户列表，但拿不到凭据与订阅令牌。
+//
+// v0.9.7 及以前整条 GET /api/clients 对 viewer 是 403：连「谁用了多少流量」
+// 都看不到，代价太大。真正敏感的只有 credential / sub_token 两列，
+// 所以改成脱敏返回，并带 masked 标记让前端能说清「是你看不到，不是没配」。
+func TestViewerSeesMaskedClients(t *testing.T) {
+	a := newRoleTestServer(t)
+	owner := loginAs(t, a, "admin", "admin")
+	guest := loginAs(t, a, "guest", "guest-password-1")
+
+	if w := do(a, owner, "POST", "/api/clients", map[string]any{"name": "bob"}); w.Code != 200 {
+		t.Fatalf("建用户应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+
+	// owner 拿到完整凭据
+	w := do(a, owner, "GET", "/api/clients", nil)
+	if w.Code != 200 {
+		t.Fatalf("owner 拉列表应 200，实际 %d", w.Code)
+	}
+	var full []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 1 {
+		t.Fatalf("应有 1 个用户，实际 %d", len(full))
+	}
+	fc, _ := full[0]["client"].(map[string]any)
+	if fc["credential"] == "" || fc["sub_token"] == "" {
+		t.Fatalf("owner 应看到凭据与订阅令牌，实际 %v", fc)
+	}
+	if full[0]["masked"] != false {
+		t.Fatalf("owner 的响应不应标记 masked，实际 %v", full[0]["masked"])
+	}
+
+	// viewer 能看列表，但两列都空，且带 masked 标记
+	w = do(a, guest, "GET", "/api/clients", nil)
+	if w.Code != 200 {
+		t.Fatalf("viewer 拉列表应 200（脱敏），实际 %d: %s", w.Code, w.Body.String())
+	}
+	var masked []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &masked); err != nil {
+		t.Fatal(err)
+	}
+	mc, _ := masked[0]["client"].(map[string]any)
+	if mc["credential"] != "" || mc["sub_token"] != "" {
+		t.Fatalf("viewer 看到的凭据与订阅令牌必须为空，实际 %v", mc)
+	}
+	if masked[0]["masked"] != true {
+		t.Fatalf("viewer 的响应应标记 masked=true，实际 %v", masked[0]["masked"])
+	}
+	// 但配额、启用状态这些「看得懂但不危险」的字段要保留
+	if mc["name"] != "bob" || mc["enabled"] != true {
+		t.Fatalf("脱敏不应抹掉非敏感字段，实际 %v", mc)
+	}
+
+	// viewer 仍然不能建用户
+	if w := do(a, guest, "POST", "/api/clients", map[string]any{"name": "x"}); w.Code != http.StatusForbidden {
+		t.Fatalf("viewer 建用户应 403，实际 %d", w.Code)
+	}
+}

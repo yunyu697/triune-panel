@@ -71,6 +71,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions", a.auth(a.handleSessionsList))
 	mux.HandleFunc("DELETE /api/sessions", a.auth(a.handleSessionsRevokeOthers))
 	mux.HandleFunc("DELETE /api/sessions/{id}", a.auth(a.handleSessionRevoke))
+	// 登录历史：从审计的 login 记录按人聚合（viewer 只看到自己）
+	mux.HandleFunc("GET /api/login-history", a.auth(a.handleLoginHistory))
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
@@ -100,8 +102,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inbounds/{id}/export", a.write(a.handleInboundExport))
 	mux.HandleFunc("GET /api/export/catalog", a.write(a.handleExportCatalog))
 	mux.HandleFunc("POST /api/export/config", a.write(a.handleExportConfig))
-	// 客户端列表含 credential 与订阅令牌，等同凭据
-	mux.HandleFunc("GET /api/clients", a.write(a.listClients))
+	// 客户端列表：只读账号也放行，但响应是**脱敏副本**（凭据与订阅令牌置空）。
+	// 之前整条挡在 write 档外，代价是只读账号连「谁用了多少流量」都看不到；
+	// 真正敏感的只有那两列，把整页关掉属于用大炮打蚊子。
+	mux.HandleFunc("GET /api/clients", a.auth(a.listClients))
 	mux.HandleFunc("POST /api/clients", a.write(a.createClient))
 	mux.HandleFunc("PUT /api/clients/{id}", a.write(a.updateClient))
 	mux.HandleFunc("DELETE /api/clients/{id}", a.write(a.deleteClient))
@@ -122,6 +126,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/audit", a.write(a.handleAuditList))
 	mux.HandleFunc("POST /api/tools/reality-keypair", a.write(a.handleRealityKeypair))
 	mux.HandleFunc("POST /api/self-update", a.write(a.handleSelfUpdate))
+	// 变更通知：发一条测试事件，把错误原样返回（配错了要能立刻发现）
+	mux.HandleFunc("POST /api/notify/test", a.write(a.handleNotifyTest))
 	mux.HandleFunc("POST /api/cores/{name}/update", a.write(a.handleCoreUpdate))
 	mux.HandleFunc("POST /api/cores/{name}/rollback", a.write(a.handleCoreRollback))
 	mux.HandleFunc("GET /api/panel/backups", a.write(a.handlePanelBackups))
@@ -452,7 +458,7 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Draft {
 		detail += "（草稿）"
 	}
-	a.auditOK(r, AuditInboundCreate, in.Name, detail)
+	a.changed(r, AuditInboundCreate, in.Name, detail)
 	writeJSON(w, 200, in)
 }
 
@@ -547,7 +553,7 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	if old.Draft && !in.Draft {
 		detail += "（草稿转正）"
 	}
-	a.auditOK(r, AuditInboundUpdate, in.Name, detail)
+	a.changed(r, AuditInboundUpdate, in.Name, detail, inboundDiff(old, &in)...)
 	writeJSON(w, 200, in)
 }
 
@@ -570,7 +576,7 @@ func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	if in != nil {
 		name = in.Name
 	}
-	a.auditOK(r, AuditInboundDelete, name, fmt.Sprintf("删除入站 #%d", id))
+	a.changed(r, AuditInboundDelete, name, fmt.Sprintf("删除入站 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -657,10 +663,20 @@ func (a *Server) listClients(w http.ResponseWriter, r *http.Request) {
 	if cs == nil {
 		cs = []*model.Client{}
 	}
+	// 只读账号拿不到凭据与订阅令牌：这两样等价于「能连上节点」的钥匙。
+	// 置空而不是不返回字段——前端据此渲染「—」并带上 masked 标记，
+	// 免得看起来像「这个用户没配凭据」。
+	masked := !a.roleAtLeast(r, authn.RoleAdmin)
 	out := make([]map[string]any, 0, len(cs))
 	for _, c := range cs {
 		ids, _ := a.Store.ClientInboundIDs(c.ID)
-		out = append(out, map[string]any{"client": c, "inbound_ids": ids})
+		if masked {
+			cc := *c
+			cc.Credential, cc.SubToken = "", ""
+			out = append(out, map[string]any{"client": &cc, "inbound_ids": ids, "masked": true})
+			continue
+		}
+		out = append(out, map[string]any{"client": c, "inbound_ids": ids, "masked": false})
 	}
 	writeJSON(w, 200, out)
 }
@@ -690,7 +706,7 @@ func (a *Server) createClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.Store.SetClientInbounds(req.Client.ID, req.InboundIDs)
-	a.auditOK(r, AuditClientCreate, req.Client.Name,
+	a.changed(r, AuditClientCreate, req.Client.Name,
 		fmt.Sprintf("新建用户 #%d，绑定 %d 个入站", req.Client.ID, len(req.InboundIDs)))
 	writeJSON(w, 200, req.Client)
 }
@@ -721,6 +737,7 @@ func (a *Server) updateClient(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err.Error())
 		return
 	}
+	before := *c // 变更前快照，用于通知里的字段级 diff
 	for k, v := range raw {
 		var ferr error
 		switch k {
@@ -754,7 +771,7 @@ func (a *Server) updateClient(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	a.auditOK(r, AuditClientUpdate, c.Name, fmt.Sprintf("修改用户 #%d", c.ID))
+	a.changed(r, AuditClientUpdate, c.Name, fmt.Sprintf("修改用户 #%d", c.ID), clientDiff(&before, c)...)
 	writeJSON(w, 200, c)
 }
 
@@ -764,7 +781,7 @@ func (a *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	a.auditOK(r, AuditClientDelete, fmt.Sprintf("#%d", id), fmt.Sprintf("删除用户 #%d", id))
+	a.changed(r, AuditClientDelete, fmt.Sprintf("#%d", id), fmt.Sprintf("删除用户 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -777,12 +794,14 @@ func (a *Server) setClientInbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := pathID(r)
+	before, _ := a.Store.ClientInboundIDs(id)
 	if err := a.Store.SetClientInbounds(id, req.InboundIDs); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	a.auditOK(r, AuditClientUpdate, fmt.Sprintf("#%d", id),
-		fmt.Sprintf("调整用户 #%d 的入站绑定，共 %d 个", id, len(req.InboundIDs)))
+	a.changed(r, AuditClientUpdate, fmt.Sprintf("#%d", id),
+		fmt.Sprintf("调整用户 #%d 的入站绑定，共 %d 个", id, len(req.InboundIDs)),
+		"绑定入站: "+fmtIDs(before)+" → "+fmtIDs(req.InboundIDs))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
@@ -994,7 +1013,7 @@ func (a *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevApplied, "")
 	res.RevisionID = rev.ID
-	a.auditOK(r, AuditApply, req.Core, fmt.Sprintf("应用成功，修订 #%d", rev.ID))
+	a.changed(r, AuditApply, req.Core, fmt.Sprintf("应用成功，修订 #%d", rev.ID))
 	writeJSON(w, 200, res)
 }
 
@@ -1036,7 +1055,7 @@ func (a *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, err.Error())
 		return
 	}
-	a.auditOK(r, AuditRollback, req.Core, "回滚到备份 "+bak)
+	a.changed(r, AuditRollback, req.Core, "回滚到备份 "+bak)
 	writeJSON(w, 200, map[string]string{"restored_from": bak})
 }
 
@@ -1079,7 +1098,10 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
 		"auth_2fa_mode", "auth_email",
-		"smtp_host", "smtp_port", "smtp_user", "smtp_from"} {
+		"smtp_host", "smtp_port", "smtp_user", "smtp_from",
+		// 变更通知：Webhook 地址可能带 token，但它是「自己填给自己看」的配置，
+		// 只读角色拿不到这个接口（write 档），所以照常回显便于核对。
+		NotifyEmailSetting, NotifyWebhookSetting, NotifyEventsSetting} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -1130,6 +1152,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		"auth_email": true,
 		"smtp_host":  true, "smtp_port": true, "smtp_user": true,
 		"smtp_pass": true, "smtp_from": true,
+		// 变更通知（收件邮箱 / Webhook / 订阅哪些事件）
+		NotifyEmailSetting: true, NotifyWebhookSetting: true, NotifyEventsSetting: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
@@ -1142,24 +1166,40 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var changed []string
+	var changedKeys []string
+	var diff []string
 	for k, v := range m {
-		if allowed[k] {
-			if err := a.Store.SetSetting(k, v); err != nil {
-				fail(w, 500, err.Error())
-				return
-			}
-			changed = append(changed, k)
+		if !allowed[k] {
+			continue
+		}
+		// 先读旧值：变更通知要说清「从什么改成什么」，只报键名等于让人
+		// 收到一封「你改了 public_host」却不知道改成了什么的邮件。
+		old, _ := a.Store.GetSetting(k)
+		if err := a.Store.SetSetting(k, v); err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+		changedKeys = append(changedKeys, k)
+		if old != v {
+			diff = append(diff, settingDiff(k, old, v))
 		}
 	}
 	// 审计只记「改了哪些键」，不记值——smtp_pass / stats_secret 这类敏感项
 	// 一旦进了日志就等于明文落盘，比不记更糟。
-	if len(changed) > 0 {
-		sort.Strings(changed)
-		a.auditOK(r, AuditSettings, strings.Join(changed, ","), "修改设置")
+	// 通知里的 diff 走 settingDiff，敏感键自动打码。
+	if len(changedKeys) > 0 {
+		sort.Strings(changedKeys)
+		a.auditOK(r, AuditSettings, strings.Join(changedKeys, ","), "修改设置")
+		if len(diff) > 0 {
+			sort.Strings(diff)
+			a.notifyChange(changeEvent{
+				Actor: a.actorName(r), Action: AuditSettings,
+				Target: strings.Join(changedKeys, ","), Detail: "修改设置", Diff: diff,
+			})
+		}
 	}
 	if relogin {
-		a.auditOK(r, AuditPassword, a.actorName(r), "本账号密码已修改，该账号的旧会话全部失效")
+		a.changed(r, AuditPassword, a.actorName(r), "本账号密码已修改，该账号的旧会话全部失效")
 	}
 	// ACME 设置变更后立即触发一次签发/续期检查，无需等下一个检查周期
 	if m["acme_enabled"] == "1" && a.CertMgr != nil {

@@ -26,6 +26,9 @@ type AuditFilter struct {
 	Offset int
 	Prefix string // action 前缀，如 "login" 匹配 login / login.fail
 	Result string // ok / fail
+	// Since 只取该时间之后的记录，格式与 AuditEntry.Time 一致
+	// （"2006-01-02 15:04:05"，本地时区）。登录历史按天回溯时用。
+	Since string
 }
 
 // 审计结果的两种取值。
@@ -37,7 +40,9 @@ const (
 // AuditKeepDays 审计日志保留天数（按天清理，避免长期运行把库撑大）。
 const AuditKeepDays = 90
 
-const auditTimeLayout = "2006-01-02 15:04:05"
+// AuditTimeLayout 审计时间格式（本地时区）。查询条件 Since 与展示共用，
+// 改一处即可，避免写入与过滤用两种格式导致「明明有记录却查不到」。
+const AuditTimeLayout = "2006-01-02 15:04:05"
 
 // AddAudit 写入一条审计。
 //
@@ -45,7 +50,7 @@ const auditTimeLayout = "2006-01-02 15:04:05"
 // 不能因为它挂了就让改配置这类主操作失败。
 func (s *Store) AddAudit(e AuditEntry) error {
 	if e.Time == "" {
-		e.Time = time.Now().Format(auditTimeLayout)
+		e.Time = time.Now().Format(AuditTimeLayout)
 	}
 	if e.Result == "" {
 		e.Result = AuditOK
@@ -81,6 +86,10 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, error) {
 		where = append(where, `result = ?`)
 		args = append(args, f.Result)
 	}
+	if f.Since != "" {
+		where = append(where, `ts >= ?`)
+		args = append(args, f.Since)
+	}
 	q := `SELECT id, ts, actor, ip, action, target, result, detail FROM audit_log`
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -111,7 +120,7 @@ func (s *Store) PruneAudit(keepDays int) (int64, error) {
 	if keepDays <= 0 {
 		keepDays = AuditKeepDays
 	}
-	cutoff := time.Now().AddDate(0, 0, -keepDays).Format(auditTimeLayout)
+	cutoff := time.Now().AddDate(0, 0, -keepDays).Format(AuditTimeLayout)
 	res, err := s.db.Exec(`DELETE FROM audit_log WHERE ts < ?`, cutoff)
 	if err != nil {
 		return 0, err

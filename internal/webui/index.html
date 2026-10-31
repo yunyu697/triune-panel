@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.9.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -598,7 +598,7 @@ canvas{display:block;width:100%}
     <!-- 用户 -->
     <section id="v-clients" class="view">
       <div class="card">
-        <h3>用户<span class="spacer"></span><button class="btn primary sm" onclick="openClientModal()">+ 新增用户</button></h3>
+        <h3>用户<span class="spacer"></span><button class="btn primary sm need-admin" onclick="openClientModal()">+ 新增用户</button></h3>
         <div class="tbl-wrap"><table>
           <thead><tr><th>名称</th><th>凭据</th><th>订阅链接</th><th>配额</th><th>到期</th><th>启用</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="cltbody"></tbody>
@@ -800,6 +800,27 @@ canvas{display:block;width:100%}
         </div>
       </div>
 
+      <!-- 登录历史：会话表只回答「现在谁还连着」，过去只能翻审计 -->
+      <div class="card">
+        <h3>登录历史<span class="spacer"></span>
+          <select id="lh_days" class="input" style="width:120px" onchange="loadLoginHistory()">
+            <option value="7">近 7 天</option>
+            <option value="30">近 30 天</option>
+            <option value="90">近 90 天</option>
+          </select>
+          <button class="btn sm" onclick="loadLoginHistory()">刷新</button>
+        </h3>
+        <p class="muted" style="margin:0 0 12px">
+          来自审计的登录记录（保留 90 天）：成功与失败次数、来源 IP、最近一次成功 / 失败。
+          来源 IP 只统计<b>成功</b>的登录——失败尝试多半来自扫描器，混进来会让人误以为自己的账号被人用过。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>账号</th><th>成功 / 失败</th><th>来源 IP</th><th>最近成功</th><th>最近失败</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="lhbody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <p class="muted" id="lh_msg" style="margin:10px 0 0"></p>
+      </div>
+
       <div class="need-admin">
       <div class="card">
         <h3>基础设置</h3>
@@ -838,6 +859,28 @@ canvas{display:block;width:100%}
         <p class="muted" style="margin:0">仅管理本机防火墙，云厂商安全组需在控制台另行放行。iptables 规则重启后不保留，ufw / firewalld 会持久化。</p>
         <div style="margin-top:14px"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
+      <div class="card">
+        <h3>变更通知<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px" id="nt_state"></span></h3>
+        <p class="muted" style="margin:0 0 12px">
+          改配置时推一条摘要出去：谁、什么时候、改了什么，设置项带<b>字段级 diff</b>（从什么改成什么）。
+          邮件复用下方「登录二次验证」里的 SMTP 通道；Webhook 是 POST 一个 JSON。
+          敏感值（密码 / 密钥 / 令牌）只写「已变更」，不推明文。
+        </p>
+        <div class="frm">
+          <div><label>收件邮箱<span class="muted" style="font-weight:400">（留空 = 不发邮件）</span></label>
+            <input id="s_notify_email" class="input" placeholder="ops@example.com"></div>
+          <div><label>Webhook 地址<span class="muted" style="font-weight:400">（留空 = 不推）</span></label>
+            <input id="s_notify_webhook" class="input mono" placeholder="https://hooks.example.com/triune"></div>
+          <div class="full"><label>订阅哪些事件<span class="muted" style="font-weight:400">（全不选 = 默认集合，不含登录）</span></label>
+            <div class="checks" id="nt_events"></div></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn primary" onclick="saveNotify()">保存通知设置</button>
+          <button class="btn" onclick="testNotify()">发送测试</button>
+          <span class="muted" id="nt_msg"></span>
+        </div>
+      </div>
+
       <div class="card">
         <h3>ACME 证书（Let's Encrypt · HTTP-01）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
         <div class="frm">
@@ -3593,10 +3636,11 @@ const VIEWS = [
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
 
-/* 只读账号的可见页面：其余页面依赖的接口（客户端凭据、导出、应用、审计）
+/* 只读账号的可见页面：其余页面依赖的接口（导出、应用、审计、设置）
    都会 403，与其让人点进去看一堆红字，不如不给入口。
-   「设置」保留，但里面只显示「我的账号」卡片（见 applyRole）。 */
-const VIEWER_VIEWS = ["overview", "inbounds", "traffic", "settings"];
+   「用户」保留：服务端返回脱敏副本（凭据与订阅令牌为空），能看到用量与配额，
+   但改不了。「设置」保留，里面只显示「我的账号」「登录设备」两张卡。 */
+const VIEWER_VIEWS = ["overview", "inbounds", "clients", "traffic", "settings"];
 function visibleViews() {
   return VIEWS.filter(([k]) => !isViewer() || VIEWER_VIEWS.includes(k));
 }
@@ -3735,7 +3779,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com"},
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client"},
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
       {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
@@ -3809,6 +3853,26 @@ async function mockRoute(path, opts) {
     if (rest.includes("disable")) return { ok:"1" };
     return {};
   }
+  if (api === "login-history") {
+    const t = n => new Date(Date.now() - n * 60000).toISOString().slice(0, 19).replace("T", " ");
+    return { days: +q.days || 7, scanned: 11, truncated: false, items: [
+      { user:"admin", total:4, ok:3, fail:1, ips:["203.0.113.7","198.51.100.77"],
+        last_ok:t(12), last_fail:t(320), events:[
+        {time:t(12), ip:"203.0.113.7", result:"ok", detail:"登录成功（已通过 totp 二次验证）"},
+        {time:t(95), ip:"198.51.100.77", result:"ok", detail:"登录成功（已通过 totp 二次验证）"},
+        {time:t(320), ip:"45.9.9.9", result:"fail", detail:"用户名或密码错误"},
+        {time:t(1440), ip:"203.0.113.7", result:"ok", detail:"登录成功"}] },
+      { user:"ops-lin", total:2, ok:2, fail:0, ips:["198.51.100.23"],
+        last_ok:t(600), last_fail:"", events:[
+        {time:t(600), ip:"198.51.100.23", result:"ok", detail:"登录成功"},
+        {time:t(1500), ip:"198.51.100.23", result:"ok", detail:"登录成功"}] },
+      { user:"root", total:5, ok:0, fail:5, ips:[],
+        last_ok:"", last_fail:t(3), events:[
+        {time:t(3), ip:"45.9.9.9", result:"fail", detail:"用户名或密码错误"},
+        {time:t(4), ip:"45.9.9.9", result:"fail", detail:"用户名或密码错误"},
+        {time:t(5), ip:"45.9.9.9", result:"fail", detail:"来源处于锁定期，拒绝登录（剩余约 10 分钟）"}] }
+    ]};
+  }
   if (api === "sessions") {
     if (m === "GET") return MDB.sessions;
     const sid = (rest || "").split("/")[1];
@@ -3859,6 +3923,13 @@ async function mockRoute(path, opts) {
   if (api === "traffic/live") return {up_bps:Math.round(2.1e5+Math.random()*9e4), down_bps:Math.round(1.9e6+Math.random()*8e5), interval:30, updated_at:new Date().toISOString().slice(0,19)};
   if (api === "revisions") return MDB.revisions;
   if (api === "logs") return {logs:["2026-10-31 03:40:11 INFO sing-box started (1.9.7)","2026-10-31 03:40:11 INFO inbound/hk-01-reality: tcp://:443 started","2026-10-31 03:40:12 INFO inbound/jp-01-ws: ws://:8443 started"]};
+  if (api === "notify" && rest.includes("/test")) {
+    const ch = [];
+    if ((MDB.settings.notify_email || "").trim()) ch.push("邮件 → " + MDB.settings.notify_email);
+    if ((MDB.settings.notify_webhook || "").trim()) ch.push("Webhook → " + MDB.settings.notify_webhook);
+    if (!ch.length) return { ok: false, errors: ["还没配置任何通道：填收件邮箱或 Webhook 地址后先保存"] };
+    return { ok: true, channels: ch };
+  }
   if (api === "settings" && m === "GET") return MDB.settings;
   if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
   if (api === "apply") { MDB.revisions.unshift({id:++REV_N,core:opts.body.core,status:"applied",note:opts.body.note||"demo apply",created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"}); return {revision_id:REV_N,core:opts.body.core,validated:true,restarted:true}; }
@@ -4045,12 +4116,12 @@ function logout(){
 
 /* ================= 数据加载 ================= */
 async function loadAll() {
-  // 按角色决定拉什么：只读账号拉客户端 / 设置 / 配置生成会被 403，
-  // 与其刷一串错误提示，不如根本不请求。
-  const jobs = [loadStatus(), loadInbounds(), loadTraffic(), loadRevisions(), loadVersion(),
-                loadCerts(), loadComponents(), loadLive(), loadExternal(), loadOverview(), loadMe(),
-                loadSessions()];
-  if (!isViewer()) jobs.push(loadClients(), loadSettings(), loadGen(), loadAuth2FA());
+  // 按角色决定拉什么：只读账号拉设置 / 配置生成会被 403，
+  // 与其刷一串错误提示，不如根本不请求。用户列表例外——服务端会给脱敏副本。
+  const jobs = [loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(),
+                loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(),
+                loadOverview(), loadMe(), loadSessions(), loadLoginHistory()];
+  if (!isViewer()) jobs.push(loadSettings(), loadGen(), loadAuth2FA());
   if (isOwner()) jobs.push(loadAdmins());
   await Promise.allSettled(jobs);
 }
@@ -4097,28 +4168,43 @@ async function loadStatus() {
     if ($("v-overview") && $("v-overview").classList.contains("active")) { renderKpis(); renderRings(); }
   } catch(e){}
 }
-let CLIENT_N = 0, CL_INBS = [];
+let CLIENT_N = 0, CL_INBS = [], CL_MASKED = false;
 async function loadClients() {
   try {
     const j = await req("/api/clients");
     CLIENT_N = j.length;
+    // 只读账号拿到的凭据与订阅令牌是空的（服务端置空 + masked 标记）。
+    // 这里不能渲染成「没配凭据」——要明确说是权限问题。
+    CL_MASKED = !!(j[0] && j[0].masked);
     const inbs = await req("/api/inbounds").catch(() => []);
     CL_INBS = inbs;
-    $("cltbody").innerHTML = j.map(x => { const c = x.client;
-      return `<tr>
-      <td><b>${c.name}</b></td>
-      <td class="mono" title="${c.credential}">${c.credential.slice(0,14)}…</td>
-      <td><span class="sub-token"><a href="${DEMO?"#":"/sub/"+c.sub_token}" target="_blank" class="mono">/sub/${c.sub_token.slice(0,10)}…</a>
+    $("cltbody").innerHTML = j.map(x => { const c = x.client, m = !!x.masked;
+      const cred = m
+        ? '<span class="muted" title="只读账号看不到凭据">—</span>'
+        : `<span class="mono" title="${c.credential}">${c.credential.slice(0,14)}…</span>`;
+      const sub = m
+        ? '<span class="muted" title="只读账号看不到订阅令牌">—</span>'
+        : `<span class="sub-token"><a href="${DEMO?"#":"/sub/"+c.sub_token}" target="_blank" class="mono">/sub/${c.sub_token.slice(0,10)}…</a>
         <button class="btn sm" title="复制订阅链接" onclick="copySub('${c.sub_token}')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         复制</button>
         <button class="btn sm" title="生成订阅/节点二维码，手机扫码即用" onclick="userQRSub('${c.sub_token}','${c.name}')">二维码</button>
-        <button class="btn sm" title="重置后旧订阅链接立即失效" onclick="resetSubToken(${c.id})">重置订阅</button></span></td>
+        <button class="btn sm" title="重置后旧订阅链接立即失效" onclick="resetSubToken(${c.id})">重置订阅</button></span>`;
+      const sw = m
+        ? (c.enabled ? '<span class="badge b-ok">启用</span>' : '<span class="badge b-idle">停用</span>')
+        : `<label class="sw"><input type="checkbox" ${c.enabled?"checked":""} onchange="toggleClient(${c.id},this.checked)"><i></i></label>`;
+      const ops = m
+        ? '<span class="muted" style="font-size:12px">只读</span>'
+        : `<button class="btn sm" onclick="openClientModal(${c.id})">编辑</button>
+        <button class="btn sm danger" onclick="delClient(${c.id})">删除</button>`;
+      return `<tr>
+      <td><b>${c.name}</b></td>
+      <td>${cred}</td>
+      <td>${sub}</td>
       <td>${c.quota_gb ? c.quota_gb + " GB" : "不限"}</td>
       <td>${c.expires_at ? c.expires_at.slice(0,10) : '<span class="muted">永久</span>'}</td>
-      <td><label class="sw"><input type="checkbox" ${c.enabled?"checked":""} onchange="toggleClient(${c.id},this.checked)"><i></i></label></td>
-      <td class="ta-r"><button class="btn sm" onclick="openClientModal(${c.id})">编辑</button>
-        <button class="btn sm danger" onclick="delClient(${c.id})">删除</button></td></tr>`;
+      <td>${sw}</td>
+      <td class="ta-r">${ops}</td></tr>`;
     }).join("") || `<tr><td colspan="7" class="empty">暂无用户，点击右上角「+ 新增用户」创建</td></tr>`;
   } catch(e){}
 }
@@ -7242,7 +7328,67 @@ async function loadSettings() {
     $("s_auth_email").value = j.auth_email || "";
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
     $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
+    applyNotifyValues(j);
   } catch(e){}
+}
+
+/* ---- 变更通知 ----
+   订阅项按审计动作前缀登记：勾「设置变更」= settings（含 settings.update /
+   settings.password）。全不选时后端用默认集合（不含登录，否则收件箱很快就没人看）。 */
+const NOTIFY_EVENTS = [
+  ["settings","设置变更"], ["inbound","入站增删改"], ["client","用户增删改"],
+  ["admin","管理员账号"], ["apply","应用配置"], ["session","吊销会话"],
+  ["auth2fa","二次验证"], ["update","版本更新"]
+];
+function renderNotifyEvents() {
+  const box = $("nt_events");
+  if (!box) return;
+  box.innerHTML = NOTIFY_EVENTS.map(([k, label]) =>
+    `<label><input type="checkbox" value="${k}"> ${label}</label>`).join("");
+}
+renderNotifyEvents();
+
+function applyNotifyValues(j) {
+  if (!$("s_notify_email")) return;
+  $("s_notify_email").value = j.notify_email || "";
+  $("s_notify_webhook").value = j.notify_webhook || "";
+  const sel = String(j.notify_events || "").split(",").map(s => s.trim()).filter(Boolean);
+  document.querySelectorAll("#nt_events input").forEach(i => { i.checked = sel.includes(i.value); });
+  const ch = [];
+  if ((j.notify_email || "").trim()) ch.push("邮件");
+  if ((j.notify_webhook || "").trim()) ch.push("Webhook");
+  $("nt_state").textContent = ch.length ? "已启用：" + ch.join(" + ") : "未启用";
+}
+
+async function saveNotify() {
+  const events = [...document.querySelectorAll("#nt_events input:checked")].map(i => i.value).join(",");
+  try {
+    await req("/api/settings", { method: "PUT", body: {
+      notify_email: $("s_notify_email").value.trim(),
+      notify_webhook: $("s_notify_webhook").value.trim(),
+      notify_events: events,
+    }});
+    $("nt_msg").textContent = "已保存";
+    toast("通知设置已保存");
+    loadSettings();
+  } catch (e) { toast("保存失败：" + e.message, "err"); }
+}
+
+async function testNotify() {
+  $("nt_msg").textContent = "发送中…";
+  try {
+    const j = await req("/api/notify/test", { method: "POST" });
+    if (j.ok) {
+      $("nt_msg").textContent = "已发送：" + (j.channels || []).join("、");
+      toast("测试通知已发送");
+    } else {
+      $("nt_msg").textContent = (j.errors || []).join("；");
+      toast("测试通知发送失败", "err");
+    }
+  } catch (e) {
+    $("nt_msg").textContent = e.message;
+    toast("测试失败：" + e.message, "err");
+  }
 }
 
 /* ================= 登录二次验证（2FA 管理） ================= */
@@ -7693,6 +7839,49 @@ async function revokeOtherDevices() {
     toast(`已退出 ${(j && j.revoked) || 0} 台设备`);
     loadSessions();
   } catch (e) { toast("操作失败：" + e.message, "err"); }
+}
+
+/* ---- 登录历史：审计里的 login 记录按人聚合 ---- */
+let LH = [];
+async function loadLoginHistory() {
+  const tb = $("lhbody");
+  if (!tb) return;
+  try {
+    const days = $("lh_days") ? $("lh_days").value : 7;
+    const j = await req("/api/login-history?days=" + days);
+    LH = j.items || [];
+    $("lh_msg").textContent = j.truncated
+      ? `只扫描了最近 ${j.scanned} 条登录记录，更早的没统计进来（缩小时间范围会更准）。`
+      : (j.scanned ? `该时间段内共 ${j.scanned} 条登录记录。` : "该时间段内没有登录记录。");
+    if (!LH.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="muted">暂无登录记录</td></tr>';
+      return;
+    }
+    tb.innerHTML = LH.map((h, i) => {
+      const fail = h.fail ? `<span class="badge b-warn">${h.fail}</span>` : '<span class="muted">0</span>';
+      const ips = (h.ips || []).length
+        ? h.ips.map(ip => `<span class="mono" style="font-size:12px">${escHtml(ip)}</span>`).join(", ")
+        : '<span class="muted">—</span>';
+      // 账号名可能是任意「被尝试的用户名」（有人在猜 admin"），不能拼进内联 JS 字符串，
+      // 所以传下标，函数里再回查
+      return `<tr>
+        <td><b>${escHtml(h.user)}</b>${h.user === (ME.user || "") ? ' <span class="muted" style="font-size:11px">（我）</span>' : ""}</td>
+        <td><span class="badge b-ok">${h.ok}</span> ${fail}</td>
+        <td>${ips}</td>
+        <td class="muted" style="font-size:12px">${escHtml(h.last_ok || "—")}</td>
+        <td class="muted" style="font-size:12px">${escHtml(h.last_fail || "—")}</td>
+        <td class="ta-r"><button class="btn sm" onclick="showLoginTimeline(${i})">时间线</button></td></tr>`;
+    }).join("");
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="6" class="muted">${escHtml(e.message)}</td></tr>`;
+  }
+}
+function showLoginTimeline(idx) {
+  const h = LH[idx];
+  if (!h) return;
+  const lines = (h.events || []).map(e =>
+    `${e.time}  ${e.result === "ok" ? "✓ 成功" : "✕ 失败"}  ${e.ip || "-"}  ${e.detail || ""}`);
+  viewContent(`登录时间线 · ${h.user}`, lines.length ? lines.join("\n") : "暂无记录");
 }
 
 /* ================= 审计日志 ================= */

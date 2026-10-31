@@ -241,7 +241,7 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 		"revision_id": applyRes.RevisionID,
 		"warnings":    warnings,
 	})
-	a.auditOK(r, AuditSwitchCore, req.To,
+	a.changed(r, AuditSwitchCore, req.To,
 		fmt.Sprintf("%d 个入站由 %s 切换到 %s（修订 #%d）",
 			len(targets), strings.Join(fromList, "/"), req.To, applyRes.RevisionID))
 }
