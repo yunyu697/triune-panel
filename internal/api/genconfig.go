@@ -20,7 +20,8 @@ type ruleSetDef struct {
 	Name     string `json:"name"`     // 显示名
 	Dir      string `json:"-"`        // geosite | geoip（决定 URL 模板）
 	Behavior string `json:"behavior"` // domain | ipcidr
-	Group    string `json:"group"`    // UI 分组：基础 / 流媒体 / AI / 广告 / 平台
+	Group    string `json:"group"`    // UI 分组：基础分流 / 流媒体 / AI / 广告与隐私 ...
+	Cores    string `json:"cores"`    // both | mihomo | singbox（上游规则集覆盖情况）
 }
 
 type setPolicy struct {
@@ -31,31 +32,127 @@ type setPolicy struct {
 type scenarioDef struct {
 	ID    string      `json:"id"`
 	Name  string      `json:"name"`
+	Tag   string      `json:"tag"`   // 场景分类标签：通用 / 流媒体 / AI / 游戏 ...
 	Desc  string      `json:"desc"`
 	Sets  []setPolicy `json:"sets"`
 	Rules []string    `json:"rules"` // 场景内置的自定义规则（clash 语法）
 }
 
 // ruleCatalog 规则集目录（geosite 类目名与 v2fly domain-list-community / MetaCubeX / SagerNet 对齐）
+// ruleCatalog 规则集目录
+// 所有条目均已对上游真实文件校验：
+//   mihomo   → MetaCubeX/meta-rules-dat  meta/geo/{geosite|geoip}/{name}.mrs
+//   sing-box → SagerNet/sing-geosite      rule-set/geosite-{name}.srs
+//              SagerNet/sing-geoip       rule-set/geoip-{name}.srs
+// Cores 标记该规则集在哪些内核的上游存在（geoip-private / category-porn 仅 mihomo 提供）。
 var ruleCatalog = []ruleSetDef{
-	{ID: "geosite-cn", Name: "中国大陆域名", Dir: "geosite", Behavior: "domain", Group: "基础分流"},
-	{ID: "geoip-cn", Name: "中国大陆 IP", Dir: "geoip", Behavior: "ipcidr", Group: "基础分流"},
-	{ID: "geosite-private", Name: "局域网/私有域名", Dir: "geosite", Behavior: "domain", Group: "基础分流"},
-	{ID: "geosite-category-ads-all", Name: "广告域名（通用）", Dir: "geosite", Behavior: "domain", Group: "广告拦截"},
-	{ID: "geosite-netflix", Name: "Netflix", Dir: "geosite", Behavior: "domain", Group: "流媒体"},
-	{ID: "geosite-disney", Name: "Disney+", Dir: "geosite", Behavior: "domain", Group: "流媒体"},
-	{ID: "geosite-youtube", Name: "YouTube", Dir: "geosite", Behavior: "domain", Group: "流媒体"},
-	{ID: "geosite-tiktok", Name: "TikTok", Dir: "geosite", Behavior: "domain", Group: "流媒体"},
-	{ID: "geosite-spotify", Name: "Spotify", Dir: "geosite", Behavior: "domain", Group: "流媒体"},
-	{ID: "geosite-openai", Name: "OpenAI / ChatGPT", Dir: "geosite", Behavior: "domain", Group: "AI 服务"},
-	{ID: "geosite-bing", Name: "Bing / Copilot", Dir: "geosite", Behavior: "domain", Group: "AI 服务"},
-	{ID: "geosite-category-games", Name: "游戏平台（Steam/PSN 等）", Dir: "geosite", Behavior: "domain", Group: "游戏"},
-	{ID: "geosite-steam", Name: "Steam", Dir: "geosite", Behavior: "domain", Group: "游戏"},
-	{ID: "geosite-telegram", Name: "Telegram", Dir: "geosite", Behavior: "domain", Group: "平台直连/代理"},
-	{ID: "geosite-google", Name: "Google", Dir: "geosite", Behavior: "domain", Group: "平台直连/代理"},
-	{ID: "geosite-apple", Name: "Apple", Dir: "geosite", Behavior: "domain", Group: "平台直连/代理"},
-	{ID: "geosite-microsoft", Name: "Microsoft", Dir: "geosite", Behavior: "domain", Group: "平台直连/代理"},
-	{ID: "geosite-gfw", Name: "GFW 列表", Dir: "geosite", Behavior: "domain", Group: "平台直连/代理"},
+	{ID: "geosite-cn", Name: "中国大陆域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both"},
+	{ID: "geoip-cn", Name: "中国大陆 IP", Dir: "geoip", Behavior: "ipcidr", Group: "基础分流", Cores: "both"},
+	{ID: "geosite-private", Name: "局域网 / 私有域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both"},
+	{ID: "geoip-private", Name: "局域网 / 私有 IP", Dir: "geoip", Behavior: "ipcidr", Group: "基础分流", Cores: "mihomo"},
+	{ID: "geosite-geolocation-!cn", Name: "非中国大陆域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both"},
+	{ID: "geosite-category-ads-all", Name: "广告域名（通用全量）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-ads", Name: "广告域名（精简）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-public-tracker", Name: "公共追踪器", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-telemetry", Name: "遥测 / 数据上报", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-consent-management", Name: "Cookie 同意管理", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-password-management", Name: "密码管理器", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-ip-geo-detect", Name: "IP 归属地检测", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-anticensorship", Name: "反审查站点", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-proxy-tunnels", Name: "代理隧道与中转", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-vpnservices", Name: "VPN 服务商", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-stun", Name: "STUN / TURN 服务", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-category-ipfs", Name: "IPFS 节点", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both"},
+	{ID: "geosite-openai", Name: "OpenAI / ChatGPT", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-anthropic", Name: "Anthropic / Claude", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-category-ai-!cn", Name: "AI 服务（海外）", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-category-ai-chat-!cn", Name: "AI 对话（海外）", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-category-ai-cn", Name: "AI 服务（国内）", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-category-ai-ru", Name: "AI 服务（俄罗斯区）", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-google-gemini", Name: "Google Gemini", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-perplexity", Name: "Perplexity", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-deepseek", Name: "DeepSeek", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-doubao", Name: "豆包 Doubao", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-bing", Name: "Bing / Copilot", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-huggingface", Name: "Hugging Face", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-notion", Name: "Notion", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both"},
+	{ID: "geosite-netflix", Name: "Netflix", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-disney", Name: "Disney+", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-youtube", Name: "YouTube", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-tiktok", Name: "TikTok", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-spotify", Name: "Spotify", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-hbo", Name: "HBO", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-bahamut", Name: "巴哈姆特动漫", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-twitch", Name: "Twitch", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-netease", Name: "网易云音乐", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-bilibili", Name: "哔哩哔哩", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-iqiyi", Name: "爱奇艺", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-youku", Name: "优酷", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-category-media", Name: "影音媒体站点", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-category-media-cn", Name: "国内影音站点", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-category-entertainment", Name: "娱乐站点", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-category-entertainment-cn", Name: "国内娱乐站点", Dir: "geosite", Behavior: "domain", Group: "流媒体影音", Cores: "both"},
+	{ID: "geosite-telegram", Name: "Telegram", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-twitter", Name: "X / Twitter", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-facebook", Name: "Facebook", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-instagram", Name: "Instagram", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-whatsapp", Name: "WhatsApp", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-line", Name: "LINE", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-discord", Name: "Discord", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-reddit", Name: "Reddit", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-viber", Name: "Viber", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-signal", Name: "Signal", Dir: "geosite", Behavior: "domain", Group: "社交通讯", Cores: "both"},
+	{ID: "geosite-category-games", Name: "游戏平台（综合）", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-category-games-cn", Name: "国内游戏平台", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-category-game-accelerator-cn", Name: "国内游戏加速服务", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-category-enhance-gaming", Name: "游戏加速增强", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-category-flight-simulator", Name: "模拟器类游戏", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-steam", Name: "Steam", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-epicgames", Name: "Epic Games", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-playstation", Name: "PlayStation", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-xbox", Name: "Xbox", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-nintendo", Name: "Nintendo", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-blizzard", Name: "暴雪战网", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-mihoyo", Name: "米哈游（HoYoPlay）", Dir: "geosite", Behavior: "domain", Group: "游戏加速", Cores: "both"},
+	{ID: "geosite-github", Name: "GitHub", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-gitlab", Name: "GitLab", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-docker", Name: "Docker Hub", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-golang", Name: "Go 语言站点", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-nodejs", Name: "Node.js / npm", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-jetbrains", Name: "JetBrains", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-category-dev", Name: "开发者站点", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-category-dev-cn", Name: "国内开发者站点", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-category-cdn-!cn", Name: "海外 CDN", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-category-cdn-cn", Name: "国内 CDN", Dir: "geosite", Behavior: "domain", Group: "开发与技术", Cores: "both"},
+	{ID: "geosite-category-finance", Name: "金融理财站点", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-category-bank-cn", Name: "国内银行", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-category-securities-cn", Name: "国内证券", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-category-cryptocurrency", Name: "加密货币", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-paypal", Name: "PayPal", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-stripe", Name: "Stripe", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-wise", Name: "Wise 转账", Dir: "geosite", Behavior: "domain", Group: "金融商务", Cores: "both"},
+	{ID: "geosite-amazon", Name: "Amazon", Dir: "geosite", Behavior: "domain", Group: "购物电商", Cores: "both"},
+	{ID: "geosite-ebay", Name: "eBay", Dir: "geosite", Behavior: "domain", Group: "购物电商", Cores: "both"},
+	{ID: "geosite-pinduoduo", Name: "拼多多", Dir: "geosite", Behavior: "domain", Group: "购物电商", Cores: "both"},
+	{ID: "geosite-category-ecommerce", Name: "电商平台", Dir: "geosite", Behavior: "domain", Group: "购物电商", Cores: "both"},
+	{ID: "geosite-microsoft", Name: "Microsoft", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-google", Name: "Google", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-dropbox", Name: "Dropbox", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-zoom", Name: "Zoom 会议", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-onedrive", Name: "OneDrive", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-icloud", Name: "iCloud", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-category-companies", Name: "大型企业站点", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both"},
+	{ID: "geosite-category-scholar-cn", Name: "国内学术资源", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-scholar-!cn", Name: "海外学术资源", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-scholar-hk", Name: "港澳学术资源", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-mooc-cn", Name: "国内慕课平台", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-education-cn", Name: "国内教育站点", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-documents-cn", Name: "国内文档站", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both"},
+	{ID: "geosite-category-hospital-cn", Name: "国内医院与医疗", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both"},
+	{ID: "geosite-category-food-cn", Name: "国内餐饮外卖", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both"},
+	{ID: "geosite-category-logistics-cn", Name: "国内物流", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both"},
+	{ID: "geosite-category-blog-cn", Name: "国内博客", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both"},
+	{ID: "geosite-category-porn", Name: "成人内容（拦截用）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "mihomo"},
 }
 
 var ruleSetIndex = func() map[string]ruleSetDef {
@@ -67,20 +164,23 @@ var ruleSetIndex = func() map[string]ruleSetDef {
 }()
 
 // scenarioPresets 场景预设（最常用的几种）
+// scenarioPresets 场景预设（按使用场景一键套用规则集与策略）
 var scenarioPresets = []scenarioDef{
 	{
-		ID: "balanced", Name: "均衡日常", Desc: "国内直连、广告拦截、常规外网走代理，适合日常使用",
+		ID: "balanced", Name: "均衡日常", Tag: "通用",
+		Desc: "国内直连 + 广告拦截 + 常规外网走代理，绝大多数用户的默认选择",
 		Sets: []setPolicy{
 			{ID: "geosite-category-ads-all", Policy: "REJECT"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
-			{ID: "geosite-apple", Policy: "DIRECT"},
 			{ID: "geosite-microsoft", Policy: "DIRECT"},
+			{ID: "geosite-google", Policy: "PROXY"},
 		},
 	},
 	{
-		ID: "streaming", Name: "流媒体优先", Desc: "在均衡基础上，Netflix/Disney+/YouTube/TikTok 等强制走代理",
+		ID: "streaming", Name: "流媒体优先", Tag: "流媒体",
+		Desc: "海外流媒体全量走代理，避免 CDN 落地变慢、区域限制",
 		Sets: []setPolicy{
 			{ID: "geosite-category-ads-all", Policy: "REJECT"},
 			{ID: "geosite-netflix", Policy: "PROXY"},
@@ -88,52 +188,319 @@ var scenarioPresets = []scenarioDef{
 			{ID: "geosite-youtube", Policy: "PROXY"},
 			{ID: "geosite-tiktok", Policy: "PROXY"},
 			{ID: "geosite-spotify", Policy: "PROXY"},
+			{ID: "geosite-hbo", Policy: "PROXY"},
+			{ID: "geosite-bahamut", Policy: "PROXY"},
+			{ID: "geosite-twitch", Policy: "PROXY"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
-			{ID: "geosite-apple", Policy: "DIRECT"},
 			{ID: "geosite-microsoft", Policy: "DIRECT"},
 		},
 	},
 	{
-		ID: "gaming", Name: "游戏加速", Desc: "Steam/游戏平台走代理降低延迟，其余国内直连",
+		ID: "gaming", Name: "游戏加速", Tag: "游戏",
+		Desc: "游戏平台与加速服务走代理，降低延迟；国内服务照常直连",
 		Sets: []setPolicy{
 			{ID: "geosite-category-ads-all", Policy: "REJECT"},
 			{ID: "geosite-category-games", Policy: "PROXY"},
 			{ID: "geosite-steam", Policy: "PROXY"},
+			{ID: "geosite-epicgames", Policy: "PROXY"},
+			{ID: "geosite-playstation", Policy: "PROXY"},
+			{ID: "geosite-xbox", Policy: "PROXY"},
+			{ID: "geosite-nintendo", Policy: "PROXY"},
+			{ID: "geosite-blizzard", Policy: "PROXY"},
+			{ID: "geosite-mihoyo", Policy: "PROXY"},
+			{ID: "geosite-category-enhance-gaming", Policy: "PROXY"},
+			{ID: "geosite-category-flight-simulator", Policy: "PROXY"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
 		},
 	},
 	{
-		ID: "ai", Name: "AI 服务", Desc: "OpenAI / Bing Copilot 等走代理（保证区域可用性），其余国内直连",
+		ID: "ai", Name: "AI 服务", Tag: "AI",
+		Desc: "ChatGPT / Claude / Gemini 等走代理保证区域可用，国内 AI 服务直连",
 		Sets: []setPolicy{
 			{ID: "geosite-category-ads-all", Policy: "REJECT"},
 			{ID: "geosite-openai", Policy: "PROXY"},
+			{ID: "geosite-anthropic", Policy: "PROXY"},
+			{ID: "geosite-category-ai-!cn", Policy: "PROXY"},
+			{ID: "geosite-category-ai-chat-!cn", Policy: "PROXY"},
+			{ID: "geosite-google-gemini", Policy: "PROXY"},
+			{ID: "geosite-perplexity", Policy: "PROXY"},
+			{ID: "geosite-deepseek", Policy: "PROXY"},
+			{ID: "geosite-huggingface", Policy: "PROXY"},
+			{ID: "geosite-notion", Policy: "PROXY"},
 			{ID: "geosite-bing", Policy: "PROXY"},
-			{ID: "geosite-google", Policy: "PROXY"},
+			{ID: "geosite-category-ai-cn", Policy: "DIRECT"},
+			{ID: "geosite-doubao", Policy: "DIRECT"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
-			{ID: "geosite-apple", Policy: "DIRECT"},
-			{ID: "geosite-microsoft", Policy: "DIRECT"},
 		},
 	},
 	{
-		ID: "privacy", Name: "隐私优先", Desc: "广告/跟踪全拦截，除国内必需外全部走代理",
+		ID: "privacy", Name: "隐私优先", Tag: "隐私",
+		Desc: "广告 / 追踪 / 遥测全部拦截，除国内必需外一律走代理",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-public-tracker", Policy: "REJECT"},
+			{ID: "geosite-category-telemetry", Policy: "REJECT"},
+			{ID: "geosite-category-consent-management", Policy: "REJECT"},
+			{ID: "geosite-category-password-management", Policy: "REJECT"},
+			{ID: "geosite-category-ip-geo-detect", Policy: "REJECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+		Rules: []string{
+			"DOMAIN-KEYWORD,analytics,REJECT",
+			"DOMAIN-KEYWORD,tracker,REJECT",
+			"DOMAIN-SUFFIX,doubleclick.net,REJECT",
+		},
+	},
+	{
+		ID: "cn-max", Name: "国内直连优先", Tag: "通用",
+		Desc: "只有明确在境外的站点走代理，可用性最高、延迟最低",
+		Sets: []setPolicy{
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "work", Name: "办公协作", Tag: "办公",
+		Desc: "SaaS 协作工具走代理，保证海外团队会议与文档同步顺畅",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-zoom", Policy: "PROXY"},
+			{ID: "geosite-dropbox", Policy: "PROXY"},
+			{ID: "geosite-onedrive", Policy: "PROXY"},
+			{ID: "geosite-microsoft", Policy: "PROXY"},
+			{ID: "geosite-google", Policy: "PROXY"},
+			{ID: "geosite-category-companies", Policy: "PROXY"},
+			{ID: "geosite-category-cdn-!cn", Policy: "PROXY"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "dev", Name: "开发调试", Tag: "开发",
+		Desc: "代码托管 / 镜像源 / 包管理走代理，国内镜像直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-github", Policy: "PROXY"},
+			{ID: "geosite-gitlab", Policy: "PROXY"},
+			{ID: "geosite-docker", Policy: "PROXY"},
+			{ID: "geosite-golang", Policy: "PROXY"},
+			{ID: "geosite-nodejs", Policy: "PROXY"},
+			{ID: "geosite-jetbrains", Policy: "PROXY"},
+			{ID: "geosite-category-dev", Policy: "PROXY"},
+			{ID: "geosite-category-dev-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-cdn-cn", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "study", Name: "学术科研", Tag: "学习",
+		Desc: "海外学术资源走代理，国内教务与文档站直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-scholar-!cn", Policy: "PROXY"},
+			{ID: "geosite-category-scholar-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-scholar-hk", Policy: "DIRECT"},
+			{ID: "geosite-category-mooc-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-education-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-documents-cn", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "finance", Name: "金融证券", Tag: "商务",
+		Desc: "海外支付与理财走代理，国内银行证券直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-finance", Policy: "PROXY"},
+			{ID: "geosite-paypal", Policy: "PROXY"},
+			{ID: "geosite-stripe", Policy: "PROXY"},
+			{ID: "geosite-wise", Policy: "PROXY"},
+			{ID: "geosite-category-cryptocurrency", Policy: "PROXY"},
+			{ID: "geosite-category-bank-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-securities-cn", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "shopping", Name: "海淘电商", Tag: "商务",
+		Desc: "海外电商走代理保物流与风控稳定，国内电商直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-amazon", Policy: "PROXY"},
+			{ID: "geosite-ebay", Policy: "PROXY"},
+			{ID: "geosite-category-ecommerce", Policy: "PROXY"},
+			{ID: "geosite-pinduoduo", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "social", Name: "社交通讯", Tag: "社交",
+		Desc: "Telegram / X / Discord 等社交平台走代理，保留国内即时通讯直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-telegram", Policy: "PROXY"},
+			{ID: "geosite-twitter", Policy: "PROXY"},
+			{ID: "geosite-facebook", Policy: "PROXY"},
+			{ID: "geosite-instagram", Policy: "PROXY"},
+			{ID: "geosite-whatsapp", Policy: "PROXY"},
+			{ID: "geosite-line", Policy: "PROXY"},
+			{ID: "geosite-discord", Policy: "PROXY"},
+			{ID: "geosite-reddit", Policy: "PROXY"},
+			{ID: "geosite-signal", Policy: "PROXY"},
+			{ID: "geosite-viber", Policy: "PROXY"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "video-call", Name: "视频会议", Tag: "办公",
+		Desc: "会议与会议相关 SaaS 走代理，注意保留 UDP 以保证实时画质",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-zoom", Policy: "PROXY"},
+			{ID: "geosite-microsoft", Policy: "PROXY"},
+			{ID: "geosite-google", Policy: "PROXY"},
+			{ID: "geosite-category-companies", Policy: "PROXY"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+		Rules: []string{
+			"DOMAIN-SUFFIX,meet.google.com,PROXY",
+		},
+	},
+	{
+		ID: "low-latency", Name: "低延迟精简", Tag: "通用",
+		Desc: "只保留必要规则集，规则匹配开销最小，适合小内存路由与 NAS",
 		Sets: []setPolicy{
 			{ID: "geosite-category-ads-all", Policy: "REJECT"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
 		},
-		Rules: []string{"DOMAIN-KEYWORD,analytics,REJECT", "DOMAIN-KEYWORD,tracker,REJECT"},
 	},
 	{
-		ID: "cn-max", Name: "国内直连优先", Desc: "仅 GFW 列表走代理，其余全部直连（可用性最高）",
+		ID: "ads-block", Name: "纯净拦截", Tag: "隐私",
+		Desc: "专注拦广告，其余按国内直连 / 境外代理分流",
 		Sets: []setPolicy{
-			{ID: "geosite-gfw", Policy: "PROXY"},
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-ads", Policy: "REJECT"},
+			{ID: "geosite-category-public-tracker", Policy: "REJECT"},
+			{ID: "geosite-category-telemetry", Policy: "REJECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
+		},
+	},
+	{
+		ID: "overseas", Name: "出海商务", Tag: "商务",
+		Desc: "除中国大陆外全部走代理，适合出海办公与海外业务",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "back-to-cn", Name: "回国加速", Tag: "通用",
+		Desc: "国内站点与国内 CDN 强制直连，境外走代理，适合回国使用",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-cdn-cn", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
+		},
+	},
+	{
+		ID: "kid-safe", Name: "青少年模式", Tag: "隐私",
+		Desc: "拦截成人内容与广告追踪，其余保持国内直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-porn", Policy: "REJECT"},
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-public-tracker", Policy: "REJECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "music", Name: "音乐听歌", Tag: "流媒体",
+		Desc: "海外音乐平台走代理，国内音乐 App 直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-spotify", Policy: "PROXY"},
+			{ID: "geosite-youtube", Policy: "PROXY"},
+			{ID: "geosite-netease", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "anime", Name: "动漫追番", Tag: "流媒体",
+		Desc: "B 站与巴哈姆特等正版平台，国内平台直连不卡顿",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-bilibili", Policy: "DIRECT"},
+			{ID: "geosite-bahamut", Policy: "PROXY"},
+			{ID: "geosite-youtube", Policy: "PROXY"},
+			{ID: "geosite-netease", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "news", Name: "资讯聚合", Tag: "生活",
+		Desc: "海外媒体走代理，国内资讯与博客直连",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-category-media", Policy: "PROXY"},
+			{ID: "geosite-category-media-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-blog-cn", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "smart-home", Name: "智能家居直连", Tag: "生活",
+		Desc: "局域网与国内 IoT / 生活服务全部直连，只把境外流量交给代理",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-private", Policy: "DIRECT"},
+			{ID: "geosite-cn", Policy: "DIRECT"},
+			{ID: "geoip-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-food-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-hospital-cn", Policy: "DIRECT"},
+			{ID: "geosite-category-logistics-cn", Policy: "DIRECT"},
+		},
+	},
+	{
+		ID: "global", Name: "全局代理", Tag: "通用",
+		Desc: "除中国大陆外所有流量统一走代理，规则最简洁",
+		Sets: []setPolicy{
+			{ID: "geosite-category-ads-all", Policy: "REJECT"},
+			{ID: "geosite-geolocation-!cn", Policy: "PROXY"},
 			{ID: "geosite-cn", Policy: "DIRECT"},
 			{ID: "geoip-cn", Policy: "DIRECT"},
 			{ID: "geosite-private", Policy: "DIRECT"},
@@ -274,14 +641,28 @@ type normSet struct {
 	Interval int    // 更新间隔（秒）
 }
 
+// mihomoSetURL mihomo 规则集地址（上游文件名为裸名：geo/geosite/cn.mrs）
 func mihomoSetURL(dir, name string) string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/%s/%s-%s.mrs", dir, dir, name)
+	return fmt.Sprintf("https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/%s/%s.mrs", dir, name)
 }
+
+// singboxSetURL sing-box 规则集地址（上游文件带前缀：geosite-cn.srs / geoip-cn.srs）
 func singboxSetURL(dir, name string) string {
 	if dir == "geoip" {
-		return "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/" + name + ".srs"
+		return "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + name + ".srs"
 	}
-	return "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/" + name + ".srs"
+	return "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + name + ".srs"
+}
+
+// coreHasSet 判断该规则集在目标内核的上游是否存在
+func coreHasSet(core string, def ruleSetDef) bool {
+	switch def.Cores {
+	case "mihomo":
+		return core == "mihomo"
+	case "singbox":
+		return core == "singbox"
+	}
+	return true
 }
 
 func normalizeSets(q genReq) ([]normSet, []string) {
@@ -306,6 +687,11 @@ func normalizeSets(q genReq) ([]normSet, []string) {
 		def, ok := ruleSetIndex[s.ID]
 		if !ok {
 			warns = append(warns, "未知规则集已跳过: "+s.ID)
+			continue
+		}
+		// 上游未提供该规则集的内核直接跳过（避免生成 404 的远程引用）
+		if !coreHasSet(q.Core, def) {
+			warns = append(warns, def.Name+" 在 "+q.Core+" 上游没有对应规则集，已跳过")
 			continue
 		}
 		if q.Core == "mihomo" {
@@ -549,6 +935,14 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 
 func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string) *generator {
 	router := target != "client"
+
+	// DNS 分流需要 geosite-cn（国内域名走本地 DNS）：用户未勾选时自动补充，
+	// 否则 DNS 规则会引用一个不存在的 rule_set 导致 sing-box 启动失败
+	if !hasSet(sets, "geosite-cn") {
+		sets = append(sets, normSet{Tag: "geosite-cn", URL: singboxSetURL("geosite", "cn"),
+			Behavior: "domain", Policy: "DIRECT", Format: "binary", Interval: 86400})
+		*warns = append(*warns, "已自动补充 geosite-cn 规则集用于 DNS 分流（国内域名走本地 DNS）")
+	}
 
 	outbounds := []any{}
 	nodeTags := []string{}

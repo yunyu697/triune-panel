@@ -143,6 +143,16 @@ func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) 
 			n.Extra[k] = v
 		}
 	}
+	// Reality 公钥兼容多种写法：pbk / public_key / publicKey
+	// 注意：Extra 取不到时是 nil（interface），不能直接与 "" 比较
+	if pbk, _ := n.Extra["pbk"].(string); pbk == "" && in.TLS == "reality" {
+		for _, k := range []string{"public_key", "publicKey", "pbk"} {
+			if v := core.Field(in.Settings, k); v != "" {
+				n.Extra["pbk"] = v
+				break
+			}
+		}
+	}
 	if n.Security == "" {
 		n.Security = "none"
 	}

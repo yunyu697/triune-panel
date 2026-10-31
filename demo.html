@@ -7,203 +7,402 @@
 <style>
 /* ============ 设计令牌 ============ */
 :root{
-  --r-lg:14px; --r:10px; --r-sm:7px;
-  --font:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  --side-w:224px;
-  --t-fast:.16s ease; --t:.22s cubic-bezier(.4,0,.2,1);
+  --r-xl:20px; --r-lg:14px; --r:10px; --r-sm:7px;
+  --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --side-w:240px;
+  --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
-[data-theme="light"]{--bg:#f4f6f9;--side:#ffffff;--card:#ffffff;--text:#1b2129;--muted:#6b7280;--line:#e5e9ef;--hover:#f1f4f8;
-  --acc:#3b82f6;--acc-soft:#eaf1fe;--acc-text:#2563eb;--on-acc:#fff;
-  --ok:#16a34a;--ok-soft:#e7f6ed;--err:#dc2626;--err-soft:#fdecec;--warn:#d97706;--warn-soft:#fdf3e2;
-  --shadow:0 1px 2px rgba(16,24,40,.05),0 2px 8px rgba(16,24,40,.05);
-  --chart-up:#3b82f6;--chart-down:#22c55e;--mask:rgba(15,20,28,.45)}
-[data-theme="dark"]{--bg:#0e1116;--side:#12161d;--card:#161b23;--text:#e7eaef;--muted:#8b93a2;--line:#242b35;--hover:#1d242e;
-  --acc:#5b9cf8;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
+[data-theme="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#68727f;--line:#e5eaf1;--hover:#f1f4f9;
+  --acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e9f1fe;--acc-text:#2563eb;--on-acc:#fff;
+  --ok:#15a34a;--ok-soft:#e6f6ec;--err:#dc2626;--err-soft:#fdecec;--warn:#d97706;--warn-soft:#fdf3e2;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);
+  --shadow-lg:0 28px 64px -26px rgba(16,24,40,.34);
+  --glow:0 10px 22px -10px rgba(59,130,246,.6);
+  --glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);
+  --chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--grid:rgba(16,24,40,.075);
+  --tint:rgba(59,130,246,.07)}
+[data-theme="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;
+  --acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
   --ok:#2fca7f;--ok-soft:rgba(47,202,127,.14);--err:#f06a6a;--err-soft:rgba(240,106,106,.13);--warn:#eab308;--warn-soft:rgba(234,179,8,.13);
-  --shadow:0 1px 3px rgba(0,0,0,.4);--chart-up:#5b9cf8;--chart-down:#2fca7f;--mask:rgba(0,0,0,.55)}
-[data-theme="midnight"]{--bg:#0a101f;--side:#0d1526;--card:#101a30;--text:#e2e8f6;--muted:#7f8cab;--line:#1d2a47;--hover:#16223d;
-  --acc:#818cf8;--acc-soft:rgba(129,140,248,.15);--acc-text:#a5b0fb;--on-acc:#0a101f;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);
+  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);
+  --glow:0 10px 24px -10px rgba(91,156,248,.55);
+  --glass:rgba(13,16,22,.72);--mask:rgba(0,0,0,.58);
+  --chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
+  --tint:rgba(91,156,248,.08)}
+[data-theme="midnight"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;
+  --acc:#818cf8;--acc2:#22d3ee;--acc-soft:rgba(129,140,248,.15);--acc-text:#a5b0fb;--on-acc:#080d1a;
   --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#fb7185;--err-soft:rgba(251,113,133,.13);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow:0 1px 3px rgba(0,0,0,.45);--chart-up:#818cf8;--chart-down:#34d399;--mask:rgba(2,5,14,.6)}
-[data-theme="forest"]{--bg:#0c1410;--side:#101a15;--card:#131f18;--text:#e4ece6;--muted:#84a08e;--line:#20332a;--hover:#182720;
-  --acc:#34d399;--acc-soft:rgba(52,211,153,.13);--acc-text:#5fe0b0;--on-acc:#0c1410;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.45);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.75);
+  --shadow-lg:0 32px 72px -28px rgba(0,0,0,.9);
+  --glow:0 10px 26px -10px rgba(129,140,248,.6);
+  --glass:rgba(8,13,26,.72);--mask:rgba(2,5,14,.62);
+  --chart-up:#818cf8;--chart-down:#34d399;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
+  --tint:rgba(129,140,248,.09)}
+[data-theme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;
+  --acc:#34d399;--acc2:#a3e635;--acc-soft:rgba(52,211,153,.13);--acc-text:#5fe0b0;--on-acc:#0a120e;
   --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#f87171;--err-soft:rgba(248,113,113,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow:0 1px 3px rgba(0,0,0,.4);--chart-up:#34d399;--chart-down:#a3e635;--mask:rgba(2,8,5,.58)}
-[data-theme="rose"]{--bg:#141014;--side:#191319;--card:#1e161d;--text:#f0e5ea;--muted:#a58a96;--line:#2e222b;--hover:#271c24;
-  --acc:#fb7185;--acc-soft:rgba(251,113,133,.14);--acc-text:#fc93a2;--on-acc:#141014;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);
+  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);
+  --glow:0 10px 24px -10px rgba(52,211,153,.5);
+  --glass:rgba(10,18,14,.72);--mask:rgba(2,8,5,.6);
+  --chart-up:#34d399;--chart-down:#a3e635;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
+  --tint:rgba(52,211,153,.08)}
+[data-theme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;
+  --acc:#fb7185;--acc2:#c084fc;--acc-soft:rgba(251,113,133,.14);--acc-text:#fc93a2;--on-acc:#120e13;
   --ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--err:#fb7185;--err-soft:rgba(251,113,133,.14);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow:0 1px 3px rgba(0,0,0,.42);--chart-up:#fb7185;--chart-down:#4ade80;--mask:rgba(8,4,7,.58)}
-[data-theme="solar"]{--bg:#f8f3ea;--side:#fffdf8;--card:#fffdf8;--text:#40342a;--muted:#91826f;--line:#eae0cf;--hover:#f4ecdd;
-  --acc:#e08a2e;--acc-soft:#faeeda;--acc-text:#c77721;--on-acc:#fff;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.42);
+  --shadow:0 1px 2px rgba(0,0,0,.38),0 12px 30px -16px rgba(0,0,0,.72);
+  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.88);
+  --glow:0 10px 24px -10px rgba(251,113,133,.5);
+  --glass:rgba(18,14,19,.72);--mask:rgba(8,4,7,.6);
+  --chart-up:#fb7185;--chart-down:#4ade80;--chart-3:#c084fc;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
+  --tint:rgba(251,113,133,.08)}
+[data-theme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--text:#3b3026;--muted:#8e7f6c;--line:#e9dfcd;--hover:#f3ebdb;
+  --acc:#e08a2e;--acc2:#c2410c;--acc-soft:#faeeda;--acc-text:#bf6f1c;--on-acc:#fff;
   --ok:#5a9d3f;--ok-soft:#ecf5e3;--err:#cc4b3f;--err-soft:#fbe9e6;--warn:#c98a1b;--warn-soft:#faf0da;
-  --shadow:0 1px 2px rgba(90,70,40,.08),0 2px 8px rgba(90,70,40,.06);
-  --chart-up:#e08a2e;--chart-down:#5a9d3f;--mask:rgba(45,32,18,.42)}
-[data-theme="steel"]{--bg:#eef1f5;--side:#ffffff;--card:#ffffff;--text:#232b36;--muted:#6c7889;--line:#dde3ea;--hover:#e9edf3;
-  --acc:#5470a8;--acc-soft:#e8edf6;--acc-text:#44608f;--on-acc:#fff;
+  --shadow-sm:0 1px 2px rgba(90,70,40,.06);
+  --shadow:0 1px 2px rgba(90,70,40,.06),0 10px 26px -14px rgba(90,70,40,.22);
+  --shadow-lg:0 28px 64px -26px rgba(90,70,40,.34);
+  --glow:0 10px 22px -10px rgba(224,138,46,.55);
+  --glass:rgba(255,253,248,.76);--mask:rgba(45,32,18,.44);
+  --chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--grid:rgba(90,70,40,.09);
+  --tint:rgba(224,138,46,.08)}
+[data-theme="steel"]{--bg:#eceff4;--side:#ffffff;--card:#ffffff;--text:#1f2732;--muted:#69758a;--line:#dbe2ea;--hover:#e8edf4;
+  --acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#e8edf6;--acc-text:#415c8c;--on-acc:#fff;
   --ok:#2e8f5e;--ok-soft:#e5f2ea;--err:#c04c4c;--err-soft:#faeaea;--warn:#b78218;--warn-soft:#f8f0dc;
-  --shadow:0 1px 2px rgba(35,50,70,.06),0 2px 8px rgba(35,50,70,.05);
-  --chart-up:#5470a8;--chart-down:#2e8f5e;--mask:rgba(20,28,40,.45)}
-[data-theme="ocean"]{--bg:#f0f7f8;--side:#ffffff;--card:#ffffff;--text:#17323a;--muted:#5f828c;--line:#d9e8ec;--hover:#e6f1f4;
-  --acc:#0f9db8;--acc-soft:#e2f4f8;--acc-text:#0c8299;--on-acc:#fff;
+  --shadow-sm:0 1px 2px rgba(35,50,70,.05);
+  --shadow:0 1px 2px rgba(35,50,70,.05),0 10px 26px -14px rgba(35,50,70,.24);
+  --shadow-lg:0 28px 64px -26px rgba(35,50,70,.34);
+  --glow:0 10px 22px -10px rgba(84,112,168,.55);
+  --glass:rgba(255,255,255,.76);--mask:rgba(20,28,40,.46);
+  --chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--grid:rgba(35,50,70,.08);
+  --tint:rgba(84,112,168,.07)}
+[data-theme="ocean"]{--bg:#eef6f7;--side:#ffffff;--card:#ffffff;--text:#12303a;--muted:#5b7f8a;--line:#d7e6ea;--hover:#e5f0f3;
+  --acc:#0f9db8;--acc2:#0d9488;--acc-soft:#e0f3f7;--acc-text:#0a7f97;--on-acc:#fff;
   --ok:#1f9d61;--ok-soft:#e4f5ec;--err:#d15550;--err-soft:#fbeaea;--warn:#c08a1f;--warn-soft:#f9f1dc;
-  --shadow:0 1px 2px rgba(15,60,70,.06),0 2px 8px rgba(15,60,70,.05);
-  --chart-up:#0f9db8;--chart-down:#1f9d61;--mask:rgba(8,35,42,.45)}
+  --shadow-sm:0 1px 2px rgba(15,60,70,.05);
+  --shadow:0 1px 2px rgba(15,60,70,.04),0 10px 26px -14px rgba(15,60,70,.22);
+  --shadow-lg:0 28px 64px -26px rgba(15,60,70,.32);
+  --glow:0 10px 22px -10px rgba(15,157,184,.55);
+  --glass:rgba(255,255,255,.76);--mask:rgba(8,35,42,.46);
+  --chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--grid:rgba(15,60,70,.08);
+  --tint:rgba(15,157,184,.07)}
 
 /* ============ 基础 ============ */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t)}
+body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 svg{flex:none}
 a{color:var(--acc-text);text-decoration:none}
 a:hover{text-decoration:underline}
 .hide{display:none!important}
 .muted{color:var(--muted);font-size:12px}
 .mono{font-family:var(--mono);font-size:12px}
+.grad-text{background:linear-gradient(135deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+::-webkit-scrollbar-track{background:transparent}
 
 /* ============ 登录页 ============ */
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
-  background:radial-gradient(1200px 600px at 20% -10%,var(--acc-soft),transparent 60%),var(--bg)}
-.login-card{width:380px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);
-  padding:32px 28px;animation:pop .35s cubic-bezier(.34,1.4,.5,1)}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden;
+  background:var(--bg)}
+.login-wrap::before{content:"";position:absolute;width:820px;height:820px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--acc) 26%,transparent),transparent 62%);
+  filter:blur(20px);top:-260px;left:-180px;animation:float 14s ease-in-out infinite}
+.login-wrap::after{content:"";position:absolute;width:640px;height:640px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--acc2) 24%,transparent),transparent 62%);
+  filter:blur(24px);bottom:-240px;right:-160px;animation:float 18s ease-in-out infinite reverse}
+@keyframes float{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(40px,30px,0)}}
+.login-card{width:382px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--shadow-lg);padding:34px 30px;animation:pop .4s cubic-bezier(.34,1.4,.5,1);position:relative;z-index:1}
 .login-logo{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
-.login-logo .mark{width:40px;height:40px;border-radius:12px;background:var(--acc);color:var(--on-acc);display:flex;align-items:center;justify-content:center}
+.login-logo .mark{width:42px;height:42px;border-radius:13px;color:#fff;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
 .login-logo b{font-size:19px;letter-spacing:.3px}
-.login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px}
+.login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px}
 .demo-tag{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:99px;padding:1px 10px;font-size:12px;margin-left:6px}
 
 /* ============ 布局 ============ */
 .shell{display:flex;height:100vh;overflow:hidden}
 .side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:14px 10px;transition:background var(--t),border-color var(--t)}
-.logo{display:flex;align-items:center;gap:9px;padding:6px 10px 16px}
-.logo .mark{width:30px;height:30px;border-radius:9px;background:var(--acc);color:var(--on-acc);display:flex;align-items:center;justify-content:center}
-.logo b{font-size:15px;letter-spacing:.3px}
+  display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;
+  transition:background var(--t),border-color var(--t)}
+.side::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
+.logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
+.logo b{font-size:15px;letter-spacing:.3px;font-weight:650}
+.logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap}
+.nav-sec{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);opacity:.75;
+  padding:12px 12px 6px;font-weight:600}
 .nav-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
   padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:14px;text-align:left;margin-bottom:2px;font-family:var(--font);
-  transition:background var(--t-fast),color var(--t-fast)}
+  position:relative;transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
 .nav-item:hover{background:var(--hover);color:var(--text)}
 .nav-item.on{background:var(--acc-soft);color:var(--acc-text);font-weight:600}
-.side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px}
-.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;
-  padding:14px 26px;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.topbar h2{font-size:17px;font-weight:650}
+.nav-item.on::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:18px;
+  border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--acc),var(--acc2))}
+.nav-item .badge{margin-left:auto}
+.side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;position:relative}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:14px 28px;
+  background:var(--glass);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
+  border-bottom:1px solid var(--line)}
+.topbar h2{font-size:17px;font-weight:650;letter-spacing:.2px}
+.topbar .sub{font-size:12px;color:var(--muted);margin-top:1px}
 .topbar .spacer{flex:1}
-.content{padding:22px 26px 40px;max-width:1060px;width:100%;margin:0 auto}
-@media (max-width:880px){
+.top-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;font-size:12px;
+  background:var(--hover);color:var(--muted);border:1px solid var(--line);transition:all var(--t-fast)}
+.top-pill b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 60%,transparent);
+  animation:pulse 2.2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.content{padding:24px 28px 48px;max-width:1240px;width:100%;margin:0 auto}
+@media (max-width:960px){
   .shell{flex-direction:column}
   .side{width:100%;flex-direction:row;align-items:center;padding:8px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}
-  .logo{padding:0 8px 0 4px}
-  .nav-item{width:auto;margin:0}
+  .logo{padding:0 8px 0 4px}.logo .logo-v{display:none}
+  .nav-sec{display:none}
+  .nav-item{width:auto;margin:0}.nav-item.on::before{display:none}
   .side-foot{margin:0 0 0 auto;border:none;padding:0;display:flex;gap:4px}
   .logo b{display:none}
+  .content{padding:18px 16px 40px}
+  .topbar{padding:12px 16px}
 }
 
-/* ============ 视图与卡片 ============ */
+/* ============ 卡片 ============ */
 .view{display:none}
-.view.active{display:block;animation:fadeUp .24s ease}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:none}}
+.view.active{display:block;animation:fadeUp .28s cubic-bezier(.16,1,.3,1)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);
-  padding:18px 20px;margin-bottom:16px;transition:background var(--t),border-color var(--t)}
-.card h3{font-size:14.5px;font-weight:650;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  padding:20px 22px;margin-bottom:18px;position:relative;transition:background var(--t),border-color var(--t),box-shadow var(--t)}
+.card::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;border-radius:var(--r-lg) var(--r-lg) 0 0;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--acc) 40%,transparent),transparent);opacity:.75}
+.card h3{font-size:15px;font-weight:650;margin-bottom:15px;display:flex;align-items:center;gap:9px;letter-spacing:.2px}
 .card h3 .spacer{flex:1}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card h3 .hint{font-size:11.5px;font-weight:400;color:var(--muted)}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media (max-width:1080px){.grid-3{grid-template-columns:1fr}}
 @media (max-width:880px){.grid-2{grid-template-columns:1fr}}
 
-/* 概览统计 */
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:16px 18px;
-  display:flex;gap:14px;align-items:center;transition:transform var(--t-fast),box-shadow var(--t-fast)}
-.stat:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.1)}
-.stat .ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--acc-soft);color:var(--acc-text)}
-.stat b{font-size:20px;font-weight:700;display:block;line-height:1.2}
-.stat span{font-size:12px;color:var(--muted)}
+/* ============ 仪表盘 ============ */
+.hero{position:relative;overflow:hidden;border-radius:var(--r-xl);border:1px solid var(--line);box-shadow:var(--shadow);
+  background:var(--card);padding:26px 28px;margin-bottom:18px}
+.hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(620px 240px at 12% -30%,color-mix(in srgb,var(--acc) 22%,transparent),transparent 68%),
+             radial-gradient(520px 220px at 92% 0%,color-mix(in srgb,var(--acc2) 18%,transparent),transparent 70%)}
+.hero-inner{position:relative;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+.hero-txt{flex:1;min-width:260px}
+.hero-txt h1{font-size:25px;font-weight:700;letter-spacing:-.4px;line-height:1.25;margin-bottom:8px}
+.hero-txt p{color:var(--muted);font-size:13.5px;max-width:560px}
+.hero-act{display:flex;gap:10px;flex-wrap:wrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:16px;margin-bottom:18px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:18px 20px;
+  position:relative;overflow:hidden;transition:transform var(--t-fast),box-shadow var(--t-fast),border-color var(--t-fast)}
+.kpi:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:color-mix(in srgb,var(--acc) 32%,var(--line))}
+.kpi-top{display:flex;align-items:center;gap:11px;margin-bottom:14px}
+.kpi-ic{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;flex:none;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
+.kpi-ic.g2{background:linear-gradient(135deg,var(--chart-3),var(--acc2));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-3) 60%,transparent)}
+.kpi-ic.g3{background:linear-gradient(135deg,var(--chart-down),var(--chart-4));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-down) 55%,transparent)}
+.kpi-ic.g4{background:linear-gradient(135deg,var(--chart-4),var(--acc));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-4) 55%,transparent)}
+.kpi-lb{font-size:12px;color:var(--muted);font-weight:500}
+.kpi-val{font-size:26px;font-weight:700;letter-spacing:-.6px;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi-val .unit{font-size:13px;font-weight:500;color:var(--muted);margin-left:3px}
+.kpi-delta{font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:5px}
+.kpi-delta .up{color:var(--ok);font-weight:600}.kpi-delta .down{color:var(--err);font-weight:600}
+.kpi-spark{position:absolute;right:0;bottom:0;width:46%;height:52px;opacity:.95;pointer-events:none}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:500;
+  background:var(--acc-soft);color:var(--acc-text);white-space:nowrap}
+.chip.ghost{background:var(--hover);color:var(--muted)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.err{background:var(--err-soft);color:var(--err)}
+
+/* 图表容器 */
+.chart-wrap{position:relative;width:100%}
+.chart-wrap canvas{width:100%;display:block}
+.chart-tip{position:absolute;pointer-events:none;z-index:5;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);box-shadow:var(--shadow-lg);padding:9px 12px;font-size:12px;min-width:132px;
+  opacity:0;transform:translate(-50%,-112%);transition:opacity .14s ease}
+.chart-tip.show{opacity:1}
+.chart-tip .t-d{color:var(--muted);font-size:11px;margin-bottom:5px}
+.chart-tip .t-r{display:flex;align-items:center;gap:7px;justify-content:space-between;line-height:1.7}
+.chart-tip .t-r i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.chart-tip .t-r b{font-variant-numeric:tabular-nums;font-weight:600}
+.mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.mini-stats>div{background:var(--hover);border:1px solid var(--line);border-radius:var(--r);padding:10px 13px}
+.mini-stats .ms-l{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.mini-stats .ms-v{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted)}
+.legend .li{display:inline-flex;align-items:center;gap:6px}
+.legend .li i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* 内核状态环 */
+.rings{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media (max-width:700px){.rings{grid-template-columns:1fr}}
+.ring-card{background:var(--hover);border:1px solid var(--line);border-radius:var(--r);padding:16px 12px;text-align:center;
+  transition:transform var(--t-fast),border-color var(--t-fast)}
+.ring-card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--acc) 34%,var(--line))}
+.ring-card .nm{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:10px}
+.ring-card .st{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+/* 排行榜 */
+.rank{display:flex;flex-direction:column;gap:9px}
+.rank-row{display:grid;grid-template-columns:22px 1fr auto;gap:11px;align-items:center;padding:9px 11px;border-radius:var(--r);
+  background:var(--hover);transition:transform var(--t-fast)}
+.rank-row:hover{transform:translateX(3px)}
+.rank-row .idx{width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;
+  font-weight:700;background:var(--card);color:var(--muted);border:1px solid var(--line)}
+.rank-row:nth-child(1) .idx{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border-color:transparent}
+.rank-row .nm{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank-row .vl{font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.rank-row .bar{grid-column:2/4;height:4px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:-3px}
+.rank-row .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width var(--t-slow)}
 
 /* ============ 组件：按钮 / 输入 / 徽章 / 开关 ============ */
 .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--text);
-  border-radius:var(--r-sm);padding:7px 14px;font-size:13.5px;cursor:pointer;font-family:var(--font);
-  transition:background var(--t-fast),border-color var(--t-fast),transform .08s,color var(--t-fast)}
-.btn:hover{background:var(--hover)}
+  border-radius:var(--r-sm);padding:7px 14px;font-size:13.5px;cursor:pointer;font-family:var(--font);position:relative;overflow:hidden;
+  transition:background var(--t-fast),border-color var(--t-fast),transform .08s,color var(--t-fast),box-shadow var(--t-fast)}
+.btn:hover{background:var(--hover);border-color:color-mix(in srgb,var(--acc) 28%,var(--line))}
 .btn:active{transform:scale(.97)}
-.btn.primary{background:var(--acc);border-color:var(--acc);color:var(--on-acc);font-weight:600}
-.btn.primary:hover{filter:brightness(1.08);background:var(--acc)}
-.btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 30%,transparent)}
+.btn.primary{background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent;color:#fff;font-weight:600;
+  box-shadow:var(--glow)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 32%,transparent)}
 .btn.danger:hover{background:var(--err-soft)}
 .btn.sm{padding:4px 10px;font-size:12.5px;border-radius:6px}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
 label{font-size:12.5px;color:var(--muted);display:block;margin-bottom:5px}
 .input,select,textarea{width:100%;border:1px solid var(--line);background:var(--card);color:var(--text);
-  border-radius:var(--r-sm);padding:8px 10px;font-size:13.5px;font-family:var(--font);transition:border-color var(--t-fast),box-shadow var(--t-fast)}
+  border-radius:var(--r-sm);padding:8px 11px;font-size:13.5px;font-family:var(--font);
+  transition:border-color var(--t-fast),box-shadow var(--t-fast),background var(--t-fast)}
+.input:hover,select:hover,textarea:hover{border-color:color-mix(in srgb,var(--acc) 24%,var(--line))}
 .input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
 textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertical}
-.frm{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.frm{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:16px}
 .frm .full{grid-column:1/-1}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:500}
 .b-ok{background:var(--ok-soft);color:var(--ok)} .b-err{background:var(--err-soft);color:var(--err)}
 .b-warn{background:var(--warn-soft);color:var(--warn)} .b-idle{background:var(--hover);color:var(--muted)}
 .b-acc{background:var(--acc-soft);color:var(--acc-text)}
-.sw{position:relative;display:inline-block;width:36px;height:20px;flex:none;vertical-align:middle}
+.sw{position:relative;display:inline-block;width:38px;height:21px;flex:none;vertical-align:middle}
 .sw input{opacity:0;width:0;height:0}
 .sw i{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:background var(--t-fast);cursor:pointer}
-.sw i::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;
-  box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform var(--t-fast)}
-.sw input:checked+i{background:var(--acc)}
-.sw input:checked+i::after{transform:translateX(16px)}
+.sw i::after{content:"";position:absolute;left:3px;top:3px;width:15px;height:15px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform var(--t-fast)}
+.sw input:checked+i{background:linear-gradient(135deg,var(--acc),var(--acc2))}
+.sw input:checked+i::after{transform:translateX(17px)}
+
+/* 分段控件 */
+.seg{display:inline-flex;padding:3px;gap:3px;background:var(--hover);border:1px solid var(--line);border-radius:var(--r)}
+.seg button{border:none;background:none;color:var(--muted);font-size:13px;font-family:var(--font);cursor:pointer;
+  padding:6px 14px;border-radius:7px;transition:all var(--t-fast);white-space:nowrap}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:var(--card);color:var(--acc-text);font-weight:600;box-shadow:var(--shadow-sm)}
 
 /* ============ 表格 ============ */
-.tbl-wrap{overflow-x:auto;margin:0 -4px}
+.tbl-wrap{overflow-x:auto;margin:0 -4px;border-radius:var(--r)}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
-th{color:var(--muted);font-weight:500;font-size:12.5px;background:color-mix(in srgb,var(--hover) 55%,transparent)}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px;background:var(--hover);position:sticky;top:0;z-index:1}
 th:first-child{border-radius:8px 0 0 8px} th:last-child{border-radius:0 8px 8px 0}
 tbody tr{transition:background var(--t-fast)}
 tbody tr:hover{background:var(--hover)}
+tbody tr:last-child td{border-bottom:none}
 td.ta-r,th.ta-r{text-align:right}
 td.num{font-variant-numeric:tabular-nums}
-.empty{padding:28px;text-align:center;color:var(--muted);font-size:13px}
+.empty{padding:34px;text-align:center;color:var(--muted);font-size:13px}
 .progress{width:110px;height:7px;background:var(--line);border-radius:99px;display:inline-block;vertical-align:middle;overflow:hidden}
-.progress i{display:block;height:100%;border-radius:99px;background:var(--ok);transition:width var(--t)}
+.progress i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width var(--t-slow)}
 
 /* ============ 主题选择 ============ */
 .theme-btn{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
   padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
 .theme-btn:hover{background:var(--hover);color:var(--text)}
-.tpop{position:absolute;bottom:52px;left:10px;right:10px;background:var(--card);border:1px solid var(--line);
-  border-radius:var(--r);box-shadow:var(--shadow);padding:10px;z-index:50;
-  opacity:0;transform:translateY(6px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
+.tpop{position:absolute;bottom:54px;left:10px;right:10px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);box-shadow:var(--shadow-lg);padding:12px;z-index:50;
+  opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
 .tpop.show{opacity:1;transform:none;pointer-events:auto}
-.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px;padding-bottom:14px}
-.swatch{aspect-ratio:1;border-radius:9px;border:2px solid transparent;cursor:pointer;position:relative;transition:transform var(--t-fast)}
-.swatch:hover{transform:scale(1.1)}
-.swatch.on{border-color:var(--acc)}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:15px 8px;padding-bottom:16px}
+.swatch{aspect-ratio:1;border-radius:10px;border:2px solid transparent;cursor:pointer;position:relative;transition:transform var(--t-fast),box-shadow var(--t-fast)}
+.swatch:hover{transform:scale(1.12)}
+.swatch.on{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
 .swatch span{position:absolute;left:0;right:0;bottom:-16px;font-size:10px;color:var(--muted);text-align:center;white-space:nowrap}
-@media (max-width:880px){.tpop{position:fixed;bottom:auto;top:52px;left:12px;right:12px;width:auto}}
+@media (max-width:960px){.tpop{position:fixed;bottom:auto;top:54px;left:12px;right:12px;width:auto}}
 
 /* ============ 弹层 ============ */
-.overlay{position:fixed;inset:0;background:var(--mask);display:flex;align-items:center;justify-content:center;padding:20px;
+.overlay{position:fixed;inset:0;background:var(--mask);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
+  display:flex;align-items:center;justify-content:center;padding:20px;
   opacity:0;pointer-events:none;transition:opacity var(--t-fast);z-index:100}
 .overlay.show{opacity:1;pointer-events:auto}
-.modal{width:100%;max-width:560px;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);
-  border-radius:var(--r-lg);box-shadow:0 20px 50px rgba(0,0,0,.25);padding:22px;
-  transform:translateY(14px) scale(.97);transition:transform var(--t)}
+.modal{width:100%;max-width:580px;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:24px;
+  transform:translateY(16px) scale(.97);transition:transform var(--t)}
 .overlay.show .modal{transform:none}
-.modal h3{font-size:15.5px;margin-bottom:16px}
-.modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
-.modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;font-family:var(--mono);
+.modal h3{font-size:16px;margin-bottom:16px;letter-spacing:.2px}
+.modal .foot{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
+.modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;font-family:var(--mono);
   font-size:12px;overflow:auto;max-height:46vh;white-space:pre-wrap;word-break:break-all}
 
 /* ============ Toast ============ */
-.toasts{position:fixed;top:18px;right:18px;z-index:200;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
-  box-shadow:var(--shadow);border-radius:var(--r);padding:10px 16px;font-size:13.5px;max-width:380px;
-  animation:toastIn .25s cubic-bezier(.34,1.3,.5,1)}
+.toasts{position:fixed;top:18px;right:18px;z-index:200;display:flex;flex-direction:column;gap:9px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
+  box-shadow:var(--shadow-lg);border-radius:var(--r);padding:11px 16px;font-size:13.5px;max-width:400px;
+  animation:toastIn .28s cubic-bezier(.34,1.3,.5,1)}
 .toast.ok{border-left-color:var(--ok)} .toast.err{border-left-color:var(--err)} .toast.warn{border-left-color:var(--warn)}
-.toast.out{opacity:0;transform:translateX(16px);transition:all .3s}
-@keyframes toastIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+.toast.out{opacity:0;transform:translateX(18px);transition:all .3s}
+@keyframes toastIn{from{opacity:0;transform:translateX(26px) scale(.96)}to{opacity:1;transform:none}}
+
+/* ============ 配置生成器 ============ */
+.scn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:13px}
+.scn-card{border:1px solid var(--line);background:var(--card);border-radius:var(--r);padding:14px 15px;cursor:pointer;
+  transition:all var(--t-fast);position:relative;overflow:hidden}
+.scn-card:hover{border-color:color-mix(in srgb,var(--acc) 46%,var(--line));transform:translateY(-2px);box-shadow:var(--shadow)}
+.scn-card.on{border-color:transparent;background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 12%,var(--card)),var(--card));
+  box-shadow:var(--glow)}
+.scn-card.on::after{content:"";position:absolute;inset:0;border-radius:var(--r);border:1.5px solid var(--acc);pointer-events:none}
+.scn-card .scn-t{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.scn-card .scn-t b{font-size:13.5px;font-weight:650}
+.scn-card .scn-d{font-size:12px;color:var(--muted);line-height:1.5;min-height:36px}
+.scn-card .scn-m{font-size:11px;color:var(--muted);margin-top:9px;display:flex;gap:8px;align-items:center}
+.set-group{border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px;overflow:hidden;background:var(--card)}
+.set-group>.gh{display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--hover);cursor:pointer;
+  font-size:13px;font-weight:600;transition:background var(--t-fast)}
+.set-group>.gh:hover{background:color-mix(in srgb,var(--acc) 8%,var(--hover))}
+.set-group>.gh .cnt{font-size:11px;color:var(--muted);font-weight:400;margin-left:auto}
+.set-group>.gb{padding:10px 14px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:8px}
+.set-group.closed .gb{display:none}
+.set-row{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;transition:background var(--t-fast);
+  border:1px solid transparent}
+.set-row:hover{background:var(--hover);border-color:var(--line)}
+.set-row.off{opacity:.42}
+.set-row label{display:flex;align-items:center;gap:7px;margin:0;color:var(--text);font-size:13px;cursor:pointer;flex:1;min-width:0}
+.set-row label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-row input[type=checkbox]{width:auto;accent-color:var(--acc);flex:none}
+.set-row select{width:auto;padding:3px 7px;font-size:12px;border-radius:6px;flex:none}
+.set-row .tagcore{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;flex:none}
+.inb-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:9px}
+.inb-pick label{display:flex;align-items:center;gap:8px;margin:0;color:var(--text);font-size:13px;cursor:pointer;
+  border:1px solid var(--line);border-radius:var(--r);padding:9px 11px;background:var(--card);transition:all var(--t-fast)}
+.inb-pick label:hover{border-color:color-mix(in srgb,var(--acc) 42%,var(--line));background:var(--hover)}
+.inb-pick input{width:auto;accent-color:var(--acc);flex:none}
+.inb-pick .meta{margin-left:auto;font-size:11.5px;color:var(--muted)}
 
 /* 其他 */
-pre.log{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;font-family:var(--mono);
+pre.log{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;font-family:var(--mono);
   font-size:12px;overflow:auto;max-height:300px;white-space:pre-wrap;word-break:break-all}
 canvas{display:block;width:100%}
 .checks{display:flex;flex-wrap:wrap;gap:8px 16px;padding:4px 0}
@@ -214,6 +413,13 @@ canvas{display:block;width:100%}
 .radio-row input{width:auto;accent-color:var(--acc)}
 .sub-token{display:inline-flex;align-items:center;gap:6px;max-width:240px}
 .sub-token a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:11px}
+.quick{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);border-radius:var(--r);
+  padding:12px 14px;cursor:pointer;font-family:var(--font);font-size:13.5px;color:var(--text);text-align:left;
+  transition:all var(--t-fast)}
+.quick:hover{border-color:color-mix(in srgb,var(--acc) 45%,var(--line));transform:translateY(-2px);box-shadow:var(--shadow)}
+.quick .qi{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;
+  background:var(--acc-soft);color:var(--acc-text)}
 </style>
 </head>
 <body>
@@ -241,8 +447,9 @@ canvas{display:block;width:100%}
 <div id="app" class="shell hide">
   <aside class="side">
     <div class="logo">
-      <div class="mark"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <div class="mark"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
       <b>Triune Panel</b>
+      <span class="logo-v" id="logoVer">—</span>
     </div>
     <nav id="nav"></nav>
     <div class="side-foot">
@@ -264,33 +471,82 @@ canvas{display:block;width:100%}
   </aside>
 
   <main class="main">
-    <div class="topbar"><h2 id="pageTitle">概览</h2><span class="spacer"></span><span class="muted mono" id="verinfo"></span></div>
+    <div class="topbar">
+      <div><h2 id="pageTitle">概览</h2><div class="sub" id="pageSub">一屏掌握入站、用户、流量与内核状态</div></div>
+      <span class="spacer"></span>
+      <span class="top-pill" id="pillCore"><i class="pulse"></i> 内核 <b>0/0</b></span>
+      <span class="top-pill" id="pillLive">↓ —</span>
+      <span class="muted mono" id="verinfo"></span>
+    </div>
     <div class="content">
 
     <!-- 概览 -->
     <section id="v-overview" class="view active">
-      <div class="stats" id="statCards"></div>
-      <div class="card">
-        <h3>内核状态<span class="spacer"></span><button class="btn sm" onclick="loadStatus()">刷新</button></h3>
-        <div class="stats" id="cores" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))"></div>
-        <p class="muted" style="margin-top:10px">「未校验」表示未配置内核二进制路径 —— 可在下方 设置 中填入，或在 设置 → 组件更新与版本管理 里<b>一键安装</b>面板专用副本（推荐，与系统现有二进制完全隔离）。</p>
-      </div>
-      <div class="card">
-        <h3>实时速率<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px" id="live_at">每 30 秒采样</span></h3>
-        <div style="display:flex;gap:36px;align-items:baseline">
-          <div style="display:flex;align-items:baseline;gap:8px"><span class="muted">↑ 上行</span><b class="mono" id="liveUp" style="font-size:21px">—</b></div>
-          <div style="display:flex;align-items:baseline;gap:8px"><span class="muted">↓ 下行</span><b class="mono" id="liveDown" style="font-size:21px">—</b></div>
+      <div class="hero">
+        <div class="hero-inner">
+          <div class="hero-txt">
+            <h1>Triune Panel · <span class="grad-text">三内核统一控制台</span></h1>
+            <p>mihomo · sing-box · xray 统一纳管。配置渲染 → 内核校验 → 原子替换 → 备份 → 回滚，
+               任一环节失败都不影响现网运行；升级与切换全程可回滚。</p>
+          </div>
+          <div class="hero-act">
+            <button class="btn primary" onclick="openInboundModal()">+ 新增入站</button>
+            <button class="btn" onclick="goto('gen')">生成配置</button>
+            <button class="btn" onclick="goto('apply')">应用配置</button>
+          </div>
         </div>
-        <p class="muted" style="margin-top:10px">由流量采样差值计算；需在设置中开启流量统计并应用生效。</p>
       </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>流量趋势<span class="hint">近 14 天 · 上行 / 下行</span><span class="spacer"></span>
+            <span class="legend"><span class="li"><i style="background:var(--chart-down)"></i>下行</span>
+              <span class="li"><i style="background:var(--chart-up)"></i>上行</span></span>
+          </h3>
+          <div class="chart-wrap"><canvas id="ov_chart"></canvas><div class="chart-tip" id="ov_tip"></div></div>
+          <div class="mini-stats" id="ov_stats"></div>
+        </div>
+
+        <div class="card">
+          <h3>内核状态<span class="spacer"></span><button class="btn sm" onclick="loadStatus()">刷新</button></h3>
+          <div class="rings" id="ov_rings"></div>
+          <h3 style="margin-top:20px">实时速率<span class="spacer"></span>
+            <span class="muted" id="live_at" style="font-weight:400;font-size:11.5px">每 30 秒采样</span></h3>
+          <div class="chart-wrap"><canvas id="ov_live"></canvas></div>
+          <div style="display:flex;gap:22px;margin-top:10px;flex-wrap:wrap">
+            <span class="muted">↑ 上行 <b class="mono" id="liveUp" style="color:var(--text)">—</b></span>
+            <span class="muted">↓ 下行 <b class="mono" id="liveDown" style="color:var(--text)">—</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>用户流量占比<span class="spacer"></span><span class="hint">Top 6</span></h3>
+          <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">
+            <div class="chart-wrap" style="width:172px;flex:none"><canvas id="ov_donut"></canvas></div>
+            <div style="flex:1;min-width:180px" class="legend" id="ov_legend"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>流量排行<span class="spacer"></span><span class="hint">按用户合计</span></h3>
+          <div class="rank" id="ov_rank"></div>
+        </div>
+      </div>
+
       <div class="card">
         <h3>快捷操作</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn primary" onclick="openInboundModal()">+ 新增入站</button>
-          <button class="btn primary" onclick="openClientModal()">+ 新增用户</button>
-          <button class="btn" onclick="goto('import')">导入现有链接</button>
-          <button class="btn" onclick="goto('apply')">应用配置</button>
+        <div class="quick-grid">
+          <button class="quick" onclick="openInboundModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></span>新增入站</button>
+          <button class="quick" onclick="openClientModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
+          <button class="quick" onclick="goto('import')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>导入链接</button>
+          <button class="quick" onclick="goto('gen')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
+          <button class="quick" onclick="goto('apply')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
+          <button class="quick" onclick="goto('settings')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
         </div>
+        <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或在「设置 → 组件更新与版本管理」里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
       </div>
     </section>
 
@@ -324,7 +580,7 @@ canvas{display:block;width:100%}
             <option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option>
           </select>
         </h3>
-        <canvas id="tr_chart" height="230"></canvas>
+        <div class="chart-wrap"><canvas id="tr_chart"></canvas><div class="chart-tip" id="tr_tip"></div></div>
         <div style="display:flex;gap:18px;margin-top:10px">
           <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-up);border-radius:3px"></span> 上行</span>
           <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-down);border-radius:3px"></span> 下行</span>
@@ -367,38 +623,42 @@ canvas{display:block;width:100%}
     <!-- 配置生成 -->
     <section id="v-gen" class="view">
       <div class="card">
-        <h3>生成客户端 / 路由配置</h3>
-        <p class="muted" style="margin-bottom:12px">选择入站与使用场景，生成可直接使用的 mihomo / sing-box 完整配置；按目标设备自动套用最优模板（TUN、DNS 劫持、嗅探等）。</p>
+        <h3>目标与内核<span class="spacer"></span><span class="hint">决定 TUN / DNS 劫持 / 嗅探等模板</span></h3>
         <div class="frm" style="grid-template-columns:1fr 1fr">
           <div><label>配置内核</label>
-            <div class="radio-row">
-              <label><input type="radio" name="g_core" value="mihomo" checked> mihomo / Clash.Meta</label>
-              <label><input type="radio" name="g_core" value="singbox"> sing-box</label>
+            <div class="seg" id="g_core_seg">
+              <button data-v="mihomo" class="on">mihomo / Clash.Meta</button>
+              <button data-v="singbox">sing-box</button>
             </div>
           </div>
           <div><label>使用目标</label>
-            <div class="radio-row">
-              <label><input type="radio" name="g_target" value="client" checked> 客户端</label>
-              <label><input type="radio" name="g_target" value="main-router"> 主路由</label>
-              <label><input type="radio" name="g_target" value="side-router"> 旁路由</label>
+            <div class="seg" id="g_target_seg">
+              <button data-v="client" class="on">客户端</button>
+              <button data-v="main-router">主路由</button>
+              <button data-v="side-router">旁路由</button>
             </div>
           </div>
         </div>
-        <p class="muted" id="gen_target_note" style="font-size:12.5px;margin:6px 0 12px"></p>
+        <p class="muted" id="gen_target_note" style="font-size:12.5px;margin:2px 0 14px"></p>
         <div><label>选择入站（可多选，节点名 = 入站名-用户名）</label>
-          <div id="gen_inbounds" class="radio-row" style="flex-wrap:wrap"></div>
+          <div class="inb-pick" id="gen_inbounds"></div>
         </div>
       </div>
 
       <div class="card">
-        <h3>场景预设</h3>
-        <div class="radio-row" style="flex-wrap:wrap" id="gen_scenarios"></div>
-        <p class="muted" id="gen_scn_desc" style="font-size:12.5px;margin-top:8px"></p>
+        <h3>场景预设<span class="spacer"></span><span class="hint" id="gen_scn_count"></span></h3>
+        <div class="scn-grid" id="gen_scenarios"></div>
+        <p class="muted" id="gen_scn_desc" style="font-size:12.5px;margin-top:12px"></p>
       </div>
 
       <div class="card">
-        <h3>规则集</h3>
-        <p class="muted" style="margin-bottom:10px">勾选需要启用的规则集，并为每个规则集选择策略（仅勾选后生效）。远程规则集自动定期更新。</p>
+        <h3>规则集<span class="spacer"></span>
+          <span class="hint" id="gen_sets_count"></span>
+          <input id="gen_set_search" class="input" style="width:180px;padding:5px 10px;font-size:12.5px"
+                 placeholder="搜索规则集…" oninput="filterSets()">
+        </h3>
+        <p class="muted" style="margin-bottom:12px">勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
+           标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
         <div id="gen_sets"></div>
       </div>
 
@@ -407,12 +667,12 @@ canvas{display:block;width:100%}
         <p class="muted" style="margin-bottom:8px">每行一条，语法 <code>类型,值,策略</code>，策略可选 DIRECT / PROXY / REJECT。<br>
         类型：DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、IP-CIDR6、GEOSITE、GEOIP。<br>
         示例：<code>DOMAIN-SUFFIX,example.com,DIRECT</code>、<code>IP-CIDR,1.2.3.0/24,PROXY</code>、<code>GEOSITE,bilibili,DIRECT</code></p>
-        <textarea id="gen_rules" class="input mono" style="min-height:90px" placeholder="DOMAIN-SUFFIX,corp.example.com,DIRECT&#10;DOMAIN-KEYWORD,baidu,DIRECT"></textarea>
+        <textarea id="gen_rules" class="input mono" style="min-height:96px" placeholder="DOMAIN-SUFFIX,corp.example.com,DIRECT&#10;DOMAIN-KEYWORD,baidu,DIRECT"></textarea>
       </div>
 
       <div class="card">
         <h3>自定义规则集</h3>
-        <p class="muted" style="margin-bottom:8px">添加远程规则订阅（mihomo 支持 .mrs/.yaml，sing-box 建议 .srs）。</p>
+        <p class="muted" style="margin-bottom:10px">添加远程规则订阅（mihomo 支持 .mrs/.yaml/.txt，sing-box 建议 .srs）。</p>
         <div id="gen_csets"></div>
         <button class="btn sm" onclick="addCustomSetRow()">+ 添加规则集</button>
       </div>
@@ -675,6 +935,9 @@ canvas{display:block;width:100%}
 const DEMO = location.hash.includes("demo") || /demo\.html?$/i.test(location.pathname);
 const $ = id => document.getElementById(id);
 let TOKEN = localStorage.getItem("triune_token") || "";
+// 仪表盘数据状态（需在演示 mock 初始化之前声明）
+const OV = { daily: [], hist: [], traffic: [], cores: [] };
+let INB_N = 0;
 
 const ICONS = {
   gen:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
@@ -687,15 +950,28 @@ const ICONS = {
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
 };
 const VIEWS = [
-  ["overview","概览"],["inbounds","入站"],["clients","用户"],["traffic","流量"],
-  ["import","导入链接"],["gen","配置生成"],["apply","应用 / 修订"],["settings","设置"]
+  ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
+  ["inbounds","入站","网络服务","管理监听端口、协议、传输与 TLS"],
+  ["clients","用户","网络服务","账号、凭据、配额与到期时间"],
+  ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
+  ["import","导入链接","配置","反向解析订阅链接为节点或入站"],
+  ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
+  ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
+  ["settings","设置","系统","内核路径、证书、版本管理与主题"]
 ];
-const TITLES = Object.fromEntries(VIEWS);
+const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
+const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
 
-$("nav").innerHTML = VIEWS.map(([v,label]) =>
-  `<button class="nav-item${v==="overview"?" on":""}" data-v="${v}">
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
-    <span>${label}</span></button>`).join("");
+$("nav").innerHTML = (() => {
+  let html = "", last = null;
+  VIEWS.forEach(([v, label, sec]) => {
+    if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
+    html += `<button class="nav-item${v==="overview"?" on":""}" data-v="${v}">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
+      <span>${label}</span></button>`;
+  });
+  return html;
+})();
 $("nav").addEventListener("click", e => {
   const b = e.target.closest(".nav-item");
   if (b) goto(b.dataset.v);
@@ -704,7 +980,9 @@ function goto(v) {
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
   $("pageTitle").textContent = TITLES[v];
+  $("pageSub").textContent = SUBS[v] || "";
   loadAll();
+  if (v === "overview") setTimeout(loadOverview, 30);
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -737,7 +1015,7 @@ function setTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem("triune_theme", t);
   document.querySelectorAll(".swatch").forEach(s => s.classList.toggle("on", s.dataset.t === t));
-  setTimeout(() => { if ($("v-traffic") && $("v-traffic").classList.contains("active")) loadDaily(); }, 60);
+  setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
 }
 $("swatches").innerHTML = THEMES.map(([t,name,c]) =>
   `<button class="swatch" data-t="${t}" style="background:${c}" title="${name}"><span>${name}</span></button>`).join("");
@@ -767,11 +1045,20 @@ let MDB, REV_N = 3;
 if (DEMO) {
   const seedDaily = n => Array.from({length:n},(_,i)=>{
     const d = new Date(Date.now()-(n-1-i)*864e5).toISOString().slice(0,10);
-    const w = 0.4+0.6*Math.abs(Math.sin(i/4.3));
-    return {day:d, up:Math.round(2.2e9*w*(0.9+0.2*Math.sin(i/2))), down:Math.round(9.6e9*w*(0.9+0.2*Math.cos(i/3)))};
+    // 双周期叠加 + 周末低谷，曲线更接近真实用量
+    const week = 1 + 0.22*Math.sin(i/2.6) + 0.12*Math.sin(i/1.3 + 0.7);
+    const dow = [0.82,0.86,0.9,0.95,1.12,1.28,1.18][new Date(d).getDay()];
+    const base = 0.55 + 0.45*Math.abs(Math.sin(i/5.1 + 0.4));
+    return {day:d, up:Math.round(2.4e9*base*week*dow*(0.92+0.16*Math.cos(i/2))),
+                 down:Math.round(9.2e9*base*week*dow*(0.9+0.22*Math.sin(i/3.1)))};
   });
+  // 演示数据：预置一段实时速率采样历史，首屏即可看到实时速率曲线
+  OV.hist = Array.from({length: 30}, (_, i) => ({
+    up: Math.round(1.6e5 + 9e4 * Math.sin(i / 3.1) + Math.random() * 5e4),
+    down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
+  }));
   MDB = {
-    version:"v0.4.0-demo",
+    version:"v0.7.0-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -883,7 +1170,7 @@ function logout(){ TOKEN=""; localStorage.removeItem("triune_token"); showLogin(
 
 /* ================= 数据加载 ================= */
 async function loadAll() {
-  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(), loadGen()]);
+  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal(), loadGen(), loadOverview()]);
 }
 function fmtBytes(b) {
   if (!b) return "0";
@@ -898,42 +1185,35 @@ async function loadLive() {
     const j = await req("/api/traffic/live");
     $("liveUp").textContent = fmtBytes(j.up_bps) + "/s";
     $("liveDown").textContent = fmtBytes(j.down_bps) + "/s";
+    const pl = $("pillLive");
+    if (pl) pl.textContent = "↓ " + fmtBytes(j.down_bps) + "/s";
+    const pt = { up: j.up_bps || 0, down: j.down_bps || 0 };
+    if (DEMO && OV.hist.length) OV.hist[OV.hist.length - 1] = pt;  // 演示：替换末点，避免尖峰
+    else { OV.hist.push(pt); if (OV.hist.length > 40) OV.hist.shift(); }
+    if ($("v-overview") && $("v-overview").classList.contains("active")) drawLiveChart($("ov_live"), OV.hist);
     if (j.updated_at) $("live_at").textContent = "更新于 " + String(j.updated_at).replace("T", " ").slice(11, 19);
   } catch(e){}
 }
 setInterval(() => { if (TOKEN) loadLive(); }, 10000);
 
 async function loadVersion() {
-  try { const j = await req("/api/version"); $("curver").textContent = j.version; $("verinfo").textContent = "v" + j.version; } catch(e){}
+  try {
+    const j = await req("/api/version");
+    $("curver").textContent = j.version;
+    $("verinfo").textContent = "v" + j.version;
+    const lv = $("logoVer"); if (lv) lv.textContent = "v" + j.version;
+  } catch(e){}
 }
 async function loadStatus() {
   try {
     const j = await req("/api/status");
-    $("cores").innerHTML = j.cores.map(c => {
-      let cls = "b-err", txt = "未配置二进制";
-      if (c.running) { cls = "b-ok"; txt = "运行中"; }
-      else if (c.config_exists) { cls = "b-warn"; txt = "有配置未运行"; }
-      const bin = c.bin_set ? (c.bin_found ? "二进制正常" : "二进制不存在") : "未配置二进制";
-      return `<div class="card" style="margin:0;box-shadow:none">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <b style="text-transform:uppercase;font-size:14px">${c.core}</b><span class="badge ${cls}">${txt}</span></div>
-        <span class="muted">配置文件: ${c.config_exists ? "存在" : "无"} · ${bin}</span></div>`;
-    }).join("");
-    renderStats(j.cores.length, j.cores.filter(c => c.running).length);
+    OV.cores = j.cores || [];
+    const pc = $("pillCore");
+    if (pc) pc.innerHTML = `<i class="pulse"></i> 内核 <b>${OV.cores.filter(c => c.running).length}/${OV.cores.length}</b>`;
+    if ($("v-overview") && $("v-overview").classList.contains("active")) { renderKpis(); renderRings(); }
   } catch(e){}
 }
 let CLIENT_N = 0, CL_INBS = [];
-function renderStats(total, running) {
-  $("statCards").innerHTML = `
-    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div>
-      <div><b>${running}<span class="muted" style="font-size:13px"> / ${total}</span></b><span>内核运行中</span></div></div>
-    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
-      <div><b>${CLIENT_N}</b><span>用户数</span></div></div>
-    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-      <div><b id="st_traffic">—</b><span>累计流量</span></div></div>
-    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
-      <div><b id="st_inb">—</b><span>入站数</span></div></div>`;
-}
 async function loadClients() {
   try {
     const j = await req("/api/clients");
@@ -959,6 +1239,7 @@ async function loadClients() {
 async function loadInbounds() {
   try {
     const j = await req("/api/inbounds");
+    INB_N = j.length;
     const stInb = $("st_inb"); if (stInb) stInb.textContent = j.length;
     $("ibtbody").innerHTML = j.map(i => { return `<tr>
       <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}</td>
@@ -1033,6 +1314,7 @@ async function exportInboundDownload(fmt) {
 
 /* ---- 配置生成器 ---- */
 let genCatalog = null, genPolicies = {}, genResult = null;
+let genCore = "mihomo", genTarget = "client", genScenario = "", genChecked = {}, genClosed = {};
 const GEN_TARGET_NOTES = {
   client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。",
   "main-router": "主路由模式：启用 TUN 接管全机流量 + DNS 劫持 :53 + 流量嗅探，局域网设备零配置；建议先在单设备上验证配置。",
@@ -1040,27 +1322,1634 @@ const GEN_TARGET_NOTES = {
 };
 const DEMO_CATALOG = {
   sets: [
-    {id:"geosite-cn",name:"中国大陆域名",group:"基础分流"},
-    {id:"geoip-cn",name:"中国大陆 IP",group:"基础分流"},
-    {id:"geosite-category-ads-all",name:"广告域名（通用）",group:"广告拦截"},
-    {id:"geosite-netflix",name:"Netflix",group:"流媒体"},
-    {id:"geosite-youtube",name:"YouTube",group:"流媒体"},
-    {id:"geosite-openai",name:"OpenAI / ChatGPT",group:"AI 服务"},
-    {id:"geosite-apple",name:"Apple",group:"平台直连/代理"}
+    {
+      "id": "geosite-cn",
+      "name": "中国大陆域名",
+      "group": "基础分流",
+      "cores": "both"
+    },
+    {
+      "id": "geoip-cn",
+      "name": "中国大陆 IP",
+      "group": "基础分流",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-private",
+      "name": "局域网 / 私有域名",
+      "group": "基础分流",
+      "cores": "both"
+    },
+    {
+      "id": "geoip-private",
+      "name": "局域网 / 私有 IP",
+      "group": "基础分流",
+      "cores": "mihomo"
+    },
+    {
+      "id": "geosite-geolocation-!cn",
+      "name": "非中国大陆域名",
+      "group": "基础分流",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ads-all",
+      "name": "广告域名（通用全量）",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ads",
+      "name": "广告域名（精简）",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-public-tracker",
+      "name": "公共追踪器",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-telemetry",
+      "name": "遥测 / 数据上报",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-consent-management",
+      "name": "Cookie 同意管理",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-password-management",
+      "name": "密码管理器",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ip-geo-detect",
+      "name": "IP 归属地检测",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-anticensorship",
+      "name": "反审查站点",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-proxy-tunnels",
+      "name": "代理隧道与中转",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-vpnservices",
+      "name": "VPN 服务商",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-stun",
+      "name": "STUN / TURN 服务",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ipfs",
+      "name": "IPFS 节点",
+      "group": "广告与隐私",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-openai",
+      "name": "OpenAI / ChatGPT",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-anthropic",
+      "name": "Anthropic / Claude",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ai-!cn",
+      "name": "AI 服务（海外）",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ai-chat-!cn",
+      "name": "AI 对话（海外）",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ai-cn",
+      "name": "AI 服务（国内）",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ai-ru",
+      "name": "AI 服务（俄罗斯区）",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-google-gemini",
+      "name": "Google Gemini",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-perplexity",
+      "name": "Perplexity",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-deepseek",
+      "name": "DeepSeek",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-doubao",
+      "name": "豆包 Doubao",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-bing",
+      "name": "Bing / Copilot",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-huggingface",
+      "name": "Hugging Face",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-notion",
+      "name": "Notion",
+      "group": "AI 服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-netflix",
+      "name": "Netflix",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-disney",
+      "name": "Disney+",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-youtube",
+      "name": "YouTube",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-tiktok",
+      "name": "TikTok",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-spotify",
+      "name": "Spotify",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-hbo",
+      "name": "HBO",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-bahamut",
+      "name": "巴哈姆特动漫",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-twitch",
+      "name": "Twitch",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-netease",
+      "name": "网易云音乐",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-bilibili",
+      "name": "哔哩哔哩",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-iqiyi",
+      "name": "爱奇艺",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-youku",
+      "name": "优酷",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-media",
+      "name": "影音媒体站点",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-media-cn",
+      "name": "国内影音站点",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-entertainment",
+      "name": "娱乐站点",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-entertainment-cn",
+      "name": "国内娱乐站点",
+      "group": "流媒体影音",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-telegram",
+      "name": "Telegram",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-twitter",
+      "name": "X / Twitter",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-facebook",
+      "name": "Facebook",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-instagram",
+      "name": "Instagram",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-whatsapp",
+      "name": "WhatsApp",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-line",
+      "name": "LINE",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-discord",
+      "name": "Discord",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-reddit",
+      "name": "Reddit",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-viber",
+      "name": "Viber",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-signal",
+      "name": "Signal",
+      "group": "社交通讯",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-games",
+      "name": "游戏平台（综合）",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-games-cn",
+      "name": "国内游戏平台",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-game-accelerator-cn",
+      "name": "国内游戏加速服务",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-enhance-gaming",
+      "name": "游戏加速增强",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-flight-simulator",
+      "name": "模拟器类游戏",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-steam",
+      "name": "Steam",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-epicgames",
+      "name": "Epic Games",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-playstation",
+      "name": "PlayStation",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-xbox",
+      "name": "Xbox",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-nintendo",
+      "name": "Nintendo",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-blizzard",
+      "name": "暴雪战网",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-mihoyo",
+      "name": "米哈游（HoYoPlay）",
+      "group": "游戏加速",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-github",
+      "name": "GitHub",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-gitlab",
+      "name": "GitLab",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-docker",
+      "name": "Docker Hub",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-golang",
+      "name": "Go 语言站点",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-nodejs",
+      "name": "Node.js / npm",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-jetbrains",
+      "name": "JetBrains",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-dev",
+      "name": "开发者站点",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-dev-cn",
+      "name": "国内开发者站点",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-cdn-!cn",
+      "name": "海外 CDN",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-cdn-cn",
+      "name": "国内 CDN",
+      "group": "开发与技术",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-finance",
+      "name": "金融理财站点",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-bank-cn",
+      "name": "国内银行",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-securities-cn",
+      "name": "国内证券",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-cryptocurrency",
+      "name": "加密货币",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-paypal",
+      "name": "PayPal",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-stripe",
+      "name": "Stripe",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-wise",
+      "name": "Wise 转账",
+      "group": "金融商务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-amazon",
+      "name": "Amazon",
+      "group": "购物电商",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-ebay",
+      "name": "eBay",
+      "group": "购物电商",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-pinduoduo",
+      "name": "拼多多",
+      "group": "购物电商",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-ecommerce",
+      "name": "电商平台",
+      "group": "购物电商",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-microsoft",
+      "name": "Microsoft",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-google",
+      "name": "Google",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-dropbox",
+      "name": "Dropbox",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-zoom",
+      "name": "Zoom 会议",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-onedrive",
+      "name": "OneDrive",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-icloud",
+      "name": "iCloud",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-companies",
+      "name": "大型企业站点",
+      "group": "办公云服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-scholar-cn",
+      "name": "国内学术资源",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-scholar-!cn",
+      "name": "海外学术资源",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-scholar-hk",
+      "name": "港澳学术资源",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-mooc-cn",
+      "name": "国内慕课平台",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-education-cn",
+      "name": "国内教育站点",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-documents-cn",
+      "name": "国内文档站",
+      "group": "教育科研",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-hospital-cn",
+      "name": "国内医院与医疗",
+      "group": "生活服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-food-cn",
+      "name": "国内餐饮外卖",
+      "group": "生活服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-logistics-cn",
+      "name": "国内物流",
+      "group": "生活服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-blog-cn",
+      "name": "国内博客",
+      "group": "生活服务",
+      "cores": "both"
+    },
+    {
+      "id": "geosite-category-porn",
+      "name": "成人内容（拦截用）",
+      "group": "广告与隐私",
+      "cores": "mihomo"
+    }
   ],
   scenarios: [
-    {id:"balanced",name:"均衡日常",desc:"国内直连、广告拦截、常规外网走代理",sets:[
-      {id:"geosite-category-ads-all",policy:"REJECT"},{id:"geosite-cn",policy:"DIRECT"},
-      {id:"geoip-cn",policy:"DIRECT"},{id:"geosite-apple",policy:"DIRECT"}]}
+    {
+      "id": "balanced",
+      "name": "均衡日常",
+      "tag": "通用",
+      "desc": "国内直连 + 广告拦截 + 常规外网走代理，绝大多数用户的默认选择",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-microsoft",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-google",
+          "policy": "PROXY"
+        }
+      ]
+    },
+    {
+      "id": "streaming",
+      "name": "流媒体优先",
+      "tag": "流媒体",
+      "desc": "海外流媒体全量走代理，避免 CDN 落地变慢、区域限制",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-netflix",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-disney",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-youtube",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-tiktok",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-spotify",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-hbo",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-bahamut",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-twitch",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-microsoft",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "gaming",
+      "name": "游戏加速",
+      "tag": "游戏",
+      "desc": "游戏平台与加速服务走代理，降低延迟；国内服务照常直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-games",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-steam",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-epicgames",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-playstation",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-xbox",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-nintendo",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-blizzard",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-mihoyo",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-enhance-gaming",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-flight-simulator",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "name": "AI 服务",
+      "tag": "AI",
+      "desc": "ChatGPT / Claude / Gemini 等走代理保证区域可用，国内 AI 服务直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-openai",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-anthropic",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-ai-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-ai-chat-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-google-gemini",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-perplexity",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-deepseek",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-huggingface",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-notion",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-bing",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-ai-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-doubao",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "privacy",
+      "name": "隐私优先",
+      "tag": "隐私",
+      "desc": "广告 / 追踪 / 遥测全部拦截，除国内必需外一律走代理",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-public-tracker",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-telemetry",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-consent-management",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-password-management",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-ip-geo-detect",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ],
+      "rules": [
+        "DOMAIN-KEYWORD,analytics,REJECT",
+        "DOMAIN-KEYWORD,tracker,REJECT",
+        "DOMAIN-SUFFIX,doubleclick.net,REJECT"
+      ]
+    },
+    {
+      "id": "cn-max",
+      "name": "国内直连优先",
+      "tag": "通用",
+      "desc": "只有明确在境外的站点走代理，可用性最高、延迟最低",
+      "sets": [
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "name": "办公协作",
+      "tag": "办公",
+      "desc": "SaaS 协作工具走代理，保证海外团队会议与文档同步顺畅",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-zoom",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-dropbox",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-onedrive",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-microsoft",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-google",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-companies",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-cdn-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "dev",
+      "name": "开发调试",
+      "tag": "开发",
+      "desc": "代码托管 / 镜像源 / 包管理走代理，国内镜像直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-github",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-gitlab",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-docker",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-golang",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-nodejs",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-jetbrains",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-dev",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-dev-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-cdn-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "study",
+      "name": "学术科研",
+      "tag": "学习",
+      "desc": "海外学术资源走代理，国内教务与文档站直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-scholar-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-scholar-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-scholar-hk",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-mooc-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-education-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-documents-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "finance",
+      "name": "金融证券",
+      "tag": "商务",
+      "desc": "海外支付与理财走代理，国内银行证券直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-finance",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-paypal",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-stripe",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-wise",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-cryptocurrency",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-bank-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-securities-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "shopping",
+      "name": "海淘电商",
+      "tag": "商务",
+      "desc": "海外电商走代理保物流与风控稳定，国内电商直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-amazon",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-ebay",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-ecommerce",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-pinduoduo",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "social",
+      "name": "社交通讯",
+      "tag": "社交",
+      "desc": "Telegram / X / Discord 等社交平台走代理，保留国内即时通讯直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-telegram",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-twitter",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-facebook",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-instagram",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-whatsapp",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-line",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-discord",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-reddit",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-signal",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-viber",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "video-call",
+      "name": "视频会议",
+      "tag": "办公",
+      "desc": "会议与会议相关 SaaS 走代理，注意保留 UDP 以保证实时画质",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-zoom",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-microsoft",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-google",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-companies",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ],
+      "rules": [
+        "DOMAIN-SUFFIX,meet.google.com,PROXY"
+      ]
+    },
+    {
+      "id": "low-latency",
+      "name": "低延迟精简",
+      "tag": "通用",
+      "desc": "只保留必要规则集，规则匹配开销最小，适合小内存路由与 NAS",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        }
+      ]
+    },
+    {
+      "id": "ads-block",
+      "name": "纯净拦截",
+      "tag": "隐私",
+      "desc": "专注拦广告，其余按国内直连 / 境外代理分流",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-ads",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-public-tracker",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-telemetry",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        }
+      ]
+    },
+    {
+      "id": "overseas",
+      "name": "出海商务",
+      "tag": "商务",
+      "desc": "除中国大陆外全部走代理，适合出海办公与海外业务",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "back-to-cn",
+      "name": "回国加速",
+      "tag": "通用",
+      "desc": "国内站点与国内 CDN 强制直连，境外走代理，适合回国使用",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-cdn-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        }
+      ]
+    },
+    {
+      "id": "kid-safe",
+      "name": "青少年模式",
+      "tag": "隐私",
+      "desc": "拦截成人内容与广告追踪，其余保持国内直连",
+      "sets": [
+        {
+          "id": "geosite-category-porn",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-public-tracker",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "music",
+      "name": "音乐听歌",
+      "tag": "流媒体",
+      "desc": "海外音乐平台走代理，国内音乐 App 直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-spotify",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-youtube",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-netease",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "anime",
+      "name": "动漫追番",
+      "tag": "流媒体",
+      "desc": "B 站与巴哈姆特等正版平台，国内平台直连不卡顿",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-bilibili",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-bahamut",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-youtube",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-netease",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "news",
+      "name": "资讯聚合",
+      "tag": "生活",
+      "desc": "海外媒体走代理，国内资讯与博客直连",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-category-media",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-category-media-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-blog-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "smart-home",
+      "name": "智能家居直连",
+      "tag": "生活",
+      "desc": "局域网与国内 IoT / 生活服务全部直连，只把境外流量交给代理",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-food-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-hospital-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-category-logistics-cn",
+          "policy": "DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "global",
+      "name": "全局代理",
+      "tag": "通用",
+      "desc": "除中国大陆外所有流量统一走代理，规则最简洁",
+      "sets": [
+        {
+          "id": "geosite-category-ads-all",
+          "policy": "REJECT"
+        },
+        {
+          "id": "geosite-geolocation-!cn",
+          "policy": "PROXY"
+        },
+        {
+          "id": "geosite-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geoip-cn",
+          "policy": "DIRECT"
+        },
+        {
+          "id": "geosite-private",
+          "policy": "DIRECT"
+        }
+      ]
+    }
   ]
 };
+
+function coreHasSet(def) {
+  if (!def || !def.cores || def.cores === "both") return true;
+  return def.cores === genCore;
+}
+
 async function loadGen() {
   try {
     const inbs = await req("/api/inbounds");
     const el = $("gen_inbounds");
     const cur = new Set([...el.querySelectorAll("input:checked")].map(i => i.value));
     el.innerHTML = inbs.length ? inbs.map(i =>
-      `<label><input type="checkbox" value="${i.id}" ${cur.has(String(i.id)) ? "checked" : ""}> ${i.name} <span class="muted">(${i.core}:${i.port}${i.draft ? " · 草稿" : ""})</span></label>`).join("")
+      `<label><input type="checkbox" value="${i.id}" ${cur.has(String(i.id)) ? "checked" : ""}>
+        <span>${i.name}</span><span class="meta">${i.core}:${i.port}${i.draft ? " · 草稿" : ""}</span></label>`).join("")
       : '<span class="muted">暂无入站，请先在「入站」中创建</span>';
   } catch(e){}
   if (!genCatalog) {
@@ -1069,43 +2958,115 @@ async function loadGen() {
   }
   genTargetNote();
 }
+
 function renderScenarios() {
-  $("gen_scenarios").innerHTML = genCatalog.scenarios.map(s =>
-    `<label><input type="radio" name="g_scn" value="${s.id}" onchange="applyScenario('${s.id}')"> ${s.name}</label>`).join("");
-  $("gen_scn_desc").textContent = "";
+  const list = genCatalog.scenarios || [];
+  $("gen_scenarios").innerHTML = list.map(s =>
+    `<div class="scn-card${s.id===genScenario?" on":""}" data-id="${s.id}" onclick="applyScenario('${s.id}')">
+      <div class="scn-t"><b>${s.name}</b><span class="chip ghost">${s.tag||"通用"}</span></div>
+      <div class="scn-d">${s.desc||""}</div>
+      <div class="scn-m"><span class="chip">${(s.sets||[]).length} 规则集</span>${(s.rules||[]).length?`<span class="chip ghost">${s.rules.length} 条自定义规则</span>`:""}</div>
+    </div>`).join("");
+  $("gen_scn_count").textContent = list.length + " 个预设";
 }
+
+function setRowHTML(s) {
+  const usable = coreHasSet(s);
+  const on = !!genChecked[s.id];
+  const pol = genPolicies[s.id] || "PROXY";
+  const tag = (s.cores && s.cores !== "both") ? `<span class="tagcore">仅 ${s.cores}</span>` : "";
+  return `<div class="set-row${usable?"":" off"}" data-name="${(s.name||"").toLowerCase()} ${(s.id||"").toLowerCase()}">
+    <label><input type="checkbox" class="gset" data-id="${s.id}" ${on?"checked":""} ${usable?"":"disabled"}
+      onchange="toggleSet('${s.id}',this.checked)"><span title="${s.name}">${s.name}</span></label>
+    ${tag}
+    <select class="input gpol" data-id="${s.id}" ${on?"":"disabled"} onchange="genPolicies['${s.id}']=this.value">
+      <option ${pol==="DIRECT"?"selected":""}>DIRECT</option>
+      <option ${pol==="PROXY"?"selected":""}>PROXY</option>
+      <option ${pol==="REJECT"?"selected":""}>REJECT</option></select></div>`;
+}
+
 function renderSets() {
   const groups = {};
-  genCatalog.sets.forEach(s => (groups[s.Group] = groups[s.Group] || []).push(s));
-  $("gen_sets").innerHTML = Object.entries(groups).map(([g, arr]) =>
-    `<div style="margin-bottom:10px"><b style="font-size:13px">${g}</b>
-     <div class="radio-row" style="flex-wrap:wrap">${arr.map(s =>
-      `<label style="display:inline-flex;align-items:center;gap:6px">
-        <input type="checkbox" class="gset" data-id="${s.id}" onchange="this.nextElementSibling.style.display=this.checked?'':'none';if(this.checked&&!genPolicies['${s.id}'])genPolicies['${s.id}']='PROXY'">
-        ${s.name}
-        <select class="input gpol" data-id="${s.id}" style="width:auto;padding:2px 6px;display:none" onchange="genPolicies['${s.id}']=this.value">
-          <option>DIRECT</option><option>PROXY</option><option>REJECT</option>
-        </select></label>`).join("")}</div></div>`).join("");
+  (genCatalog.sets||[]).forEach(s => (groups[s.group||"其他"] = groups[s.group||"其他"]||[]).push(s));
+  $("gen_sets").innerHTML = Object.entries(groups).map(([g, arr]) => {
+    const usable = arr.filter(s => coreHasSet(s)).length;
+    const closed = genClosed[g] ? " closed" : "";
+    return `<div class="set-group${closed}" data-group="${g}">
+      <div class="gh" onclick="toggleGroup('${g}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        <span>${g}</span><span class="cnt">${usable}/${arr.length} 可用</span></div>
+      <div class="gb">${arr.map(setRowHTML).join("")}</div></div>`;
+  }).join("");
+  const picked = Object.keys(genChecked).filter(k => genChecked[k]).length;
+  $("gen_sets_count").textContent = `已选 ${picked} / ${(genCatalog.sets||[]).length}`;
 }
-function applyScenario(id) {
-  const s = genCatalog.scenarios.find(x => x.id === id); if (!s) return;
-  document.querySelectorAll("#gen_sets .gset").forEach(cb => {
-    cb.checked = false; cb.nextElementSibling.style.display = "none";
+
+function toggleGroup(g) {
+  genClosed[g] = !genClosed[g];
+  renderSets();
+  filterSets();
+}
+
+function toggleSet(id, on) {
+  if (on) { genChecked[id] = true; if (!genPolicies[id]) genPolicies[id] = "PROXY"; }
+  else delete genChecked[id];
+  renderSets();
+  filterSets();
+}
+
+function filterSets() {
+  const q = ($("gen_set_search").value || "").trim().toLowerCase();
+  document.querySelectorAll("#gen_sets .set-row").forEach(r => {
+    r.style.display = (!q || r.dataset.name.includes(q)) ? "" : "none";
   });
-  (s.sets || []).forEach(sp => {
-    const cb = document.querySelector(`#gen_sets .gset[data-id="${CSS.escape(sp.id)}"]`);
-    if (!cb) return;
-    cb.checked = true;
-    const sel = cb.nextElementSibling;
-    sel.style.display = ""; sel.value = sp.policy;
+  document.querySelectorAll("#gen_sets .set-group").forEach(g => {
+    const any = [...g.querySelectorAll(".set-row")].some(r => r.style.display !== "none");
+    g.style.display = any ? "" : "none";
+  });
+}
+
+function applyScenario(id) {
+  const s = (genCatalog.scenarios||[]).find(x => x.id === id);
+  if (!s) return;
+  genScenario = id;
+  genChecked = {}; genPolicies = {};
+  let skipped = 0;
+  (s.sets||[]).forEach(sp => {
+    const def = (genCatalog.sets||[]).find(d => d.id === sp.id);
+    if (!def) { skipped++; return; }
+    if (!coreHasSet(def)) { skipped++; return; }
+    genChecked[sp.id] = true;
     genPolicies[sp.id] = sp.policy;
   });
-  $("gen_scn_desc").textContent = s.desc || "";
+  if ((s.rules||[]).length) {
+    const ta = $("gen_rules");
+    const cur = ta.value.split("\n").map(x => x.trim()).filter(Boolean);
+    (s.rules||[]).forEach(r => { if (cur.indexOf(r) < 0) cur.push(r); });
+    ta.value = cur.join("\n");
+  }
+  renderScenarios(); renderSets(); filterSets();
+  $("gen_scn_desc").innerHTML = `<b style="color:var(--text)">${s.name}</b> · ${s.desc||""}` +
+    (skipped ? ` <span class="muted">（${skipped} 个规则集在 ${genCore} 上游不可用，已跳过）</span>` : "");
 }
+
 function genTargetNote() {
-  const t = document.querySelector('input[name=g_target]:checked');
-  $("gen_target_note").textContent = GEN_TARGET_NOTES[t ? t.value : "client"] || "";
+  $("gen_target_note").textContent = GEN_TARGET_NOTES[genTarget] || "";
 }
+
+$("g_core_seg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  genCore = b.dataset.v;
+  [...$("g_core_seg").children].forEach(x => x.classList.toggle("on", x === b));
+  renderSets(); filterSets();
+  if (genScenario) applyScenario(genScenario);
+});
+$("g_target_seg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  genTarget = b.dataset.v;
+  [...$("g_target_seg").children].forEach(x => x.classList.toggle("on", x === b));
+  genTargetNote();
+});
+
 function addCustomSetRow(name, url, beh, pol) {
   const d = document.createElement("div");
   d.className = "cset-row";
@@ -1122,11 +3083,10 @@ function addCustomSetRow(name, url, beh, pol) {
 }
 let genLast = null;
 async function genGenerate() {
-  const core = document.querySelector('input[name=g_core]:checked').value;
-  const target = document.querySelector('input[name=g_target]:checked').value;
+  const core = genCore, target = genTarget;
   const ids = [...document.querySelectorAll("#gen_inbounds input:checked")].map(i => +i.value);
   if (!ids.length) { toast("请至少选择一个入站", "warn"); return; }
-  const sets = [...document.querySelectorAll("#gen_sets .gset:checked")].map(cb => ({ id: cb.dataset.id, policy: genPolicies[cb.dataset.id] || "PROXY" }));
+  const sets = Object.keys(genChecked).filter(k => genChecked[k]).map(id => ({ id, policy: genPolicies[id] || "PROXY" }));
   const custom_rules = $("gen_rules").value.split("\n").map(s => s.trim()).filter(Boolean);
   const custom_sets = [...document.querySelectorAll("#gen_csets .cset-row")].map(r => ({
     name: r.querySelector(".cs-name").value.trim(),
@@ -1134,8 +3094,7 @@ async function genGenerate() {
     behavior: r.querySelector(".cs-beh").value,
     policy: r.querySelector(".cs-pol").value
   })).filter(s => s.name && s.url);
-  const scn = document.querySelector('input[name=g_scn]:checked');
-  const body = { core, target, inbound_ids: ids, scenario: scn ? scn.value : "custom", sets, custom_rules, custom_sets };
+  const body = { core, target, inbound_ids: ids, scenario: genScenario || "custom", sets, custom_rules, custom_sets };
   toast("生成中…", "info");
   try {
     let j;
@@ -1355,6 +3314,8 @@ async function genReality() {
     const j = await req("/api/tools/reality-keypair", { method:"POST", body:{ core } });
     let s = {}; try { s = JSON.parse($("ib_settings").value || "{}"); } catch(e){}
     s.private_key = j.private_key;
+    // 同时写入 pbk（客户端出站所需的公钥），保证生成的配置可直接使用
+    if (!s.pbk) s.pbk = j.public_key;
     $("ib_settings").value = JSON.stringify(s, null, 2);
     $("ibkey").textContent = "public_key（发给客户端）: " + j.public_key;
     toast("Reality 密钥对已生成并写入 Settings");
@@ -1386,7 +3347,9 @@ async function loadTraffic() {
 async function loadDaily() {
   try {
     const points = await req("/api/traffic/daily?days=" + $("tr_days").value);
-    drawDailyChart(points);
+    drawFlowChart($("tr_chart"), points, $("tr_tip"));
+    const total = (points || []).reduce((s, p) => s + p.up + p.down, 0);
+    $("tr_total").textContent = "区间合计: " + fmtBytes(total);
   } catch(e){}
 }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
@@ -1437,7 +3400,390 @@ function niceCeil(v) {
   for (const m of [1,2,5,10]) if (v <= m * p) return m * p;
   return 10 * p;
 }
-window.addEventListener("resize", () => { if ($("v-traffic").classList.contains("active")) loadDaily(); });
+window.addEventListener("resize", () => { if (typeof redrawCharts === "function") redrawCharts(); });
+
+/* ================= 图表引擎（纯 Canvas，无外部依赖） ================= */
+function chartSetup(cv, h) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(220, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600);
+  const H = h || 200;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  cv.style.height = H + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  return { ctx, W, H };
+}
+function hexA(c, a) {
+  c = (c || "").trim();
+  if (!c) return "rgba(120,140,180," + a + ")";
+  if (c.startsWith("rgb")) return c.replace(/rgba?\(([^)]+)\)/, (m, g) => "rgba(" + g.split(",").slice(0, 3).join(",") + "," + a + ")");
+  if (c.length === 4) c = "#" + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+  const n = parseInt(c.slice(1), 16);
+  return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+}
+function smoothPath(ctx, pts) {
+  if (!pts.length) return;
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    ctx.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+                     p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+}
+function fmtRate(b) {
+  if (!b) return "0";
+  const u = ["B", "KB", "MB", "GB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i ? 1 : 0) + " " + u[i];
+}
+
+/* —— 流量趋势：双序列平滑面积图 + 悬停十字线 —— */
+function drawFlowChart(cv, points, tipEl) {
+  const { ctx, W, H } = chartSetup(cv, cv.id === "ov_chart" ? 268 : 236);
+  if (!points || !points.length) return;
+  const pad = { l: 52, r: 10, t: 14, b: 24 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const maxV = Math.max(1, ...points.map(p => p.up + p.down));
+  const nice = niceCeil(maxV);
+  const n = points.length;
+  const step = cw / Math.max(1, n - 1);
+  const cUp = cssVar("--chart-up"), cDn = cssVar("--chart-down");
+  const cGrid = cssVar("--grid"), cText = cssVar("--muted");
+  ctx.font = "11px " + (cssVar("--font") || "sans-serif");
+  ctx.textBaseline = "middle";
+
+  // 网格 + Y 轴刻度
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ch - ch * i / 4;
+    ctx.strokeStyle = cGrid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, y + .5); ctx.lineTo(W - pad.r, y + .5); ctx.stroke();
+    ctx.fillStyle = cText; ctx.textAlign = "right";
+    ctx.fillText(fmtBytes(nice * i / 4), pad.l - 8, y);
+  }
+  const X = i => pad.l + step * i;
+  const Y = v => pad.t + ch - ch * (v / nice);
+
+  const series = [
+    { key: "down", color: cDn, vals: points.map(p => p.down) },
+    { key: "up", color: cUp, vals: points.map(p => p.up) }
+  ];
+  series.forEach(s => {
+    const pts = s.vals.map((v, i) => [X(i), Y(v)]);
+    // 面积
+    ctx.beginPath(); smoothPath(ctx, pts);
+    ctx.lineTo(pts[pts.length - 1][0], pad.t + ch);
+    ctx.lineTo(pts[0][0], pad.t + ch);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+    g.addColorStop(0, hexA(s.color, .34));
+    g.addColorStop(1, hexA(s.color, 0));
+    ctx.fillStyle = g; ctx.fill();
+    // 描线
+    ctx.beginPath(); smoothPath(ctx, pts);
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.shadowColor = hexA(s.color, .35); ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+    ctx.stroke();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  });
+
+  // X 轴日期
+  ctx.fillStyle = cText; ctx.textAlign = "center";
+  const every = Math.max(1, Math.ceil(n / 7));
+  points.forEach((p, i) => {
+    if (i % every === 0 || i === n - 1) ctx.fillText(String(p.day || "").slice(5), X(i), H - 10);
+  });
+
+  // 交互层
+  cv._geo = { pts: points, X, Y, pad, cw, ch, tip: tipEl };
+  if (!cv._hoverBound) {
+    cv._hoverBound = true;
+    cv.addEventListener("mousemove", e => {
+      const g = cv._geo; if (!g) return;
+      const r = cv.getBoundingClientRect();
+      const mx = e.clientX - r.left;
+      let idx = Math.round((mx - g.pad.l) / (g.cw / Math.max(1, g.pts.length - 1)));
+      idx = Math.max(0, Math.min(g.pts.length - 1, idx));
+      drawFlowChart(cv, g.pts, g.tip);
+      drawCrosshair(cv, g, idx);
+    });
+    cv.addEventListener("mouseleave", () => {
+      const g = cv._geo; if (!g) return;
+      if (g.tip) g.tip.classList.remove("show");
+      drawFlowChart(cv, g.pts, g.tip);
+    });
+  }
+}
+function drawCrosshair(cv, g, idx) {
+  const { ctx } = { ctx: cv.getContext("2d") };
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const p = g.pts[idx];
+  const x = g.X(idx);
+  const cUp = cssVar("--chart-up"), cDn = cssVar("--chart-down");
+  ctx.strokeStyle = cssVar("--muted"); ctx.globalAlpha = .45; ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x, g.pad.t); ctx.lineTo(x, g.pad.t + g.ch); ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+  [["down", p.down, cDn], ["up", p.up, cUp]].forEach(([k, v, c]) => {
+    const y = g.Y(v);
+    ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = c; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = cssVar("--card"); ctx.stroke();
+  });
+  if (g.tip) {
+    g.tip.innerHTML = `<div class="t-d">${p.day || ""}</div>
+      <div class="t-r"><span><i style="background:${cDn}"></i>下行</span><b>${fmtBytes(p.down)}</b></div>
+      <div class="t-r"><span><i style="background:${cUp}"></i>上行</span><b>${fmtBytes(p.up)}</b></div>
+      <div class="t-r"><span>合计</span><b>${fmtBytes(p.up + p.down)}</b></div>`;
+    g.tip.style.left = x + "px";
+    g.tip.style.top = (g.pad.t + 8) + "px";
+    g.tip.classList.add("show");
+  }
+}
+
+/* —— 迷你折线（KPI 卡内） —— */
+function drawSpark(cv, values, color) {
+  const { ctx, W, H } = chartSetup(cv, 52);
+  if (!values || values.length < 2) return;
+  const max = Math.max(1, ...values);
+  const pts = values.map((v, i) => [ (W - 4) * i / (values.length - 1) + 2, H - 4 - (H - 10) * (v / max) ]);
+  ctx.beginPath(); smoothPath(ctx, pts);
+  ctx.lineTo(pts[pts.length - 1][0], H); ctx.lineTo(pts[0][0], H); ctx.closePath();
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, hexA(color, .35)); g.addColorStop(1, hexA(color, 0));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); smoothPath(ctx, pts);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.stroke();
+}
+
+/* —— 实时速率双线 —— */
+function drawLiveChart(cv, hist) {
+  const { ctx, W, H } = chartSetup(cv, 120);
+  if (!hist || hist.length < 2) {
+    ctx.fillStyle = cssVar("--muted"); ctx.font = "12px " + (cssVar("--font") || "sans-serif");
+    ctx.textAlign = "center"; ctx.fillText("等待采样数据…", W / 2, H / 2);
+    return;
+  }
+  const pad = { l: 44, r: 8, t: 10, b: 16 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const max = Math.max(1, ...hist.map(h => Math.max(h.up, h.down)));
+  const cUp = cssVar("--chart-up"), cDn = cssVar("--chart-down"), cGrid = cssVar("--grid");
+  ctx.font = "10px " + (cssVar("--font") || "sans-serif");
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= 2; i++) {
+    const y = pad.t + ch - ch * i / 2;
+    ctx.strokeStyle = cGrid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, y + .5); ctx.lineTo(W - pad.r, y + .5); ctx.stroke();
+    ctx.fillStyle = cssVar("--muted"); ctx.textAlign = "right";
+    ctx.fillText(fmtRate(max * i / 2) + "/s", pad.l - 6, y);
+  }
+  const X = i => pad.l + cw * i / (hist.length - 1);
+  const Y = v => pad.t + ch - ch * (v / max);
+  [{ key: "down", color: cDn }, { key: "up", color: cUp }].forEach(s => {
+    const pts = hist.map((h, i) => [X(i), Y(h[s.key] || 0)]);
+    ctx.beginPath(); smoothPath(ctx, pts);
+    ctx.lineTo(pts[pts.length - 1][0], pad.t + ch); ctx.lineTo(pts[0][0], pad.t + ch); ctx.closePath();
+    const g = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+    g.addColorStop(0, hexA(s.color, .28)); g.addColorStop(1, hexA(s.color, 0));
+    ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); smoothPath(ctx, pts);
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.8; ctx.stroke();
+  });
+}
+
+/* —— 环形图 —— */
+function drawDonut(cv, items) {
+  const { ctx, W, H } = chartSetup(cv, 172);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 12, ri = r * 0.62;
+  if (!total) {
+    ctx.strokeStyle = cssVar("--line"); ctx.lineWidth = r - ri;
+    ctx.beginPath(); ctx.arc(cx, cy, (r + ri) / 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = cssVar("--muted"); ctx.font = "12px " + (cssVar("--font") || "sans-serif");
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("暂无流量", cx, cy);
+    return;
+  }
+  let a = -Math.PI / 2;
+  items.forEach(it => {
+    const ang = it.value / total * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, a, a + ang - 0.012);
+    ctx.arc(cx, cy, ri, a + ang - 0.012, a, true);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    g.addColorStop(0, it.color); g.addColorStop(1, hexA(it.color, .62));
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = cssVar("--card"); ctx.lineWidth = 1.5; ctx.stroke();
+    a += ang;
+  });
+  ctx.fillStyle = cssVar("--text"); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "700 15px " + (cssVar("--font") || "sans-serif");
+  ctx.fillText(fmtBytes(total), cx, cy - 7);
+  ctx.fillStyle = cssVar("--muted"); ctx.font = "11px " + (cssVar("--font") || "sans-serif");
+  ctx.fillText("总流量", cx, cy + 11);
+}
+
+/* —— 状态环（内核运行状态） —— */
+function drawRing(cv, pct, color, label) {
+  const { ctx, W, H } = chartSetup(cv, 92);
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 9, lw = 7;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = cssVar("--line"); ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  if (pct > 0) {
+    ctx.strokeStyle = color; ctx.lineWidth = lw;
+    ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, pct));
+    ctx.stroke();
+  }
+  ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "700 15px " + (cssVar("--font") || "sans-serif");
+  ctx.fillText(label, cx, cy);
+}
+
+/* ================= 仪表盘 ================= */
+const DONUT_COLORS = ["--acc", "--acc2", "--chart-3", "--chart-4", "--ok", "--warn"];
+
+function ovCoresRunning() { return OV.cores.filter(c => c.running).length; }
+
+function renderKpis() {
+  const total = OV.traffic.reduce((s, r) => s + (r.total || 0), 0);
+  const running = ovCoresRunning(), totalC = OV.cores.length;
+  const spark = OV.daily.slice(-14).map(p => p.down + p.up);
+  const yesterday = OV.daily.length > 1 ? (OV.daily[OV.daily.length - 2].up + OV.daily[OV.daily.length - 2].down) : 0;
+  const today = OV.daily.length ? (OV.daily[OV.daily.length - 1].up + OV.daily[OV.daily.length - 1].down) : 0;
+  const delta = yesterday ? Math.round((today - yesterday) / yesterday * 100) : 0;
+  const deltaHTML = yesterday
+    ? `<span class="${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}%</span> 较昨日`
+    : "暂无对比数据";
+  $("kpis").innerHTML = `
+    <div class="kpi">
+      <div class="kpi-top"><div class="kpi-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+        <div class="kpi-lb">内核运行中</div></div>
+      <div class="kpi-val">${running}<span class="unit">/ ${totalC}</span></div>
+      <div class="kpi-delta">${running === totalC && totalC ? "全部在线" : (totalC - running) + " 个未运行"}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><div class="kpi-ic g2"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+        <div class="kpi-lb">用户总数</div></div>
+      <div class="kpi-val">${CLIENT_N}</div>
+      <div class="kpi-delta">${OV.traffic.filter(r => r.enabled).length} 个启用中 · ${OV.traffic.filter(r => !r.enabled).length} 个停用</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><div class="kpi-ic g3"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+        <div class="kpi-lb">累计流量</div></div>
+      <div class="kpi-val">${fmtBytes(total)}</div>
+      <div class="kpi-delta">${deltaHTML}</div>
+      <canvas class="kpi-spark" id="kpi_spark"></canvas>
+    </div>
+    <div class="kpi">
+      <div class="kpi-top"><div class="kpi-ic g4"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div>
+        <div class="kpi-lb">入站数量</div></div>
+      <div class="kpi-val">${INB_N}</div>
+      <div class="kpi-delta">${OV.cores.filter(c => c.config_exists).length} 个内核已有配置</div>
+    </div>`;
+  const sp = $("kpi_spark");
+  if (sp) drawSpark(sp, spark.length > 1 ? spark : [0, 1], cssVar("--chart-down"));
+}
+
+function renderRings() {
+  const el = $("ov_rings");
+  if (!el) return;
+  if (!OV.cores.length) { el.innerHTML = `<div class="muted" style="grid-column:1/-1">未获取到内核状态</div>`; return; }
+  el.innerHTML = OV.cores.map((c, i) => {
+    let pct = 0, color = cssVar("--muted"), label = "未配置", st = "未配置二进制路径";
+    if (c.running) { pct = 1; color = cssVar("--ok"); label = "运行中"; st = "配置与进程正常"; }
+    else if (c.config_exists) { pct = .5; color = cssVar("--warn"); label = "待启动"; st = "有配置但未运行"; }
+    return `<div class="ring-card">
+      <canvas id="ring_${i}" height="92"></canvas>
+      <div class="nm">${c.core}</div><div class="st">${st}</div></div>`;
+  }).join("");
+  OV.cores.forEach((c, i) => {
+    const cv = $("ring_" + i); if (!cv) return;
+    let pct = 0, color = cssVar("--muted"), label = "未配";
+    if (c.running) { pct = 1; color = cssVar("--ok"); label = "运行"; }
+    else if (c.config_exists) { pct = .5; color = cssVar("--warn"); label = "待启"; }
+    drawRing(cv, pct, color, label);
+  });
+}
+
+function renderDonut() {
+  const items = OV.traffic.filter(r => r.total > 0).sort((a, b) => b.total - a.total).slice(0, 6);
+  const cv = $("ov_donut"); if (!cv) return;
+  const data = items.map((r, i) => ({
+    name: r.name, value: r.total,
+    color: cssVar(DONUT_COLORS[i % DONUT_COLORS.length]) || cssVar("--acc")
+  }));
+  drawDonut(cv, data);
+  const lg = $("ov_legend");
+  if (lg) {
+    const total = OV.traffic.reduce((s, r) => s + (r.total || 0), 0) || 1;
+    lg.innerHTML = data.length ? data.map(d =>
+      `<span class="li" style="width:100%"><i style="background:${d.color}"></i>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.name}</span>
+        <b style="color:var(--text);font-variant-numeric:tabular-nums">${fmtBytes(d.value)}</b>
+        <span style="width:44px;text-align:right">${(d.value / total * 100).toFixed(1)}%</span></span>`).join("")
+      : `<span class="muted">暂无流量数据 —— 需在设置中开启统计并应用生效</span>`;
+    lg.style.flexDirection = "column";
+    lg.style.gap = "9px";
+  }
+}
+
+function renderRank() {
+  const el = $("ov_rank"); if (!el) return;
+  const rows = OV.traffic.filter(r => r.total > 0).sort((a, b) => b.total - a.total).slice(0, 6);
+  const max = rows.length ? rows[0].total : 1;
+  el.innerHTML = rows.length ? rows.map((r, i) =>
+    `<div class="rank-row"><span class="idx">${i + 1}</span>
+      <span class="nm" title="${r.name}">${r.name}</span>
+      <span class="vl">${fmtBytes(r.total)}</span>
+      <span class="bar"><i style="width:${(r.total / max * 100).toFixed(1)}%"></i></span></div>`).join("")
+    : `<div class="muted" style="padding:14px 2px">暂无流量数据</div>`;
+}
+
+function renderMiniStats() {
+  const el = $("ov_stats"); if (!el) return;
+  const d = OV.daily || [];
+  const total = d.reduce((s, p) => s + p.up + p.down, 0);
+  const peak = d.reduce((m, p) => (p.up + p.down) > (m.v || 0) ? { v: p.up + p.down, day: p.day } : m, {});
+  const active = d.filter(p => p.up + p.down > 0).length;
+  el.innerHTML = `
+    <div><div class="ms-l">区间合计</div><div class="ms-v">${fmtBytes(total)}</div></div>
+    <div><div class="ms-l">日均流量</div><div class="ms-v">${fmtBytes(d.length ? total / d.length : 0)}</div></div>
+    <div><div class="ms-l">峰值日${peak.day ? " · " + String(peak.day).slice(5) : ""}</div><div class="ms-v">${fmtBytes(peak.v || 0)}</div></div>`;
+}
+
+function drawOverviewChart() {
+  const cv = $("ov_chart"); if (!cv) return;
+  drawFlowChart(cv, OV.daily, $("ov_tip"));
+  const total = OV.daily.reduce((s, p) => s + p.up + p.down, 0);
+  const el = $("ov_total");
+  if (el) el.textContent = "区间合计 " + fmtBytes(total) + " · 日均 " + fmtBytes(OV.daily.length ? total / OV.daily.length : 0);
+}
+
+async function loadOverview() {
+  try {
+    const [daily, traffic, status] = await Promise.all([
+      req("/api/traffic/daily?days=14").catch(() => []),
+      req("/api/traffic").catch(() => []),
+      req("/api/status").catch(() => ({ cores: [] }))
+    ]);
+    OV.daily = daily || [];
+    OV.traffic = traffic || [];
+    OV.cores = (status && status.cores) || [];
+    renderKpis(); drawOverviewChart(); renderMiniStats(); renderRings(); renderDonut(); renderRank();
+  } catch (e) {}
+}
+
+function redrawCharts() {
+  if ($("v-overview") && $("v-overview").classList.contains("active")) {
+    drawOverviewChart(); renderRings(); renderDonut();
+    const sp = $("kpi_spark");
+    if (sp) drawSpark(sp, OV.daily.slice(-14).map(p => p.down + p.up), cssVar("--chart-down"));
+  }
+  if ($("v-traffic") && $("v-traffic").classList.contains("active")) loadDaily();
+}
 
 /* ---- 导入 ---- */
 async function doImport() {
@@ -1713,9 +4059,11 @@ async function saveSettings() {
 }
 
 /* ================= 启动 ================= */
-if (TOKEN) {
-  if (DEMO) showApp();
-  else fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
+if (DEMO) {
+  // 演示模式：直接进入主界面，无需登录
+  showApp();
+} else if (TOKEN) {
+  fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
     .then(r => r.ok ? showApp() : showLogin()).catch(showLogin);
 } else showLogin();
 </script>
