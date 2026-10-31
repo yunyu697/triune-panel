@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -152,7 +153,12 @@ func (a *Server) publicHost(r *http.Request) string {
 	if h, _ := a.Store.GetSetting("public_host"); h != "" {
 		return h
 	}
-	return r.Host
+	// 回退：用请求 Host 但剥掉面板端口——节点端口由入站配置决定
+	h := r.Host
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	return h
 }
 
 func proxyNames(nodes []*link.Node) []string {

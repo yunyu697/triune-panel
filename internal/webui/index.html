@@ -508,6 +508,26 @@ canvas{display:block;width:100%}
   </div>
 </div>
 
+<!-- 入站 导出弹窗 -->
+<div class="overlay" id="mExport" onclick="if(event.target===this)closeModal('mExport')">
+  <div class="modal" style="max-width:560px">
+    <h3>导出 <span id="ex_name" style="font-weight:600"></span></h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">
+      分享链接为该入站下<b>所有有效用户</b>逐一生成（每人一条）；草稿、停用或已过期用户不会导出。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn primary" onclick="exportInboundCopy()">复制分享链接</button>
+      <button class="btn" onclick="exportInboundDownload('clash')">下载 Clash 配置</button>
+      <button class="btn" onclick="exportInboundDownload('singbox')">下载 sing-box 配置</button>
+      <button class="btn" onclick="exportInboundDownload('meta')">下载入站 JSON</button>
+    </div>
+    <textarea id="ex_links" class="input mono" readonly
+      style="min-height:140px;font-size:12px" placeholder="点击「复制分享链接」在此预览"></textarea>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mExport')">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 切换内核 弹窗 -->
 <div class="overlay" id="mSwitch" onclick="if(event.target===this)closeModal('mSwitch')">
   <div class="modal" style="max-width:480px">
@@ -884,9 +904,67 @@ async function loadInbounds() {
       <td class="ta-r"><button class="btn sm" onclick="openInboundModal(${i.id})">编辑</button>
         ${i.enabled && !i.draft ? `<button class="btn sm" onclick="openSwitchModal(${i.id})">切换内核</button>` : ""}
         ${i.draft ? `<button class="btn sm" onclick="promoteInbound(${i.id})">取消草稿</button>` : ""}
+        <button class="btn sm" onclick="openExportModal(${i.id})">导出</button>
         <button class="btn sm danger" onclick="delInbound(${i.id})">删除</button></td></tr>`;
     }).join("") || `<tr><td colspan="8" class="empty">暂无入站，点击右上角「+ 新增入站」创建</td></tr>`;
   } catch(e){}
+}
+
+/* ---- 入站导出 ---- */
+let exportId = null;
+async function openExportModal(id) {
+  exportId = id;
+  try {
+    const all = await req("/api/inbounds");
+    const i = all.find(x => x.id === id);
+    $("ex_name").textContent = i ? `${i.name} (${i.core}:${i.port})` : "#" + id;
+  } catch(e){ $("ex_name").textContent = "#" + id; }
+  $("ex_links").value = "";
+  openModal("mExport");
+}
+async function exportLinks() {
+  if (DEMO) return [
+    "vless://a1b2c3d4-1111-2222-3333-444455556666@demo.example.com:443?security=reality&sni=www.apple.com&pbk=demo-pubkey&sid=ab12&fp=chrome#demo-hk-user1",
+    "vless://a1b2c3d4-7777-8888-9999-000011112222@demo.example.com:443?security=reality&sni=www.apple.com&pbk=demo-pubkey&sid=ab12&fp=chrome#demo-hk-user2"
+  ].join("\n");
+  const r = await fetch(`/api/inbounds/${exportId}/export?format=links`,
+    { headers: { Authorization: "Bearer " + TOKEN } });
+  if (!r.ok) throw new Error("导出失败(" + r.status + ")");
+  return r.text();
+}
+async function exportInboundCopy() {
+  try {
+    const text = await exportLinks();
+    $("ex_links").value = text;
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      toast("分享链接已复制到剪贴板");
+    } else toast("已生成，请手动复制文本框内容", "info");
+  } catch(e){ toast(e.message, "err"); }
+}
+async function exportInboundDownload(fmt) {
+  try {
+    const name = ($("ex_name").textContent.split(" (")[0] || "inbound").replace(/[\/\s]/g, "_");
+    let blob, fname;
+    if (DEMO) {
+      const body = fmt === "clash" ? "proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n"
+        : JSON.stringify({ outbounds: [{ type: "direct", tag: "direct" }] }, null, 2);
+      blob = new Blob([body], { type: fmt === "clash" ? "text/yaml" : "application/json" });
+      fname = fmt === "clash" ? `${name}-clash.yaml` : fmt === "singbox" ? `${name}-singbox.json` : `${name}-inbound.json`;
+    } else {
+      const r = await fetch(`/api/inbounds/${exportId}/export?format=${fmt}`,
+        { headers: { Authorization: "Bearer " + TOKEN } });
+      if (!r.ok) throw new Error("导出失败(" + r.status + ")");
+      blob = await r.blob();
+      const m = (r.headers.get("Content-Disposition") || "").match(/filename=(.+)/);
+      fname = m ? m[1] : `${name}-${fmt}`;
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    toast("已开始下载 " + fname);
+  } catch(e){ toast(e.message, "err"); }
 }
 
 /* ---- 用户弹窗 ---- */
