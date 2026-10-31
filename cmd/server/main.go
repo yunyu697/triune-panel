@@ -76,6 +76,9 @@ func main() {
 	go coll.Run()
 	// ACME 证书自动签发/续期
 	go certMgr.Run()
+	// 启动对账：把现有「已启用且非草稿」入站的端口在防火墙补放行
+	// （幂等；本机无防火墙后端时为空操作，不阻塞启动）
+	go srv.SyncFirewallPorts()
 
 	log.Printf("triune-panel %s listening on %s, data dir %s", Version, *addr, *dataDir)
 	if p, _ := st.GetSetting("admin_pass"); p == "" {

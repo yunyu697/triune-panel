@@ -763,6 +763,10 @@ canvas{display:block;width:100%}
         <div class="radio-row" style="margin:0">
           <label><input type="checkbox" id="s_stats"> 开启流量统计（应用后生效，仅监听 127.0.0.1）</label>
         </div>
+        <div class="radio-row" style="margin:0">
+          <label><input type="checkbox" id="s_fwauto"> 入站端口自动放行防火墙（新增 / 删除 / 改端口时同步 ufw · firewalld · iptables；本机无防火墙或由云安全组控制时自动跳过）</label>
+        </div>
+        <p class="muted" style="margin:0">仅管理本机防火墙，云厂商安全组需在控制台另行放行。iptables 规则重启后不保留，ufw / firewalld 会持久化。</p>
         <div style="margin-top:14px"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
       <div class="card">
@@ -6884,6 +6888,7 @@ async function loadSettings() {
     $("s_binmihomo").value = j.bin_mihomo || ""; $("s_host").value = j.public_host || "";
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
     $("s_warn_pct").value = j.quota_warn_pct || 80;
+    $("s_fwauto").checked = j.fw_auto !== "0";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
     $("s_auth_email").value = j.auth_email || "";
@@ -7145,6 +7150,7 @@ async function saveSettings() {
     bin_mihomo:$("s_binmihomo").value, public_host:$("s_host").value,
     stats_enabled:$("s_stats").checked?"1":"0", stats_secret:$("s_stats_secret").value,
     quota_warn_pct:String(+$("s_warn_pct").value || 80),
+    fw_auto:$("s_fwauto").checked?"1":"0",
     acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
   if ($("s_pass").value) body.admin_pass = $("s_pass").value;
   try { await req("/api/settings", { method:"PUT", body }); toast("设置已保存（统计开关需应用后生效）"); }

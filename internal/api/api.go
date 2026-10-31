@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"triune/internal/core"
+	"triune/internal/firewall"
 	"triune/internal/link"
 	"triune/internal/model"
 	"triune/internal/ops"
@@ -342,6 +343,14 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	// 自动放行防火墙端口：仅非草稿、且开启自动管理时。草稿是导入预览，
+	// 未参与渲染，待「取消草稿」转正时（updateInbound）再放行。
+	if fwAuto(a) && !in.Draft {
+		proto := firewall.ProtoOf(in.Protocol, in.Transport)
+		if err := firewall.OpenPort(in.Port, proto); err != nil {
+			log.Printf("[fw] 开放入站端口 %d/%s 失败: %v", in.Port, proto, err)
+		}
+	}
 	writeJSON(w, 200, in)
 }
 
@@ -358,24 +367,113 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	// 运行中的入站不允许直接改内核 —— 必须走 /api/switch-core 安全切换流程
 	// （预检 → 停旧 → 启新 → 健康检查 → 失败自动回滚），否则可能出现
 	// 新内核配置从未校验过就上线的风险。
-	if old, err := a.Store.GetInbound(in.ID); err == nil && old != nil &&
-		old.Core != in.Core && old.Enabled && !old.Draft {
-		fail(w, 400, "运行中的入站切换内核请使用 POST /api/switch-core（含预检与健康检查）")
-		return
+	var old *model.Inbound
+	if o, err := a.Store.GetInbound(in.ID); err == nil && o != nil {
+		old = o
+		if o.Core != in.Core && o.Enabled && !o.Draft {
+			fail(w, 400, "运行中的入站切换内核请使用 POST /api/switch-core（含预检与健康检查）")
+			return
+		}
 	}
 	if err := a.Store.UpdateInbound(&in); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	// 防火墙端口对账：草稿转正 / 端口或协议变化
+	if fwAuto(a) && old != nil {
+		oldProto := firewall.ProtoOf(old.Protocol, old.Transport)
+		newProto := firewall.ProtoOf(in.Protocol, in.Transport)
+		// 草稿 → 正式：放行新端口
+		if old.Draft && !in.Draft {
+			if err := firewall.OpenPort(in.Port, newProto); err != nil {
+				log.Printf("[fw] 转正放行端口 %d/%s 失败: %v", in.Port, newProto, err)
+			}
+		}
+		// 端口或协议变化：关闭旧（无其他入站占用时）+ 开放新
+		if (old.Port != in.Port || oldProto != newProto) && !in.Draft {
+			if !a.portInUseByOthers(in.ID, old.Port, oldProto) {
+				if err := firewall.ClosePort(old.Port, oldProto); err != nil {
+					log.Printf("[fw] 回收旧端口 %d/%s 失败: %v", old.Port, oldProto, err)
+				}
+			}
+			if err := firewall.OpenPort(in.Port, newProto); err != nil {
+				log.Printf("[fw] 开放新端口 %d/%s 失败: %v", in.Port, newProto, err)
+			}
+		}
+	}
 	writeJSON(w, 200, in)
 }
 
 func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.DeleteInbound(pathID(r)); err != nil {
+	id := pathID(r)
+	in, _ := a.Store.GetInbound(id)
+	if err := a.Store.DeleteInbound(id); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	// 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
+	if fwAuto(a) && in != nil && !in.Draft {
+		proto := firewall.ProtoOf(in.Protocol, in.Transport)
+		if !a.portInUseByOthers(id, in.Port, proto) {
+			if err := firewall.ClosePort(in.Port, proto); err != nil {
+				log.Printf("[fw] 回收入站端口 %d/%s 失败: %v", in.Port, proto, err)
+			}
+		}
+	}
 	writeJSON(w, 200, map[string]string{"ok": "1"})
+}
+
+// fwAuto 是否启用入站端口的自动防火墙管理（默认开启，设置 fw_auto=0 关闭）。
+func fwAuto(a *Server) bool {
+	v, _ := a.Store.GetSetting("fw_auto")
+	return v != "0"
+}
+
+// SyncFirewallPorts 启动时对账：为所有「已启用且非草稿」的入站端口补一次放行。
+// 场景：面板升级到带自动放行能力的版本后，存量入站不会重新保存一遍，
+// 不主动对账就会一直处于「已监听但防火墙未放行」的状态。
+// 幂等：已放行的端口会被各后端自身跳过；无防火墙后端时直接空转。
+func (a *Server) SyncFirewallPorts() {
+	if !fwAuto(a) {
+		return
+	}
+	ins, err := a.Store.ListInbounds("")
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, in := range ins {
+		if in.Draft || !in.Enabled {
+			continue
+		}
+		proto := firewall.ProtoOf(in.Protocol, in.Transport)
+		key := fmt.Sprintf("%d/%s", in.Port, proto)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if err := firewall.OpenPort(in.Port, proto); err != nil {
+			log.Printf("[fw] 启动对账放行 %s 失败: %v", key, err)
+		}
+	}
+}
+
+// portInUseByOthers 判断给定端口/协议是否仍被其它「已启用且非草稿」的入站使用，
+// 用于删除/改端口时避免误关仍被占用的端口。
+func (a *Server) portInUseByOthers(selfID int64, port int, proto string) bool {
+	others, err := a.Store.ListInbounds("")
+	if err != nil {
+		return false
+	}
+	for _, o := range others {
+		if o.ID == selfID || !o.Enabled || o.Draft {
+			continue
+		}
+		if o.Port == port && firewall.ProtoOf(o.Protocol, o.Transport) == proto {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- clients ----
@@ -731,7 +829,7 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		out["bin_"+c.Name()] = v
 	}
 	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
-		"quota_warn_pct",
+		"quota_warn_pct", "fw_auto",
 		"acme_enabled", "acme_domain", "acme_email",
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
@@ -754,6 +852,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]bool{
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
 		"quota_warn_pct": true,
+		// 入站端口的自动防火墙管理（fwAuto 读取，默认开启）
+		"fw_auto": true,
 		"acme_enabled": true, "acme_domain": true, "acme_email": true,
 		"admin_user": true, "admin_pass": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）

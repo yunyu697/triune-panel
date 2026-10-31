@@ -51,6 +51,16 @@ func Get(name string) (Core, error) {
 	return c, nil
 }
 
+// All 返回已注册的内核，顺序固定为 sing-box → xray → mihomo。
+// 未注册（未 import 对应实现包）的内核会被跳过而不是返回 nil 元素——
+// 否则调用方 range 后直接 c.Name() 会空指针 panic（单测里尤其常见）。
 func All() []Core {
-	return []Core{registry[model.CoreSingBox], registry[model.CoreXray], registry[model.CoreMihomo]}
+	names := []string{model.CoreSingBox, model.CoreXray, model.CoreMihomo}
+	out := make([]Core, 0, len(names))
+	for _, n := range names {
+		if c, ok := registry[n]; ok && c != nil {
+			out = append(out, c)
+		}
+	}
+	return out
 }
