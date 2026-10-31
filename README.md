@@ -34,6 +34,53 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server
 3. **用户**：创建用户并勾选入站，获得订阅链接 `/sub/<token>`
 4. **应用/修订**：先"预检"（渲染+校验不生效），再"应用"（校验→原子替换→重启内核）
 
+## 忘记密码
+
+面板不提供网页端"找回密码"（那等于把账号入口暴露到公网，而且 SMTP 配置本身就在面板里）。
+忘记密码时在服务器上直接重置——**需要 SSH 权限，这本来就是面板的最高权限**：
+
+```bash
+# 方式一：已安装的面板（systemd）
+sudo /opt/triune-panel/triune-panel reset-password
+
+# 方式二：不用记路径，走安装脚本直通
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
+  | sudo bash -s -- --reset-password
+
+# 方式三：自定义密码（避免命令行留下历史，走标准输入）
+echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --password-stdin
+```
+
+默认行为：
+
+| 行为 | 说明 |
+|---|---|
+| 生成 16 位随机密码并打印一次 | 字符集去掉 `0O1lI` 等易混淆字符；`--password-stdin` 可自定义 |
+| **同时关闭登录二次验证** | 丢手机和忘密码常是同一场事故，否则改完密码仍进不去；要保留加 `--keep-2fa` |
+| 所有已登录会话立即失效 | 服务端换会话纪元（`session_epoch`），旧 token 立刻 401，无需重启 |
+| 密码以 bcrypt 哈希入库 | v0.8.7 起不再明文存储；旧版遗留的明文密码在下次登录时自动升级 |
+
+> 重置命令直接改 SQLite，**面板可以继续运行**（WAL + busy_timeout），不用停服务。
+
+## 命令行工具
+
+`triune-panel` 除启动服务外还带几个一次性运维命令（都不依赖面板进程在跑）：
+
+```bash
+triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证书/上次应用/最近登录
+triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
+triune-panel backup [--out DIR] [--keep N]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
+triune-panel reset-password      # 见上一节
+triune-panel version
+```
+
+- **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
+  所以 `sudo triune-panel status` 在任意目录下都能找到 systemd 安装的实例。
+- **`--json`** 便于脚本/监控取值；退出码 `0` 成功、`1` 执行失败、`2` 用法错误
+  （`doctor` 有 `fail` 项时返回 1，可直接接告警）。
+- **刻意不做** `apply` / 切换内核这类命令：内核进程由 daemon 托管，CLI 裸跑会抢端口、
+  让 daemon 的内存状态与磁盘不一致，必须走面板的 API（`/api/apply`、`/api/switch-core`）。
+
 ## 反向导入现有链接（迁移不失效）
 
 **导入链接** 页支持粘贴 `vless://` `vmess://` `trojan://` `ss://` `hysteria2://` `tuic://`
@@ -222,6 +269,24 @@ v0.8 已验证：
    忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
    新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
    二进制不可执行（架构不匹配）时立即中止并提示正确架构。
+
+v0.8.7 已验证：
+
+1. **忘记密码（离线重置）**：`triune-panel reset-password` 直接改本地 SQLite，
+   面板可继续运行。默认生成 16 位随机密码、**同时关闭 2FA**（丢设备场景）、
+   让所有已登录会话立即失效；`--password-stdin` 支持脚本化，
+   不接受命令行明文密码（会留在 shell 历史）。
+2. **命令行工具**：`status`（含 `--json`）、`doctor`（10 项环境自检，
+   有 fail 时退出码 1）、`backup`（纯 Go tar.gz，排除 backups 自身并按份数轮转）。
+   数据目录自动探测 `--data` → `TRIUNE_DATA` → `./data` → `/opt/triune-panel/data`。
+   刻意不提供 `apply` / 切换内核：内核进程归 daemon 管，CLI 裸跑会抢端口。
+3. **密码改为 bcrypt 哈希存储**：新增 `admin_pass_hash`，遗留明文槽只用于兼容——
+   登录命中明文时静默升级为哈希；安装脚本的 `bootstrap.creds` 首启即写成哈希，
+   明文不落库。密码最小长度 8 位。
+4. **会话纪元（session_epoch）**：改密/重置密码会更换纪元，旧 token 立即 401，
+   不需要重启面板；CLI 在另一个进程改库也能被运行中的 daemon 立刻感知。
+5. **前端**：改密后强制回登录页（旧会话已失效，避免"保存成功但下一步 401"的困惑）；
+   登录页直接给出忘记密码的命令提示。
 
 v0.8.6 已验证：
 

@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"triune/internal/api"
+	"triune/internal/authn"
 	"triune/internal/certmgr"
 	"triune/internal/core"
 	_ "triune/internal/core/mihomo"
@@ -30,17 +31,79 @@ import (
 )
 
 // 构建时注入（主包符号名固定为 main，故用 main.Version）：
-//   go build -ldflags "-X main.Version=v0.8.5"
+//
+//	go build -ldflags "-X main.Version=v0.8.7"
 var Version = "dev"
 
+// main 是命令分发入口。
+//
+// 用法约定：
+//   - 无子命令、或以 - 开头（`-addr :10010`、`-version`）→ 跑服务，
+//     完全兼容旧用法（systemd unit 与 install.sh 的版本校验都依赖它）；
+//   - 有子命令 → 执行对应的一次性运维命令（见 cli.go）。
 func main() {
-	addr := flag.String("addr", ":10010", "listen address")
-	dataDir := flag.String("data", "./data", "data directory")
-	showVer := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		switch os.Args[1] {
+		case "serve":
+			serve(os.Args[2:])
+		case "reset-password":
+			cmdResetPassword(os.Args[2:])
+		case "status":
+			cmdStatus(os.Args[2:])
+		case "doctor":
+			cmdDoctor(os.Args[2:])
+		case "backup":
+			cmdBackup(os.Args[2:])
+		case "version":
+			printVersion()
+		case "help":
+			usage()
+		default:
+			fmt.Fprintf(os.Stderr, "未知命令 %q\n\n", os.Args[1])
+			usage()
+			os.Exit(2)
+		}
+		return
+	}
+	serve(os.Args[1:])
+}
+
+func printVersion() {
+	fmt.Printf("triune-panel %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+}
+
+func usage() {
+	fmt.Print(`triune-panel — 三内核（mihomo / sing-box / xray）统一管理面板
+
+用法:
+  triune-panel                       启动服务（等价 serve）
+  triune-panel serve [-addr :10010] [-data ./data]
+  triune-panel reset-password [--user <名>] [--password-stdin] [--keep-2fa]
+                                     重置管理密码（忘记密码时用；默认生成随机密码）
+  triune-panel status [--json]       只读汇总：版本/入站/用户/证书/上次应用
+  triune-panel doctor                环境自检（数据目录、密码状态、内核、防火墙、端口）
+  triune-panel backup [--out DIR] [--keep N]
+                                     打包数据目录到 backups/（默认保留 7 份）
+  triune-panel version               打印版本
+  triune-panel help                  本帮助
+
+通用参数:
+  --data DIR    数据目录；默认自动探测 ./data → /opt/triune-panel/data
+                （也可用环境变量 TRIUNE_DATA 指定）
+
+退出码: 0 成功 · 1 执行失败 · 2 用法错误
+`)
+}
+
+func serve(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", ":10010", "listen address")
+	dataDir := fs.String("data", "./data", "data directory")
+	showVer := fs.Bool("version", false, "print version and exit")
+	_ = fs.Parse(args)
 
 	if *showVer {
-		fmt.Printf("triune-panel %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+		printVersion()
 		return
 	}
 
@@ -81,8 +144,8 @@ func main() {
 	go srv.SyncFirewallPorts()
 
 	log.Printf("triune-panel %s listening on %s, data dir %s", Version, *addr, *dataDir)
-	if p, _ := st.GetSetting("admin_pass"); p == "" {
-		log.Printf("管理密码仍为出厂默认，首次登录将要求修改；新装可用 data/bootstrap.creds 设置初始凭据")
+	if authn.IsFactoryDefault(st) {
+		log.Printf("管理密码仍为出厂默认，首次登录将要求修改；忘记密码可执行 `triune-panel reset-password`")
 	}
 	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
 		log.Fatal(err)
@@ -92,8 +155,10 @@ func main() {
 // applyBootstrapCreds 消费安装脚本落地的初始凭据文件 data/bootstrap.creds
 // （key=value 逐行，如 admin_user=... / admin_pass=...，权限 0600）。
 //
-// 安全规则：只在管理密码仍是出厂默认（admin_pass 设置为空）时应用——
-// 用户一旦改过密码，文件里的旧初始值一律忽略，直接删除，绝不覆盖真实密码。
+// 安全规则：只在管理密码仍是出厂默认时应用——用户一旦改过密码，文件里的
+// 旧初始值一律忽略，直接删除，绝不覆盖真实密码。
+// 密码在这里直接写成 bcrypt 哈希，明文只存在于 bootstrap.creds 本身（0600，
+// 消费后立即删除），不落库。
 func applyBootstrapCreds(dataDir string, st *store.Store) {
 	path := filepath.Join(dataDir, "bootstrap.creds")
 	raw, err := os.ReadFile(path)
@@ -121,8 +186,7 @@ func applyBootstrapCreds(dataDir string, st *store.Store) {
 		log.Printf("bootstrap.creds 缺少 admin_pass，忽略")
 		return
 	}
-	cur, _ := st.GetSetting("admin_pass")
-	if cur != "" {
+	if !authn.IsFactoryDefault(st) {
 		// 管理密码已被修改过（或此前已消费过初始凭据）：不覆盖
 		log.Printf("bootstrap.creds 已忽略（管理密码已自定义）")
 		return
@@ -130,11 +194,11 @@ func applyBootstrapCreds(dataDir string, st *store.Store) {
 	if user == "" {
 		user = "admin"
 	}
-	if err := st.SetSetting("admin_user", user); err != nil {
+	if err := st.SetSetting(authn.SettingUser, user); err != nil {
 		log.Printf("bootstrap admin_user: %v", err)
 		return
 	}
-	if err := st.SetSetting("admin_pass", pass); err != nil {
+	if err := authn.SetPassword(st, pass); err != nil {
 		log.Printf("bootstrap admin_pass: %v", err)
 		return
 	}

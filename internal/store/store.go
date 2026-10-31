@@ -595,3 +595,15 @@ func b2i(b bool) int {
 	}
 	return 0
 }
+
+// IntegrityCheck 执行 SQLite 的 quick_check，供 `triune-panel doctor` 自检使用。
+func (s *Store) IntegrityCheck() error {
+	var out string
+	if err := s.db.QueryRow(`PRAGMA quick_check`).Scan(&out); err != nil {
+		return err
+	}
+	if strings.ToLower(strings.TrimSpace(out)) != "ok" {
+		return fmt.Errorf("quick_check 未通过: %s", out)
+	}
+	return nil
+}

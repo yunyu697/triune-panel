@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.8.6 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.8.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -452,6 +452,10 @@ canvas{display:block;width:100%}
     </div>
     <div style="height:18px"></div>
     <button class="btn primary" style="width:100%;justify-content:center;padding:9px" onclick="login()">登 录</button>
+    <p class="muted" id="forgot_hint" style="margin:12px 0 0;font-size:12px;line-height:1.7">
+      忘记密码？在服务器上执行以下命令即可重置（无需登录面板）：<br>
+      <code style="font-size:11.5px;white-space:nowrap">sudo triune-panel reset-password</code>
+    </p>
     <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">
       <span id="login_ver">Triune Panel</span><span id="login_last" class="hide"></span>
     </p>
@@ -3525,7 +3529,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.5-demo",
+    version:"v0.8.7-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -3723,9 +3727,11 @@ async function submitMustChange() {
   if (p1.length < 8) { toast("新密码至少 8 位", "err"); return; }
   if (p1 !== p2) { toast("两次输入的密码不一致", "err"); return; }
   try {
-    await req("/api/settings", { method:"PUT", body:{ admin_pass: p1 } });
+    const r = await req("/api/settings", { method:"PUT", body:{ admin_pass: p1 } });
     $("mc_pass").value = ""; $("mc_pass2").value = "";
     closeModal("mMustChange");
+    // 改密会让所有会话失效（含当前这个），必须回登录页重新登录
+    if (r && r.relogin) { toast("密码已更新，请用新密码重新登录"); logout(); return; }
     toast("密码已更新，欢迎使用 Triune Panel");
     showApp();
   } catch (e) { toast("修改失败：" + e.message, "err"); }
@@ -7153,13 +7159,20 @@ async function saveSettings() {
     fw_auto:$("s_fwauto").checked?"1":"0",
     acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
   if ($("s_pass").value) body.admin_pass = $("s_pass").value;
-  try { await req("/api/settings", { method:"PUT", body }); toast("设置已保存（统计开关需应用后生效）"); }
+  try {
+    const r = await req("/api/settings", { method:"PUT", body });
+    $("s_pass").value = "";
+    // 改密后服务端会让所有会话失效（含当前这个），回登录页重新登录
+    if (r && r.relogin) { toast("密码已更新，请用新密码重新登录"); logout(); return; }
+    toast("设置已保存（统计开关需应用后生效）");
+  }
   catch (e) { toast(e.message, "err"); }
 }
 
 /* ================= 启动 ================= */
 if (DEMO) {
   // 演示模式：直接进入主界面，无需登录
+  $("forgot_hint").classList.add("hide");
   showApp();
 } else if (TOKEN) {
   fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })

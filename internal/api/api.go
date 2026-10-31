@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"triune/internal/authn"
 	"triune/internal/core"
 	"triune/internal/firewall"
 	"triune/internal/link"
@@ -30,9 +31,17 @@ type Server struct {
 	DataDir  string
 	CertMgr  CertManager   // 可为 nil（未启用 ACME）
 	Coll     *ops.Collector // 流量采样器（实时速率查询用），可为 nil
-	sessions sync.Map       // token -> expiry
+	sessions   sync.Map     // token -> session
 	loginFails sync.Map     // ip -> *loginFail（防爆破）
-	emailCode emailCodeState // 登录邮箱验证码（2FA）
+	emailCode  emailCodeState // 登录邮箱验证码（2FA）
+}
+
+// session 一次登录签发的会话。
+// epoch 记录签发时的会话纪元，改密/重置密码后纪元变化 → 旧会话全部失效
+// （CLI 重置密码在另一个进程里，只有存 DB 的纪元能让 daemon 立刻感知）。
+type session struct {
+	exp   time.Time
+	epoch string
 }
 
 // CertManager ACME 证书管理器接口（internal/certmgr 实现）。
@@ -136,7 +145,14 @@ func (a *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			fail(w, 401, "unauthorized")
 			return
 		}
-		if v, ok := a.sessions.Load(t); !ok || v.(time.Time).Before(time.Now()) {
+		v, ok := a.sessions.Load(t)
+		if !ok {
+			fail(w, 401, "unauthorized")
+			return
+		}
+		s := v.(session)
+		// 过期，或改密后纪元已变（旧会话立即失效）
+		if s.exp.Before(time.Now()) || s.epoch != authn.Epoch(a.Store) {
 			fail(w, 401, "session expired")
 			return
 		}
@@ -212,18 +228,23 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad request")
 		return
 	}
-	u, _ := a.Store.GetSetting("admin_user")
-	p, _ := a.Store.GetSetting("admin_pass")
-	if u == "" {
-		u = "admin"
+	// 密码校验：哈希优先；命中遗留明文槽则在本次登录后静默升级为哈希。
+	ok, legacy, err := authn.Verify(a.Store, req.Pass)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
 	}
-	if p == "" {
-		p = "admin" // 首次登录后请立即修改
-	}
-	if req.User != u || req.Pass != p {
+	if req.User != authn.User(a.Store) || !ok {
 		a.recordLoginFail(key)
 		fail(w, 401, "用户名或密码错误")
 		return
+	}
+	if legacy {
+		if err := authn.MigrateLegacy(a.Store); err != nil {
+			log.Printf("迁移遗留明文密码失败: %v", err)
+		} else {
+			log.Printf("已把遗留明文密码升级为 bcrypt 哈希")
+		}
 	}
 
 	// 二次验证：账密正确后按 auth_2fa_mode 进入第二步。
@@ -272,12 +293,9 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	_ = a.Store.SetSetting("login_last_time", time.Now().Format("2006-01-02 15:04:05"))
 
 	t := token()
-	a.sessions.Store(t, time.Now().Add(24*time.Hour))
-	// 管理密码仍是出厂默认（admin_pass 为空）→ 要求首次登录后强制改密
-	mustChange := false
-	if stored, _ := a.Store.GetSetting("admin_pass"); stored == "" {
-		mustChange = true
-	}
+	a.sessions.Store(t, session{exp: time.Now().Add(24 * time.Hour), epoch: authn.Epoch(a.Store)})
+	// 管理密码仍是出厂默认 → 要求首次登录后强制改密
+	mustChange := authn.IsFactoryDefault(a.Store)
 	writeJSON(w, 200, map[string]any{
 		"token": t, "must_change": mustChange,
 		"last_ip": prevIP, "last_time": prevTime,
@@ -849,13 +867,26 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	// 改密单独处理：写 bcrypt 哈希 + 递增会话纪元，旧会话（含当前这个）
+	// 立即失效，前端收到 relogin 后清 token 回登录页。密码不走白名单直写。
+	relogin := false
+	if pass, ok := m["admin_pass"]; ok {
+		delete(m, "admin_pass")
+		if pass != "" {
+			if err := authn.SetPassword(a.Store, pass); err != nil {
+				fail(w, 400, err.Error())
+				return
+			}
+			relogin = true
+		}
+	}
 	allowed := map[string]bool{
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
 		"quota_warn_pct": true,
 		// 入站端口的自动防火墙管理（fwAuto 读取，默认开启）
 		"fw_auto": true,
 		"acme_enabled": true, "acme_domain": true, "acme_email": true,
-		"admin_user": true, "admin_pass": true,
+		"admin_user": true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
@@ -879,5 +910,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if m["acme_enabled"] == "1" && a.CertMgr != nil {
 		go a.CertMgr.CheckNow()
 	}
-	writeJSON(w, 200, map[string]string{"ok": "1"})
+	resp := map[string]any{"ok": "1"}
+	if relogin {
+		resp["relogin"] = true
+	}
+	writeJSON(w, 200, resp)
 }

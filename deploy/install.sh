@@ -33,6 +33,11 @@
 # 直接卸载（免下载卸载脚本）:
 #   curl -fsSL .../install.sh | sudo bash -s -- --uninstall
 #
+# 忘记密码时重置（免登录，直接改本地数据库）:
+#   curl -fsSL .../install.sh | sudo bash -s -- --reset-password
+#   或直接执行: sudo /opt/triune-panel/triune-panel reset-password
+#   （默认生成随机密码并关闭二次验证；保留 2FA 加 --keep-2fa）
+#
 # 下载源 = GitHub 原始地址 + 多个加速镜像，写在同一个候选池里；
 # 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优。
 # 也可手动指定镜像跳过探测:  curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
@@ -86,6 +91,22 @@ if [[ "${1:-}" == "--uninstall" || "${1:-}" == "uninstall" ]]; then
   rm -f "$TMP_UN"
   echo "✘ 无法获取卸载脚本：本地未安装过（或卸载脚本已删除）且在线下载失败。"
   echo "  可手动清理：sudo systemctl disable --now triune-panel.service && sudo rm -rf $INSTALL_DIR"
+  exit 1
+fi
+
+# ---- --reset-password 直通：忘记密码时的最短路径，无需重装 ----
+# 用法: curl -fsSL .../install.sh | sudo bash -s -- --reset-password
+#       curl -fsSL .../install.sh | sudo bash -s -- --reset-password --keep-2fa
+if [[ "${1:-}" == "--reset-password" || "${1:-}" == "reset-password" ]]; then
+  shift
+  RP_BIN="$INSTALL_DIR/triune-panel"
+  if [[ ! -x "$RP_BIN" ]]; then
+    echo "✘ 未找到可执行文件 $RP_BIN，请先安装面板（或不带参数运行本脚本）"
+    exit 1
+  fi
+  if [[ "$(id -u)" -eq 0 ]]; then exec "$RP_BIN" reset-password --data "$INSTALL_DIR/data" "$@"; fi
+  if command -v sudo >/dev/null 2>&1; then exec sudo "$RP_BIN" reset-password --data "$INSTALL_DIR/data" "$@"; fi
+  echo "✘ 需要 root 权限（或安装 sudo）才能重置密码"
   exit 1
 fi
 
