@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Triune Panel</title>
+<style>
+/* ============ 设计令牌 ============ */
+:root{
+  --r-lg:14px; --r:10px; --r-sm:7px;
+  --font:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --side-w:224px;
+  --t-fast:.16s ease; --t:.22s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="light"]{--bg:#f4f6f9;--side:#ffffff;--card:#ffffff;--text:#1b2129;--muted:#6b7280;--line:#e5e9ef;--hover:#f1f4f8;
+  --acc:#3b82f6;--acc-soft:#eaf1fe;--acc-text:#2563eb;--on-acc:#fff;
+  --ok:#16a34a;--ok-soft:#e7f6ed;--err:#dc2626;--err-soft:#fdecec;--warn:#d97706;--warn-soft:#fdf3e2;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 2px 8px rgba(16,24,40,.05);
+  --chart-up:#3b82f6;--chart-down:#22c55e;--mask:rgba(15,20,28,.45)}
+[data-theme="dark"]{--bg:#0e1116;--side:#12161d;--card:#161b23;--text:#e7eaef;--muted:#8b93a2;--line:#242b35;--hover:#1d242e;
+  --acc:#5b9cf8;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
+  --ok:#2fca7f;--ok-soft:rgba(47,202,127,.14);--err:#f06a6a;--err-soft:rgba(240,106,106,.13);--warn:#eab308;--warn-soft:rgba(234,179,8,.13);
+  --shadow:0 1px 3px rgba(0,0,0,.4);--chart-up:#5b9cf8;--chart-down:#2fca7f;--mask:rgba(0,0,0,.55)}
+[data-theme="midnight"]{--bg:#0a101f;--side:#0d1526;--card:#101a30;--text:#e2e8f6;--muted:#7f8cab;--line:#1d2a47;--hover:#16223d;
+  --acc:#818cf8;--acc-soft:rgba(129,140,248,.15);--acc-text:#a5b0fb;--on-acc:#0a101f;
+  --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#fb7185;--err-soft:rgba(251,113,133,.13);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
+  --shadow:0 1px 3px rgba(0,0,0,.45);--chart-up:#818cf8;--chart-down:#34d399;--mask:rgba(2,5,14,.6)}
+[data-theme="forest"]{--bg:#0c1410;--side:#101a15;--card:#131f18;--text:#e4ece6;--muted:#84a08e;--line:#20332a;--hover:#182720;
+  --acc:#34d399;--acc-soft:rgba(52,211,153,.13);--acc-text:#5fe0b0;--on-acc:#0c1410;
+  --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#f87171;--err-soft:rgba(248,113,113,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
+  --shadow:0 1px 3px rgba(0,0,0,.4);--chart-up:#34d399;--chart-down:#a3e635;--mask:rgba(2,8,5,.58)}
+[data-theme="rose"]{--bg:#141014;--side:#191319;--card:#1e161d;--text:#f0e5ea;--muted:#a58a96;--line:#2e222b;--hover:#271c24;
+  --acc:#fb7185;--acc-soft:rgba(251,113,133,.14);--acc-text:#fc93a2;--on-acc:#141014;
+  --ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--err:#fb7185;--err-soft:rgba(251,113,133,.14);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
+  --shadow:0 1px 3px rgba(0,0,0,.42);--chart-up:#fb7185;--chart-down:#4ade80;--mask:rgba(8,4,7,.58)}
+[data-theme="solar"]{--bg:#f8f3ea;--side:#fffdf8;--card:#fffdf8;--text:#40342a;--muted:#91826f;--line:#eae0cf;--hover:#f4ecdd;
+  --acc:#e08a2e;--acc-soft:#faeeda;--acc-text:#c77721;--on-acc:#fff;
+  --ok:#5a9d3f;--ok-soft:#ecf5e3;--err:#cc4b3f;--err-soft:#fbe9e6;--warn:#c98a1b;--warn-soft:#faf0da;
+  --shadow:0 1px 2px rgba(90,70,40,.08),0 2px 8px rgba(90,70,40,.06);
+  --chart-up:#e08a2e;--chart-down:#5a9d3f;--mask:rgba(45,32,18,.42)}
+[data-theme="steel"]{--bg:#eef1f5;--side:#ffffff;--card:#ffffff;--text:#232b36;--muted:#6c7889;--line:#dde3ea;--hover:#e9edf3;
+  --acc:#5470a8;--acc-soft:#e8edf6;--acc-text:#44608f;--on-acc:#fff;
+  --ok:#2e8f5e;--ok-soft:#e5f2ea;--err:#c04c4c;--err-soft:#faeaea;--warn:#b78218;--warn-soft:#f8f0dc;
+  --shadow:0 1px 2px rgba(35,50,70,.06),0 2px 8px rgba(35,50,70,.05);
+  --chart-up:#5470a8;--chart-down:#2e8f5e;--mask:rgba(20,28,40,.45)}
+[data-theme="ocean"]{--bg:#f0f7f8;--side:#ffffff;--card:#ffffff;--text:#17323a;--muted:#5f828c;--line:#d9e8ec;--hover:#e6f1f4;
+  --acc:#0f9db8;--acc-soft:#e2f4f8;--acc-text:#0c8299;--on-acc:#fff;
+  --ok:#1f9d61;--ok-soft:#e4f5ec;--err:#d15550;--err-soft:#fbeaea;--warn:#c08a1f;--warn-soft:#f9f1dc;
+  --shadow:0 1px 2px rgba(15,60,70,.06),0 2px 8px rgba(15,60,70,.05);
+  --chart-up:#0f9db8;--chart-down:#1f9d61;--mask:rgba(8,35,42,.45)}
+
+/* ============ 基础 ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t)}
+svg{flex:none}
+a{color:var(--acc-text);text-decoration:none}
+a:hover{text-decoration:underline}
+.hide{display:none!important}
+.muted{color:var(--muted);font-size:12px}
+.mono{font-family:var(--mono);font-size:12px}
+
+/* ============ 登录页 ============ */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:radial-gradient(1200px 600px at 20% -10%,var(--acc-soft),transparent 60%),var(--bg)}
+.login-card{width:380px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);
+  padding:32px 28px;animation:pop .35s cubic-bezier(.34,1.4,.5,1)}
+.login-logo{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
+.login-logo .mark{width:40px;height:40px;border-radius:12px;background:var(--acc);color:var(--on-acc);display:flex;align-items:center;justify-content:center}
+.login-logo b{font-size:19px;letter-spacing:.3px}
+.login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px}
+.demo-tag{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:99px;padding:1px 10px;font-size:12px;margin-left:6px}
+
+/* ============ 布局 ============ */
+.shell{display:flex;height:100vh;overflow:hidden}
+.side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:14px 10px;transition:background var(--t),border-color var(--t)}
+.logo{display:flex;align-items:center;gap:9px;padding:6px 10px 16px}
+.logo .mark{width:30px;height:30px;border-radius:9px;background:var(--acc);color:var(--on-acc);display:flex;align-items:center;justify-content:center}
+.logo b{font-size:15px;letter-spacing:.3px}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
+  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:14px;text-align:left;margin-bottom:2px;font-family:var(--font);
+  transition:background var(--t-fast),color var(--t-fast)}
+.nav-item:hover{background:var(--hover);color:var(--text)}
+.nav-item.on{background:var(--acc-soft);color:var(--acc-text);font-weight:600}
+.side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;
+  padding:14px 26px;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar h2{font-size:17px;font-weight:650}
+.topbar .spacer{flex:1}
+.content{padding:22px 26px 40px;max-width:1060px;width:100%;margin:0 auto}
+@media (max-width:880px){
+  .shell{flex-direction:column}
+  .side{width:100%;flex-direction:row;align-items:center;padding:8px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}
+  .logo{padding:0 8px 0 4px}
+  .nav-item{width:auto;margin:0}
+  .side-foot{margin:0 0 0 auto;border:none;padding:0;display:flex;gap:4px}
+  .logo b{display:none}
+}
+
+/* ============ 视图与卡片 ============ */
+.view{display:none}
+.view.active{display:block;animation:fadeUp .24s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:none}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);
+  padding:18px 20px;margin-bottom:16px;transition:background var(--t),border-color var(--t)}
+.card h3{font-size:14.5px;font-weight:650;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.card h3 .spacer{flex:1}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:880px){.grid-2{grid-template-columns:1fr}}
+
+/* 概览统计 */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:16px 18px;
+  display:flex;gap:14px;align-items:center;transition:transform var(--t-fast),box-shadow var(--t-fast)}
+.stat:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.1)}
+.stat .ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--acc-soft);color:var(--acc-text)}
+.stat b{font-size:20px;font-weight:700;display:block;line-height:1.2}
+.stat span{font-size:12px;color:var(--muted)}
+
+/* ============ 组件：按钮 / 输入 / 徽章 / 开关 ============ */
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--text);
+  border-radius:var(--r-sm);padding:7px 14px;font-size:13.5px;cursor:pointer;font-family:var(--font);
+  transition:background var(--t-fast),border-color var(--t-fast),transform .08s,color var(--t-fast)}
+.btn:hover{background:var(--hover)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:var(--on-acc);font-weight:600}
+.btn.primary:hover{filter:brightness(1.08);background:var(--acc)}
+.btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 30%,transparent)}
+.btn.danger:hover{background:var(--err-soft)}
+.btn.sm{padding:4px 10px;font-size:12.5px;border-radius:6px}
+label{font-size:12.5px;color:var(--muted);display:block;margin-bottom:5px}
+.input,select,textarea{width:100%;border:1px solid var(--line);background:var(--card);color:var(--text);
+  border-radius:var(--r-sm);padding:8px 10px;font-size:13.5px;font-family:var(--font);transition:border-color var(--t-fast),box-shadow var(--t-fast)}
+.input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertical}
+.frm{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.frm .full{grid-column:1/-1}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:500}
+.b-ok{background:var(--ok-soft);color:var(--ok)} .b-err{background:var(--err-soft);color:var(--err)}
+.b-warn{background:var(--warn-soft);color:var(--warn)} .b-idle{background:var(--hover);color:var(--muted)}
+.b-acc{background:var(--acc-soft);color:var(--acc-text)}
+.sw{position:relative;display:inline-block;width:36px;height:20px;flex:none;vertical-align:middle}
+.sw input{opacity:0;width:0;height:0}
+.sw i{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:background var(--t-fast);cursor:pointer}
+.sw i::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform var(--t-fast)}
+.sw input:checked+i{background:var(--acc)}
+.sw input:checked+i::after{transform:translateX(16px)}
+
+/* ============ 表格 ============ */
+.tbl-wrap{overflow-x:auto;margin:0 -4px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+th{color:var(--muted);font-weight:500;font-size:12.5px;background:color-mix(in srgb,var(--hover) 55%,transparent)}
+th:first-child{border-radius:8px 0 0 8px} th:last-child{border-radius:0 8px 8px 0}
+tbody tr{transition:background var(--t-fast)}
+tbody tr:hover{background:var(--hover)}
+td.ta-r,th.ta-r{text-align:right}
+td.num{font-variant-numeric:tabular-nums}
+.empty{padding:28px;text-align:center;color:var(--muted);font-size:13px}
+.progress{width:110px;height:7px;background:var(--line);border-radius:99px;display:inline-block;vertical-align:middle;overflow:hidden}
+.progress i{display:block;height:100%;border-radius:99px;background:var(--ok);transition:width var(--t)}
+
+/* ============ 主题选择 ============ */
+.theme-btn{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
+  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
+.theme-btn:hover{background:var(--hover);color:var(--text)}
+.tpop{position:absolute;bottom:52px;left:10px;right:10px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);box-shadow:var(--shadow);padding:10px;z-index:50;
+  opacity:0;transform:translateY(6px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
+.tpop.show{opacity:1;transform:none;pointer-events:auto}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px;padding-bottom:14px}
+.swatch{aspect-ratio:1;border-radius:9px;border:2px solid transparent;cursor:pointer;position:relative;transition:transform var(--t-fast)}
+.swatch:hover{transform:scale(1.1)}
+.swatch.on{border-color:var(--acc)}
+.swatch span{position:absolute;left:0;right:0;bottom:-16px;font-size:10px;color:var(--muted);text-align:center;white-space:nowrap}
+@media (max-width:880px){.tpop{position:fixed;bottom:auto;top:52px;left:12px;right:12px;width:auto}}
+
+/* ============ 弹层 ============ */
+.overlay{position:fixed;inset:0;background:var(--mask);display:flex;align-items:center;justify-content:center;padding:20px;
+  opacity:0;pointer-events:none;transition:opacity var(--t-fast);z-index:100}
+.overlay.show{opacity:1;pointer-events:auto}
+.modal{width:100%;max-width:560px;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r-lg);box-shadow:0 20px 50px rgba(0,0,0,.25);padding:22px;
+  transform:translateY(14px) scale(.97);transition:transform var(--t)}
+.overlay.show .modal{transform:none}
+.modal h3{font-size:15.5px;margin-bottom:16px}
+.modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;font-family:var(--mono);
+  font-size:12px;overflow:auto;max-height:46vh;white-space:pre-wrap;word-break:break-all}
+
+/* ============ Toast ============ */
+.toasts{position:fixed;top:18px;right:18px;z-index:200;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
+  box-shadow:var(--shadow);border-radius:var(--r);padding:10px 16px;font-size:13.5px;max-width:380px;
+  animation:toastIn .25s cubic-bezier(.34,1.3,.5,1)}
+.toast.ok{border-left-color:var(--ok)} .toast.err{border-left-color:var(--err)} .toast.warn{border-left-color:var(--warn)}
+.toast.out{opacity:0;transform:translateX(16px);transition:all .3s}
+@keyframes toastIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+
+/* 其他 */
+pre.log{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;font-family:var(--mono);
+  font-size:12px;overflow:auto;max-height:300px;white-space:pre-wrap;word-break:break-all}
+canvas{display:block;width:100%}
+.checks{display:flex;flex-wrap:wrap;gap:8px 16px;padding:4px 0}
+.checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--text);font-size:13.5px;cursor:pointer}
+.checks input{width:auto;accent-color:var(--acc)}
+.radio-row{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px}
+.radio-row label{display:flex;align-items:center;gap:6px;margin:0;color:var(--text);font-size:13.5px;cursor:pointer}
+.radio-row input{width:auto;accent-color:var(--acc)}
+.sub-token{display:inline-flex;align-items:center;gap:6px;max-width:240px}
+.sub-token a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<!-- 登录 -->
+<div id="login" class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <b>Triune Panel</b><span id="demoTag" class="demo-tag hide">演示模式</span>
+    </div>
+    <div class="login-sub">mihomo · sing-box · xray 三位一体</div>
+    <label>用户名</label>
+    <input id="lu" class="input" value="admin" autocomplete="username">
+    <div style="height:10px"></div>
+    <label>密码</label>
+    <input id="lp" class="input" type="password" autocomplete="current-password">
+    <div style="height:18px"></div>
+    <button class="btn primary" style="width:100%;justify-content:center;padding:9px" onclick="login()">登 录</button>
+    <p class="muted" style="text-align:center;margin-top:14px">默认 admin/admin，登录后请立即修改</p>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app" class="shell hide">
+  <aside class="side">
+    <div class="logo">
+      <div class="mark"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <b>Triune Panel</b>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div style="position:relative">
+        <button class="theme-btn" id="themeBtn" onclick="toggleThemePop()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1 0 1.5-.7 1.2-1.5-.5-1.4.2-2.5 1.8-2.5h1.5c1.4 0 2.5-1.1 2.5-2.5A9 9 0 0 0 12 3z"/></svg>
+          <span>主题外观</span>
+        </button>
+        <div class="tpop" id="themePop">
+          <div style="margin-bottom:8px"><b style="font-size:13px">选择主题</b></div>
+          <div class="swatches" id="swatches"></div>
+        </div>
+      </div>
+      <button class="theme-btn" onclick="logout()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+        <span>退出登录</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar"><h2 id="pageTitle">概览</h2><span class="spacer"></span><span class="muted mono" id="verinfo"></span></div>
+    <div class="content">
+
+    <!-- 概览 -->
+    <section id="v-overview" class="view active">
+      <div class="stats" id="statCards"></div>
+      <div class="card">
+        <h3>内核状态<span class="spacer"></span><button class="btn sm" onclick="loadStatus()">刷新</button></h3>
+        <div class="stats" id="cores" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))"></div>
+        <p class="muted" style="margin-top:10px">「未校验」表示未配置内核二进制路径 —— 可在下方 设置 中填入，或在 设置 → 组件更新与版本管理 里<b>一键安装</b>面板专用副本（推荐，与系统现有二进制完全隔离）。</p>
+      </div>
+      <div class="card">
+        <h3>实时速率<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px" id="live_at">每 30 秒采样</span></h3>
+        <div style="display:flex;gap:36px;align-items:baseline">
+          <div style="display:flex;align-items:baseline;gap:8px"><span class="muted">↑ 上行</span><b class="mono" id="liveUp" style="font-size:21px">—</b></div>
+          <div style="display:flex;align-items:baseline;gap:8px"><span class="muted">↓ 下行</span><b class="mono" id="liveDown" style="font-size:21px">—</b></div>
+        </div>
+        <p class="muted" style="margin-top:10px">由流量采样差值计算；需在设置中开启流量统计并应用生效。</p>
+      </div>
+      <div class="card">
+        <h3>快捷操作</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" onclick="openInboundModal()">+ 新增入站</button>
+          <button class="btn primary" onclick="openClientModal()">+ 新增用户</button>
+          <button class="btn" onclick="goto('import')">导入现有链接</button>
+          <button class="btn" onclick="goto('apply')">应用配置</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 入站 -->
+    <section id="v-inbounds" class="view">
+      <div class="card">
+        <h3>入站列表<span class="spacer"></span><button class="btn primary sm" onclick="openInboundModal()">+ 新增入站</button></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>名称</th><th>内核</th><th>协议</th><th>端口</th><th>传输</th><th>TLS</th><th>启用</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="ibtbody"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 用户 -->
+    <section id="v-clients" class="view">
+      <div class="card">
+        <h3>用户<span class="spacer"></span><button class="btn primary sm" onclick="openClientModal()">+ 新增用户</button></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>名称</th><th>凭据</th><th>订阅链接</th><th>配额</th><th>到期</th><th>启用</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="cltbody"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 流量 -->
+    <section id="v-traffic" class="view">
+      <div class="card">
+        <h3>每日流量趋势<span class="spacer"></span>
+          <select id="tr_days" class="input" style="width:110px" onchange="loadDaily()">
+            <option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option>
+          </select>
+        </h3>
+        <canvas id="tr_chart" height="230"></canvas>
+        <div style="display:flex;gap:18px;margin-top:10px">
+          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-up);border-radius:3px"></span> 上行</span>
+          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-down);border-radius:3px"></span> 下行</span>
+          <span class="muted" id="tr_total"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>用户流量 <span class="muted" style="font-weight:400">（每 30 秒采样）</span></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>用户</th><th class="ta-r">上行</th><th class="ta-r">下行</th><th class="ta-r">合计</th><th>用量</th><th class="ta-r">配额</th><th>状态</th></tr></thead>
+          <tbody id="trtbody"></tbody>
+        </table></div>
+        <p class="muted" style="margin-top:10px">统计来源：sing-box/mihomo clash 兼容 API、xray StatsService。需在设置中开启统计并应用生效；到期或超配额用户会被自动停用。</p>
+      </div>
+    </section>
+
+    <!-- 导入 -->
+    <section id="v-import" class="view">
+      <div class="card">
+        <h3>反向导入分享链接</h3>
+        <p class="muted" style="margin-bottom:12px">粘贴 vless:// vmess:// trojan:// ss:// hysteria2:// tuic:// 链接（可多条，或整段 base64 订阅）。</p>
+        <div class="radio-row">
+          <label><input type="radio" name="imode" value="external" checked> 导入为外部节点<span class="muted">（仅订阅聚合，零风险）</span></label>
+          <label><input type="radio" name="imode" value="inbound"> 生成本地入站草稿<span class="muted">（需应用后才生效）</span></label>
+          <select id="im_core" class="input" style="width:120px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+        </div>
+        <textarea id="im_text" class="input" placeholder="在此粘贴链接..."></textarea>
+        <div style="margin-top:12px"><button class="btn primary" onclick="doImport()">解析并导入</button></div>
+        <div id="immsg" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3>外部节点<span class="muted" style="font-weight:400">（仅聚合进订阅，不生成本地配置）</span><span class="spacer"></span><button class="btn sm" onclick="loadExternal()">刷新</button></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>名称</th><th>协议</th><th>地址</th><th>导入时间</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="extbody"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 应用 / 修订 -->
+    <section id="v-apply" class="view">
+      <div class="card">
+        <h3>应用配置</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="ap_core" class="input" style="width:140px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+          <button class="btn" onclick="dryRun()">预检（渲染+校验，不生效）</button>
+          <button class="btn primary" onclick="applyCfg()">应用（校验 → 原子替换 → 重启）</button>
+          <button class="btn danger" onclick="rollback()">回滚上一份备份</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>修订历史</h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>ID</th><th>内核</th><th>状态</th><th>说明</th><th>时间</th><th class="ta-r">详情</th></tr></thead>
+          <tbody id="revtbody"></tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>内核运行日志</h3>
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <select id="lg_core" class="input" style="width:140px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+          <button class="btn sm" onclick="loadLogs()">刷新</button>
+        </div>
+        <pre class="log" id="lgout">（暂无日志）</pre>
+      </div>
+    </section>
+
+    <!-- 设置 -->
+    <section id="v-settings" class="view">
+      <div class="card">
+        <h3>基础设置</h3>
+        <div class="frm">
+          <div><label>sing-box 二进制路径</label><input id="s_binsingbox" class="input"></div>
+          <div><label>xray 二进制路径</label><input id="s_binxray" class="input"></div>
+          <div><label>mihomo 二进制路径</label><input id="s_binmihomo" class="input"></div>
+          <p class="muted" style="margin:0">留空可前往下方「组件更新与版本管理」一键安装面板专用副本到 <code>data/bin/</code>，与系统其他服务互不影响。</p>
+          <div><label>节点公开地址（订阅生成用）</label><input id="s_host" class="input" placeholder="如 vps.example.com"></div>
+          <div><label>统计 API 密钥</label><input id="s_stats_secret" class="input"></div>
+          <div><label>新密码</label><input id="s_pass" class="input" type="password" placeholder="留空不修改"></div>
+        </div>
+        <div class="radio-row" style="margin:0">
+          <label><input type="checkbox" id="s_stats"> 开启流量统计（应用后生效，仅监听 127.0.0.1）</label>
+        </div>
+        <div style="margin-top:14px"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
+      </div>
+      <div class="card">
+        <h3>ACME 证书（Let's Encrypt · HTTP-01）</h3>
+        <div class="frm">
+          <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="panel.example.com"></div>
+          <div><label>邮箱</label><input id="s_acme_email" class="input"></div>
+        </div>
+        <div class="radio-row" style="margin:0">
+          <label><input type="checkbox" id="s_acme"> 启用（签发期间临时占用 :80，需域名解析到本机）</label>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+          <button class="btn sm" onclick="issueCert()">立即签发 / 续期检查</button>
+          <span class="muted" id="certmsg"></span>
+        </div>
+        <pre class="log hide" id="certinfo" style="margin-top:12px"></pre>
+      </div>
+      <div class="card">
+        <h3>面板自更新</h3>
+        <p class="muted" style="margin-bottom:12px">当前版本 <b id="curver"></b>。更新流程：下载 → 可执行验证 → sha256 校验 → 备份旧文件 → 原子替换 → 无缝重启，数据与配置不受影响。</p>
+        <div class="frm">
+          <div class="full"><label>新版本二进制 URL</label><input id="up_url" class="input" placeholder="https://.../triune-panel-linux-amd64"></div>
+          <div class="full"><label>sha256（可选）</label><input id="up_sha" class="input mono"></div>
+        </div>
+        <button class="btn primary" onclick="selfUpdate()">下载并更新重启</button>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadPanelBackups()">查看历史备份</button>
+      </div>
+      <div class="card">
+        <h3>组件更新与版本管理</h3>
+        <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>组件</th><th>当前版本</th><th>状态</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="updtbody"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <p class="muted" style="margin-top:10px">
+          版本列表来自 GitHub Releases；如访问受限，可在下方填入镜像前缀（如 <code>https://ghfast.top</code>）。
+          面板的任意版本列表需在版本索引清单中配置 <code>panel_update_index</code>，或直接粘贴 URL 更新。
+        </p>
+        <div class="frm" style="margin-top:10px">
+          <div><label>GitHub 镜像前缀（可选）</label><input id="s_gh_mirror" class="input" placeholder="https://ghfast.top"></div>
+          <div><label>面板版本索引 URL（可选）</label><input id="s_panel_index" class="input" placeholder="https://.../versions.json"></div>
+        </div>
+        <button class="btn sm" onclick="saveUpdateSettings()">保存更新设置</button>
+        <span class="muted" id="updsetmsg"></span>
+      </div>
+    </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- 用户 编辑弹窗 -->
+<div class="overlay" id="mClient" onclick="if(event.target===this)closeModal('mClient')">
+  <div class="modal">
+    <h3 id="cltitle">新增用户</h3>
+    <div class="frm">
+      <div><label>名称</label><input id="cl_name" class="input"></div>
+      <div><label>凭据（UUID/密码）</label>
+        <div style="display:flex;gap:6px"><input id="cl_cred" class="input mono" placeholder="留空自动生成">
+        <button class="btn sm" style="flex:none" onclick="genUuid()">UUID</button></div>
+      </div>
+      <div><label>配额（GB，0=不限）</label><input id="cl_quota" class="input" type="number" min="0" step="0.1" value="0"></div>
+      <div><label>到期时间（留空=永久）</label><input id="cl_exp" class="input" type="datetime-local"></div>
+      <div class="full"><label>关联入站</label><div class="checks" id="cl_inbs"></div></div>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mClient')">取消</button>
+      <button class="btn primary" onclick="saveClient()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 入站 编辑弹窗 -->
+<div class="overlay" id="mInbound" onclick="if(event.target===this)closeModal('mInbound')">
+  <div class="modal">
+    <h3 id="ibtitle">新增入站</h3>
+    <div class="frm">
+      <div><label>名称</label><input id="ib_name" class="input"></div>
+      <div><label>内核</label><select id="ib_core" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select></div>
+      <div><label>协议</label><input id="ib_protocol" class="input" placeholder="vless"></div>
+      <div><label>监听地址（留空=全部）</label><input id="ib_listen" class="input"></div>
+      <div><label>端口</label><input id="ib_port" class="input" type="number"></div>
+      <div><label>传输</label><select id="ib_transport" class="input"><option>tcp</option><option>ws</option><option>grpc</option><option>h2</option></select></div>
+      <div><label>TLS</label><select id="ib_tls" class="input"><option>none</option><option>tls</option><option>reality</option></select></div>
+      <div class="full"><label>透传 Settings（JSON）</label>
+        <textarea id="ib_settings" class="input" style="min-height:64px">{}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn" onclick="genReality()">生成 Reality 密钥对</button>
+      <span class="muted" id="ibkey"></span>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mInbound')">取消</button>
+      <button class="btn primary" onclick="saveInbound()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 切换内核 弹窗 -->
+<div class="overlay" id="mSwitch" onclick="if(event.target===this)closeModal('mSwitch')">
+  <div class="modal" style="max-width:480px">
+    <h3>切换内核</h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">
+      流程：预检新内核配置（校验不过则不会切换）→ 停旧内核 → 启动新内核 → 健康检查。
+      启动失败会<b>自动回滚</b>到原内核，全程服务不中断（仅切换瞬间约 1 秒）。</p>
+    <div class="frm">
+      <div class="full"><label>切换入站</label><input id="sw_inbound" class="input" disabled></div>
+      <div class="full"><label>目标内核</label>
+        <select id="sw_to" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+      </div>
+    </div>
+    <pre class="log hide" id="sw_preview" style="max-height:200px;overflow:auto"></pre>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mSwitch')">取消</button>
+      <button class="btn" onclick="previewSwitch()">预检</button>
+      <button class="btn primary" id="sw_go" onclick="doSwitch()">预检并切换</button>
+    </div>
+  </div>
+</div>
+
+<!-- 版本选择弹窗 -->
+<div class="overlay" id="mVersions" onclick="if(event.target===this)closeModal('mVersions')">
+  <div class="modal" style="max-width:480px">
+    <h3 id="vs_title">更新 <span id="vs_component"></span></h3>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">选择任意版本（含降级）。更新全程安全保护，失败自动回滚。</p>
+    <div class="frm">
+      <div class="full"><label>可用版本（GitHub Releases，新 → 旧）</label>
+        <select id="vs_select" class="input" onchange="pickVersion()"></select></div>
+      <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
+      <div class="full"><label>sha256（可选）</label><input id="vs_sha" class="input mono"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mVersions')">取消</button>
+      <button class="btn primary" id="vs_confirm" onclick="confirmVersionUpdate()">更新到选中版本</button>
+    </div>
+  </div>
+</div>
+
+<!-- 面板回滚弹窗 -->
+<div class="overlay" id="mRollback" onclick="if(event.target===this)closeModal('mRollback')">
+  <div class="modal" style="max-width:420px">
+    <h3>回滚面板版本</h3>
+    <div class="frm">
+      <div class="full"><label>历史备份（版本-时间）</label><select id="rb_select" class="input"></select></div>
+    </div>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mRollback')">取消</button>
+      <button class="btn primary" onclick="doPanelRollback()">回滚并重启</button>
+    </div>
+  </div>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="overlay" id="mConfirm" onclick="if(event.target===this)closeModal('mConfirm')">
+  <div class="modal" style="max-width:400px">
+    <h3 id="cf_title">确认</h3>
+    <p id="cf_text" style="font-size:13.5px"></p>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mConfirm')">取消</button>
+      <button class="btn primary" id="cf_ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 通用内容弹窗（预检/详情） -->
+<div class="overlay" id="mView" onclick="if(event.target===this)closeModal('mView')">
+  <div class="modal">
+    <h3 id="vw_title">详情</h3>
+    <pre id="vw_body"></pre>
+    <div class="foot"><button class="btn primary" onclick="closeModal('mView')">关闭</button></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+/* ================= 基础设施 ================= */
+// 演示模式：URL 带 #demo，或文件名本身是 demo.html（离线演示双保险）
+const DEMO = location.hash.includes("demo") || /demo\.html?$/i.test(location.pathname);
+const $ = id => document.getElementById(id);
+let TOKEN = localStorage.getItem("triune_token") || "";
+
+const ICONS = {
+  overview:'<path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/>',
+  inbounds:'<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  clients:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  traffic:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  import:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  apply:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
+};
+const VIEWS = [
+  ["overview","概览"],["inbounds","入站"],["clients","用户"],["traffic","流量"],
+  ["import","导入链接"],["apply","应用 / 修订"],["settings","设置"]
+];
+const TITLES = Object.fromEntries(VIEWS);
+
+$("nav").innerHTML = VIEWS.map(([v,label]) =>
+  `<button class="nav-item${v==="overview"?" on":""}" data-v="${v}">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
+    <span>${label}</span></button>`).join("");
+$("nav").addEventListener("click", e => {
+  const b = e.target.closest(".nav-item");
+  if (b) goto(b.dataset.v);
+});
+function goto(v) {
+  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  $("pageTitle").textContent = TITLES[v];
+  loadAll();
+}
+
+/* ================= Toast / Modal / Confirm ================= */
+function toast(msg, type = "ok") {
+  const icons = {ok:"✓", err:"✕", warn:"!", info:"i"};
+  const el = document.createElement("div");
+  el.className = "toast " + type;
+  el.innerHTML = `<b style="color:var(--${type==="info"?"acc-text":type})">${icons[type]||"i"}</b><span>${msg}</span>`;
+  $("toasts").appendChild(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 3000);
+}
+function openModal(id){ $(id).classList.add("show"); }
+function closeModal(id){ $(id).classList.remove("show"); }
+function ask(title, text) {
+  return new Promise(resolve => {
+    $("cf_title").textContent = title; $("cf_text").textContent = text;
+    openModal("mConfirm");
+    $("cf_ok").onclick = () => { closeModal("mConfirm"); resolve(true); };
+    $("mConfirm").onclick = e => { if (e.target === $("mConfirm")) resolve(false); };
+  });
+}
+function viewContent(title, body) { $("vw_title").textContent = title; $("vw_body").textContent = body; openModal("mView"); }
+
+/* ================= 主题 ================= */
+const THEMES = [
+  ["light","浅色","#3b82f6"],["dark","曜石","#5b9cf8"],["midnight","午夜","#818cf8"],["forest","森野","#34d399"],
+  ["rose","玫瑰","#fb7185"],["solar","暖阳","#e08a2e"],["steel","雾蓝","#5470a8"],["ocean","海盐","#0f9db8"]
+];
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem("triune_theme", t);
+  document.querySelectorAll(".swatch").forEach(s => s.classList.toggle("on", s.dataset.t === t));
+  setTimeout(() => { if ($("v-traffic") && $("v-traffic").classList.contains("active")) loadDaily(); }, 60);
+}
+$("swatches").innerHTML = THEMES.map(([t,name,c]) =>
+  `<button class="swatch" data-t="${t}" style="background:${c}" title="${name}"><span>${name}</span></button>`).join("");
+$("swatches").addEventListener("click", e => { const s = e.target.closest(".swatch"); if (s) setTheme(s.dataset.t); });
+function toggleThemePop(){ $("themePop").classList.toggle("show"); }
+document.addEventListener("click", e => {
+  if (!e.target.closest("#themePop") && !e.target.closest("#themeBtn")) $("themePop").classList.remove("show");
+});
+setTheme(localStorage.getItem("triune_theme") || "light");
+
+/* ================= API（含演示 mock） ================= */
+async function req(path, opts = {}) {
+  if (DEMO) return mockRoute(path, opts);
+  const r = await fetch(path, {
+    method: opts.method || "GET",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { showLogin(); throw new Error(j.error || "unauthorized"); }
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+/* -------- 演示模式 mock 数据 -------- */
+let MDB, REV_N = 3;
+if (DEMO) {
+  const seedDaily = n => Array.from({length:n},(_,i)=>{
+    const d = new Date(Date.now()-(n-1-i)*864e5).toISOString().slice(0,10);
+    const w = 0.4+0.6*Math.abs(Math.sin(i/4.3));
+    return {day:d, up:Math.round(2.2e9*w*(0.9+0.2*Math.sin(i/2))), down:Math.round(9.6e9*w*(0.9+0.2*Math.cos(i/3)))};
+  });
+  MDB = {
+    version:"v0.4.0-demo",
+    inbounds:[
+      {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
+      {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
+      {id:3,name:"sg-01-hy2",core:"singbox",protocol:"hysteria2",port:36712,transport:"udp",tls:"tls",listen:"",enabled:false,draft:false,settings:"{}"}
+    ],
+    clients:[
+      {client:{id:1,name:"alice",credential:"8f2b1c3d-9e4a-4f5b-8c6d-7e8f9a0b1c2d",sub_token:"demo1234abcd",quota_gb:50,expires_at:null,enabled:true},inbound_ids:[1,2]},
+      {client:{id:2,name:"bob",credential:"p@ssw0rd-bob",sub_token:"demo5678efgh",quota_gb:0,expires_at:"2026-12-31T00:00:00Z",enabled:true},inbound_ids:[1]},
+      {client:{id:3,name:"carol",credential:"2a7c-41dd-9b0e",sub_token:"demo9012ijkl",quota_gb:100,expires_at:"2026-10-15T00:00:00Z",enabled:false},inbound_ids:[2]}
+    ],
+    counters:{1:{up:3.1e9,down:28.4e9},2:{up:0.9e9,down:6.2e9},3:{up:0,down:0}},
+    daily:seedDaily(30),
+    external:[
+      {id:1,name:"香港 IEPL-01",raw_link:"vless://8f2b1c3d@hk-iepl.example.net:443?security=tls#香港 IEPL-01",created_at:"2026-10-28T09:12:44"},
+      {id:2,name:"日本 BGP-02",raw_link:"vmess://eyJhZGQiOiJqcC0wMi5leGFtcGxlLmNvbSIsInBvcnQiOjQ0MywiaWQiOiJkZGVhZGVhZCJ9",created_at:"2026-10-29T21:03:17"},
+      {id:3,name:"美国 中转-01",raw_link:"trojan://p@ss@us-relay.example.org:8443#美国 中转-01",created_at:"2026-10-30T13:45:02"}
+    ],
+    revisions:[
+      {id:3,core:"singbox",status:"applied",note:"web apply",created_at:"2026-10-31T03:40:11",content:"(修订内容示例)"},
+      {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
+      {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
+    ],
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",acme_enabled:"0",acme_domain:"",acme_email:""}
+  };
+}
+async function mockRoute(path, opts) {
+  await new Promise(r => setTimeout(r, 220));
+  const m = opts.method || "GET";
+  const [, api, rest] = path.match(/\/api\/([^/?]*)(.*)?/) || [];
+  const q = Object.fromEntries(new URLSearchParams(path.split("?")[1] || ""));
+  if (api === "login") return { token: "demo" };
+  if (api === "version") return { version: MDB.version };
+  if (api === "status") return { cores: ["singbox","xray","mihomo"].map(c => ({
+    core:c, running:c!=="mihomo", config_exists:c!=="mihomo", bin_set:!!MDB.settings["bin_"+c], bin_found:!!MDB.settings["bin_"+c] })) };
+  if (api === "inbounds" && m === "GET") return MDB.inbounds;
+  if (api === "inbounds" && m === "POST") { const b = Object.assign({}, opts.body); b.id = Math.max(0,...MDB.inbounds.map(x=>x.id))+1; b.enabled=false; b.draft=false; MDB.inbounds.push(b); return b; }
+  if (api === "inbounds" && m === "PUT") { const id=+rest.split("/")[1]; const i=MDB.inbounds.findIndex(x=>x.id===id); MDB.inbounds[i]=Object.assign({},MDB.inbounds[i],opts.body,{id}); return MDB.inbounds[i]; }
+  if (api === "inbounds" && m === "DELETE") { MDB.inbounds = MDB.inbounds.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
+  if (api === "clients" && m === "GET") return MDB.clients;
+  if (api === "clients" && m === "POST") { const b=opts.body; const c={id:Math.max(0,...MDB.clients.map(x=>x.client.id))+1,name:b.name,credential:b.credential||crypto.randomUUID(),sub_token:Math.random().toString(16).slice(2,14),quota_gb:b.quota_gb||0,expires_at:b.expires_at||null,enabled:true}; MDB.clients.push({client:c,inbound_ids:b.inbound_ids||[]}); return c; }
+  if (api === "clients" && m === "PUT") { const id=+rest.split("/")[1]; const e=MDB.clients.find(x=>x.client.id===id); if(rest.includes("/inbounds")){e.inbound_ids=opts.body.inbound_ids;return{ok:1}} e.client=Object.assign({},e.client,opts.body,{id}); return e.client; }
+  if (api === "clients" && m === "DELETE") { MDB.clients=MDB.clients.filter(x=>x.client.id!==+rest.split("/")[1]); return {ok:1}; }
+  if (api === "traffic") return MDB.clients.map(({client:c}) => { const t=MDB.counters[c.id]||{up:0,down:0};
+    return {id:c.id,name:c.name,up:t.up,down:t.down,total:t.up+t.down,quota_gb:c.quota_gb,enabled:c.enabled,exceeded:c.quota_gb>0&&(t.up+t.down)>=c.quota_gb*1073741824}; });
+  if (api === "traffic/daily") { const n=+q.days||30; return MDB.daily.slice(-n); }
+  if (api === "traffic/live") return {up_bps:Math.round(2.1e5+Math.random()*9e4), down_bps:Math.round(1.9e6+Math.random()*8e5), interval:30, updated_at:new Date().toISOString().slice(0,19)};
+  if (api === "revisions") return MDB.revisions;
+  if (api === "logs") return {logs:["2026-10-31 03:40:11 INFO sing-box started (1.9.7)","2026-10-31 03:40:11 INFO inbound/hk-01-reality: tcp://:443 started","2026-10-31 03:40:12 INFO inbound/jp-01-ws: ws://:8443 started"]};
+  if (api === "settings" && m === "GET") return MDB.settings;
+  if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
+  if (api === "apply") { MDB.revisions.unshift({id:++REV_N,core:opts.body.core,status:"applied",note:opts.body.note||"demo apply",created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"}); return {revision_id:REV_N,core:opts.body.core,validated:true,restarted:true}; }
+  if (api === "apply/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
+  if (api === "rollback") return {restored_from:"revisions/singbox/config.r3.bak"};
+  if (api === "switch-core") {
+    const b = opts.body;
+    if (b.dry_run) return {to:b.to, validated:true, hash:"d3m0abcd", content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ]\n}'};
+    const moved = [];
+    (b.inbound_ids||[]).forEach(id => { const i = MDB.inbounds.find(x=>x.id===id); if (i) { moved.push(i.name); i.core = b.to; } });
+    MDB.revisions.unshift({id:++REV_N,core:b.to,status:"applied",note:"switch → "+b.to,created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"});
+    return {ok:1, to:b.to, from:["(原内核)"], inbounds:moved, validated:true, hash:"d3m0abcd", revision_id:REV_N, warnings:[]};
+  }
+  if (api === "tools/reality-keypair") return {private_key:"demo-priv-"+Math.random().toString(16).slice(2,10),public_key:"demo-pub-"+Math.random().toString(16).slice(2,10)};
+  if (api === "tools/uuid") return {uuid:crypto.randomUUID()};
+  if (api === "import") {
+    if ((opts.body.mode||"external") === "external") {
+      MDB.external.push({id:Math.max(0,...MDB.external.map(x=>x.id))+1, name:"新导入节点", raw_link:"vless://demo@node"+Math.ceil(Math.random()*99)+".example.com:443#新导入节点", created_at:new Date().toISOString().slice(0,19)});
+      return {created:["新导入节点 → 外部节点（仅订阅聚合）"],failed:[],parse_errors:[]};
+    }
+    return {created:["新导入节点 → 入站草稿 id=99（未生效，需 apply）"],failed:[],parse_errors:[]};
+  }
+  if (api === "external-nodes" && m === "GET") return MDB.external;
+  if (api === "external-nodes" && m === "DELETE") { MDB.external = MDB.external.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
+  if (api === "certs") return [];
+  if (api === "certs/issue") return {ok:1, msg:"已触发签发检查（演示）"};
+  if (api === "components") return {
+    panel:{component:"panel",version:"v0.5.0-demo"},
+    cores:[
+      {component:"singbox",bin:"/usr/local/bin/sing-box",bin_set:true,version:"sing-box version 1.9.7",running:true,config_exists:true,backups:["1.9.5-20261001-120000.bak"]},
+      {component:"xray",bin:"/usr/local/bin/xray",bin_set:true,version:"Xray 24.12.18 (Xray, Penetrates Everything.)",running:false,config_exists:true,backups:[]},
+      {component:"mihomo",bin:"",bin_set:false,running:false,backups:[]}
+    ]};
+  if (api === "updates/versions") return {component:q.component,source:"github",releases:[
+    {tag:"v1.10.0"},{tag:"v1.9.7"},{tag:"v1.9.5"},{tag:"v1.8.9"}]};
+  if (api.startsWith("cores/") && api.endsWith("/update")) { await new Promise(r=>setTimeout(r,900)); const c=api.split("/")[1];
+    const installed = !MDB.settings["bin_"+c];
+    if (installed) MDB.settings["bin_"+c] = "/opt/triune-panel/data/bin/"+c+"/"+(c==="singbox"?"sing-box":c);
+    return {ok:1,component:c,version:c+" version 9.9.9 (demo)",sha256:"demo",backup:"20261031-053500.bak",target:MDB.settings["bin_"+c],installed,restarted:!installed,was_running:!installed}; }
+  if (api.startsWith("cores/") && api.endsWith("/rollback")) { const c=api.split("/")[1]; return {ok:1,restored:"1.9.5-20261001-120000.bak",component:c}; }
+  if (api === "panel/backups") return {current_version:"v0.5.0-demo",executable:"/opt/triune-panel/triune-panel",backups:["v0.4.0-20261015-090000.bak","v0.3.0-20261002-180000.bak"],bak_exists:true};
+  if (api === "panel/rollback") { await new Promise(r=>setTimeout(r,600)); return {ok:1,msg:"回滚完成，正在重启..."}; }
+  return {};
+}
+
+/* ================= 登录 ================= */
+if (DEMO) $("demoTag").classList.remove("hide");
+function showLogin(){ $("login").classList.remove("hide"); $("app").classList.add("hide"); }
+function showApp(){ $("login").classList.add("hide"); $("app").classList.remove("hide"); loadAll(); }
+async function login() {
+  try {
+    const j = await req("/api/login", { method:"POST", body:{ user:$("lu").value, pass:$("lp").value } });
+    TOKEN = j.token; localStorage.setItem("triune_token", TOKEN); showApp();
+  } catch (e) {
+    toast(String(e.message).includes("fetch")
+      ? "无法连接面板服务：请确认面板已启动；离线演示请打开 demo.html"
+      : e.message, "err");
+  }
+}
+function logout(){ TOKEN=""; localStorage.removeItem("triune_token"); showLogin(); }
+
+/* ================= 数据加载 ================= */
+async function loadAll() {
+  await Promise.allSettled([loadStatus(), loadInbounds(), loadClients(), loadTraffic(), loadRevisions(), loadSettings(), loadVersion(), loadCerts(), loadComponents(), loadLive(), loadExternal()]);
+}
+function fmtBytes(b) {
+  if (!b) return "0";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i ? 2 : 0) + " " + u[i];
+}
+
+/* ---- 实时速率 ---- */
+async function loadLive() {
+  try {
+    const j = await req("/api/traffic/live");
+    $("liveUp").textContent = fmtBytes(j.up_bps) + "/s";
+    $("liveDown").textContent = fmtBytes(j.down_bps) + "/s";
+    if (j.updated_at) $("live_at").textContent = "更新于 " + String(j.updated_at).replace("T", " ").slice(11, 19);
+  } catch(e){}
+}
+setInterval(() => { if (TOKEN) loadLive(); }, 10000);
+
+async function loadVersion() {
+  try { const j = await req("/api/version"); $("curver").textContent = j.version; $("verinfo").textContent = "v" + j.version; } catch(e){}
+}
+async function loadStatus() {
+  try {
+    const j = await req("/api/status");
+    $("cores").innerHTML = j.cores.map(c => {
+      let cls = "b-err", txt = "未配置二进制";
+      if (c.running) { cls = "b-ok"; txt = "运行中"; }
+      else if (c.config_exists) { cls = "b-warn"; txt = "有配置未运行"; }
+      const bin = c.bin_set ? (c.bin_found ? "二进制正常" : "二进制不存在") : "未配置二进制";
+      return `<div class="card" style="margin:0;box-shadow:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b style="text-transform:uppercase;font-size:14px">${c.core}</b><span class="badge ${cls}">${txt}</span></div>
+        <span class="muted">配置文件: ${c.config_exists ? "存在" : "无"} · ${bin}</span></div>`;
+    }).join("");
+    renderStats(j.cores.length, j.cores.filter(c => c.running).length);
+  } catch(e){}
+}
+let CLIENT_N = 0, CL_INBS = [];
+function renderStats(total, running) {
+  $("statCards").innerHTML = `
+    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div>
+      <div><b>${running}<span class="muted" style="font-size:13px"> / ${total}</span></b><span>内核运行中</span></div></div>
+    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+      <div><b>${CLIENT_N}</b><span>用户数</span></div></div>
+    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+      <div><b id="st_traffic">—</b><span>累计流量</span></div></div>
+    <div class="stat"><div class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <div><b id="st_inb">—</b><span>入站数</span></div></div>`;
+}
+async function loadClients() {
+  try {
+    const j = await req("/api/clients");
+    CLIENT_N = j.length;
+    const inbs = await req("/api/inbounds").catch(() => []);
+    CL_INBS = inbs;
+    $("cltbody").innerHTML = j.map(x => { const c = x.client;
+      return `<tr>
+      <td><b>${c.name}</b></td>
+      <td class="mono" title="${c.credential}">${c.credential.slice(0,14)}…</td>
+      <td><span class="sub-token"><a href="${DEMO?"#":"/sub/"+c.sub_token}" target="_blank" class="mono">/sub/${c.sub_token.slice(0,10)}…</a>
+        <button class="btn sm" title="复制订阅链接" onclick="copySub('${c.sub_token}')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        复制</button></span></td>
+      <td>${c.quota_gb ? c.quota_gb + " GB" : "不限"}</td>
+      <td>${c.expires_at ? c.expires_at.slice(0,10) : '<span class="muted">永久</span>'}</td>
+      <td><label class="sw"><input type="checkbox" ${c.enabled?"checked":""} onchange="toggleClient(${c.id},this.checked)"><i></i></label></td>
+      <td class="ta-r"><button class="btn sm" onclick="openClientModal(${c.id})">编辑</button>
+        <button class="btn sm danger" onclick="delClient(${c.id})">删除</button></td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="empty">暂无用户，点击右上角「+ 新增用户」创建</td></tr>`;
+  } catch(e){}
+}
+async function loadInbounds() {
+  try {
+    const j = await req("/api/inbounds");
+    const stInb = $("st_inb"); if (stInb) stInb.textContent = j.length;
+    $("ibtbody").innerHTML = j.map(i => { return `<tr>
+      <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}</td>
+      <td><span class="badge b-acc">${i.core}</span></td><td>${i.protocol}</td>
+      <td class="num">${i.port}</td><td>${i.transport}</td><td>${i.tls}</td>
+      <td><label class="sw"><input type="checkbox" ${i.enabled?"checked":""} onchange="toggleInbound(${i.id},this.checked)"><i></i></label></td>
+      <td class="ta-r"><button class="btn sm" onclick="openInboundModal(${i.id})">编辑</button>
+        ${i.enabled && !i.draft ? `<button class="btn sm" onclick="openSwitchModal(${i.id})">切换内核</button>` : ""}
+        ${i.draft ? `<button class="btn sm" onclick="promoteInbound(${i.id})">取消草稿</button>` : ""}
+        <button class="btn sm danger" onclick="delInbound(${i.id})">删除</button></td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="empty">暂无入站，点击右上角「+ 新增入站」创建</td></tr>`;
+  } catch(e){}
+}
+
+/* ---- 用户弹窗 ---- */
+async function openClientModal(id) {
+  $("cltitle").textContent = id ? "编辑用户" : "新增用户";
+  $("cl_name").dataset.editing = id || "";
+  const inbs = await req("/api/inbounds").catch(() => []);
+  let sel = [], vals = { name:"", cred:"", quota:0, exp:"" };
+  if (id) {
+    const all = await req("/api/clients");
+    const x = all.find(v => v.client.id === id);
+    if (x) { sel = x.inbound_ids || [];
+      vals = { name:x.client.name, cred:x.client.credential, quota:x.client.quota_gb||0, exp:x.client.expires_at ? fmtLocalDT(x.client.expires_at) : "" }; }
+  }
+  $("cl_inbs").innerHTML = inbs.length ? inbs.map(i =>
+    `<label><input type="checkbox" value="${i.id}" ${sel.includes(i.id)?"checked":""}> ${i.name} <span class="muted">(${i.core}:${i.port})</span></label>`).join("")
+    : '<span class="muted">暂无入站，请先创建入站</span>';
+  $("cl_name").value = vals.name; $("cl_cred").value = vals.cred;
+  $("cl_quota").value = vals.quota; $("cl_exp").value = vals.exp;
+  openModal("mClient");
+  setTimeout(() => $("cl_name").focus(), 120);
+}
+function fmtLocalDT(iso){ return iso ? iso.slice(0,16) : ""; }
+async function saveClient() {
+  const ids = [...document.querySelectorAll("#cl_inbs input:checked")].map(i => +i.value);
+  const exp = $("cl_exp").value ? new Date($("cl_exp").value).toISOString() : null;
+  const editing = $("cl_name").dataset.editing;
+  try {
+    if (editing) {
+      const all = await req("/api/clients");
+      const x = all.find(v => v.client.id === +editing);
+      const c = x.client;
+      c.name = $("cl_name").value; c.credential = $("cl_cred").value;
+      c.quota_gb = +$("cl_quota").value || 0; c.expires_at = exp;
+      await req("/api/clients/" + editing, { method:"PUT", body:c });
+      await req("/api/clients/" + editing + "/inbounds", { method:"PUT", body:{ inbound_ids:ids } });
+      toast("用户已更新");
+    } else {
+      await req("/api/clients", { method:"POST", body:{ name:$("cl_name").value, credential:$("cl_cred").value, quota_gb:+$("cl_quota").value||0, expires_at:exp, inbound_ids:ids } });
+      toast("用户已创建");
+    }
+    closeModal("mClient"); loadClients();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function genUuid(){ try { const j = await req("/api/tools/uuid"); $("cl_cred").value = j.uuid; } catch(e){ toast(e.message,"err"); } }
+async function toggleClient(id, en) {
+  try { const all = await req("/api/clients"); const x = all.find(v=>v.client.id===id);
+    const c = x.client; c.enabled = en;
+    await req("/api/clients/"+id, { method:"PUT", body:c });
+    toast(en ? "用户已启用" : "用户已停用", en ? "ok" : "warn");
+    toast("开关变更需「应用配置」后才影响内核", "info");
+  } catch(e){ toast(e.message,"err"); }
+}
+async function delClient(id) {
+  if (!(await ask("删除用户", "删除后该用户的订阅立即失效（运行配置在下次应用后更新）。确定删除？"))) return;
+  try { await req("/api/clients/"+id, { method:"DELETE" }); toast("已删除"); loadClients(); } catch(e){ toast(e.message,"err"); }
+}
+function copySub(token) {
+  const url = location.origin + "/sub/" + token;
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .then(() => toast("订阅链接已复制"))
+    .catch(() => viewContent("订阅链接", url));
+}
+
+/* ---- 入站弹窗 ---- */
+async function openInboundModal(id) {
+  $("ibtitle").textContent = id ? "编辑入站" : "新增入站";
+  $("ib_name").dataset.editing = id || "";
+  $("ibkey").textContent = "";
+  let v = { name:"", core:"singbox", protocol:"", listen:"", port:"", transport:"tcp", tls:"none", settings:"{}" };
+  if (id) { const all = await req("/api/inbounds"); const i = all.find(x=>x.id===id); if (i) v = i; }
+  $("ib_name").value=v.name; $("ib_core").value=v.core; $("ib_protocol").value=v.protocol;
+  $("ib_listen").value=v.listen||""; $("ib_port").value=v.port; $("ib_transport").value=v.transport;
+  $("ib_tls").value=v.tls; $("ib_settings").value=v.settings||"{}";
+  // 运行中的入站改内核必须走安全切换流程，编辑弹窗里直接锁住内核选择
+  const lockCore = id && v.enabled && !v.draft;
+  $("ib_core").disabled = lockCore;
+  $("ib_core").title = lockCore ? "运行中的入站请用「切换内核」按钮安全迁移" : "";
+  openModal("mInbound");
+  setTimeout(() => $("ib_name").focus(), 120);
+}
+async function saveInbound() {
+  const editing = $("ib_name").dataset.editing;
+  const body = { name:$("ib_name").value, core:$("ib_core").value, protocol:$("ib_protocol").value,
+    listen:$("ib_listen").value, port:+$("ib_port").value, transport:$("ib_transport").value,
+    tls:$("ib_tls").value, settings:$("ib_settings").value||"{}" };
+  try {
+    if (editing) { await req("/api/inbounds/"+editing, { method:"PUT", body:Object.assign({},body,{id:+editing}) }); toast("入站已更新，如已启用请记得「应用配置」"); }
+    else { await req("/api/inbounds", { method:"POST", body }); toast("入站已保存（未启用），确认无误后打开开关并应用"); }
+    closeModal("mInbound"); loadInbounds();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function toggleInbound(id, en) {
+  try { const all = await req("/api/inbounds"); const inb = all.find(x=>x.id===id);
+    inb.enabled = en; await req("/api/inbounds/"+id, { method:"PUT", body:inb });
+    toast(en ? "已启用，需「应用配置」后生效" : "已停用，需「应用配置」后从内核移除", "info");
+  } catch(e){ toast(e.message,"err"); }
+}
+async function promoteInbound(id) {
+  try { const all = await req("/api/inbounds"); const inb = all.find(x=>x.id===id);
+    inb.draft = false; await req("/api/inbounds/"+id, { method:"PUT", body:inb }); toast("已取消草稿"); loadInbounds();
+  } catch(e){ toast(e.message,"err"); }
+}
+
+/* ---- 切换内核 ---- */
+let swInbound = null;
+async function openSwitchModal(id) {
+  const all = await req("/api/inbounds");
+  const i = all.find(x=>x.id===id); if (!i) return;
+  swInbound = i;
+  $("sw_inbound").value = `#${i.id} ${i.name}（当前 ${i.core}，端口 ${i.port}）`;
+  $("sw_to").innerHTML = ["singbox","xray","mihomo"].filter(c=>c!==i.core).map(c=>`<option>${c}</option>`).join("");
+  $("sw_preview").classList.add("hide"); $("sw_preview").textContent = "";
+  $("sw_go").disabled = false;
+  openModal("mSwitch");
+}
+async function previewSwitch() {
+  if (!swInbound) return;
+  try {
+    const j = await req("/api/switch-core", { method:"POST", body:{ to:$("sw_to").value, inbound_ids:[swInbound.id], dry_run:true } });
+    const p = $("sw_preview"); p.classList.remove("hide");
+    p.textContent = `✅ 预检通过（${j.to} 校验${j.validated ? "成功" : "已跳过：未配置二进制"}，配置哈希 ${j.hash}）\n\n` + j.content;
+  } catch(e){ $("sw_preview").classList.remove("hide"); $("sw_preview").textContent = "❌ " + e.message; }
+}
+async function doSwitch() {
+  if (!swInbound) return;
+  const to = $("sw_to").value;
+  if (!(await ask("切换内核", `确认把入站「${swInbound.name}」从 ${swInbound.core} 切换到 ${to}？预检失败不会切换；启动失败会自动回滚。`))) return;
+  $("sw_go").disabled = true;
+  try {
+    const j = await req("/api/switch-core", { method:"POST", body:{ to, inbound_ids:[swInbound.id] } });
+    closeModal("mSwitch");
+    toast(`已切换到 ${to}（配置哈希 ${j.hash}），当前服务正常`, "ok");
+    (j.warnings||[]).forEach(w => toast(w, "warn"));
+    loadInbounds(); loadStatus();
+  } catch(e){ toast(e.message, "err"); $("sw_go").disabled = false; }
+}
+async function delInbound(id) {
+  if (!(await ask("删除入站", "删除入站不会立即影响运行中的配置（下次应用后生效）。确定删除？"))) return;
+  try { await req("/api/inbounds/"+id, { method:"DELETE" }); toast("已删除"); loadInbounds(); } catch(e){ toast(e.message,"err"); }
+}
+async function genReality() {
+  const core = $("ib_core").value;
+  try {
+    const j = await req("/api/tools/reality-keypair", { method:"POST", body:{ core } });
+    let s = {}; try { s = JSON.parse($("ib_settings").value || "{}"); } catch(e){}
+    s.private_key = j.private_key;
+    $("ib_settings").value = JSON.stringify(s, null, 2);
+    $("ibkey").textContent = "public_key（发给客户端）: " + j.public_key;
+    toast("Reality 密钥对已生成并写入 Settings");
+  } catch (e) { toast(e.message + "（需先在设置中配置 " + core + " 二进制路径）", "err"); }
+}
+
+/* ---- 流量 ---- */
+async function loadTraffic() {
+  try {
+    const j = await req("/api/traffic");
+    let totalAll = 0;
+    $("trtbody").innerHTML = j.map(r => {
+      totalAll += r.total;
+      const pct = r.quota_gb ? Math.min(100, r.total / (r.quota_gb * 1073741824) * 100) : 0;
+      const bar = r.quota_gb
+        ? `<span class="progress"><i style="width:${pct.toFixed(1)}%;background:${pct>=100?"var(--err)":pct>80?"var(--warn)":"var(--ok)"}"></i></span> <span class="muted">${pct.toFixed(0)}%</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+      <td><b>${r.name}</b></td>
+      <td class="ta-r num">${fmtBytes(r.up)}</td><td class="ta-r num">${fmtBytes(r.down)}</td>
+      <td class="ta-r num"><b>${fmtBytes(r.total)}</b></td><td>${bar}</td>
+      <td class="ta-r">${r.quota_gb ? r.quota_gb + " GB" : "不限"}</td>
+      <td>${!r.enabled ? '<span class="badge b-err">已停用</span>' : r.exceeded ? '<span class="badge b-warn">已达配额</span>' : '<span class="badge b-ok">正常</span>'}</td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="empty">暂无数据（开启统计并应用后生效）</td></tr>`;
+    const st = $("st_traffic"); if (st) st.textContent = fmtBytes(totalAll);
+  } catch(e){}
+  loadDaily();
+}
+async function loadDaily() {
+  try {
+    const points = await req("/api/traffic/daily?days=" + $("tr_days").value);
+    drawDailyChart(points);
+  } catch(e){}
+}
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function drawDailyChart(points) {
+  const cv = $("tr_chart"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 900, H = 230;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  if (!points || !points.length) return;
+  const pad = { l:54, r:8, t:12, b:26 };
+  const maxV = Math.max(1, ...points.map(p => p.up + p.down));
+  const niceMax = niceCeil(maxV);
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const n = points.length;
+  const step = cw / n;
+  const bw = Math.max(2, Math.min(30, step * 0.6));
+  const cUp = cssVar("--chart-up") || "#3b82f6", cDown = cssVar("--chart-down") || "#22c55e";
+  const cLine = cssVar("--line") || "#e5e9ef", cText = cssVar("--muted") || "#6b7280";
+  const cFont = "11px " + (cssVar("--font") || "sans-serif");
+  ctx.font = cFont;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ch - ch * i / 4;
+    ctx.strokeStyle = cLine; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = cText; ctx.textAlign = "right";
+    ctx.fillText(fmtBytes(niceMax * i / 4), pad.l - 8, y + 4);
+  }
+  points.forEach((p, i) => {
+    const x = pad.l + step * i + (step - bw) / 2;
+    const hDown = ch * p.down / niceMax, hUp = ch * p.up / niceMax;
+    const yBase = pad.t + ch;
+    if (p.down > 0) { ctx.fillStyle = cDown; ctx.beginPath();
+      ctx.roundRect(x, yBase - hDown, bw, hDown, [2,2,0,0]); ctx.fill(); }
+    if (p.up > 0) { ctx.fillStyle = cUp; ctx.beginPath();
+      ctx.roundRect(x, yBase - hDown - hUp, bw, hUp, [2,2,0,0]); ctx.fill(); }
+    if (n <= 8 || i === 0 || i === n - 1 || i % Math.ceil(n / 8) === 0) {
+      ctx.fillStyle = cText; ctx.textAlign = "center";
+      ctx.fillText(p.day.slice(5), x + bw / 2, H - 8);
+    }
+  });
+  const total = points.reduce((s, p) => s + p.up + p.down, 0);
+  $("tr_total").textContent = "区间合计: " + fmtBytes(total);
+}
+function niceCeil(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1,2,5,10]) if (v <= m * p) return m * p;
+  return 10 * p;
+}
+window.addEventListener("resize", () => { if ($("v-traffic").classList.contains("active")) loadDaily(); });
+
+/* ---- 导入 ---- */
+async function doImport() {
+  const mode = document.querySelector('input[name=imode]:checked').value;
+  try {
+    const j = await req("/api/import", { method:"POST", body:{ text:$("im_text").value, mode, core:$("im_core").value } });
+    const ok = (j.created||[]).length;
+    $("immsg").innerHTML =
+      (j.created||[]).map(s => `<div class="muted" style="color:var(--ok)">✓ ${s}</div>`).join("") +
+      (j.failed||[]).map(s => `<div class="muted" style="color:var(--err)">✕ ${s}</div>`).join("") +
+      (j.parse_errors||[]).map(s => `<div class="muted" style="color:var(--err)">✕ 解析失败: ${s}</div>`).join("");
+    if (mode === "inbound" && ok > 0) toast(`已导入 ${ok} 条草稿，应用配置后生效`, "info");
+    else if (ok > 0) { toast(`已导入 ${ok} 条外部节点`); loadExternal(); }
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- 外部节点 ---- */
+let EXT = [];
+async function loadExternal() {
+  try {
+    EXT = await req("/api/external-nodes");
+    $("extbody").innerHTML = EXT.map(n => {
+      let proto = "", host = "";
+      try { const u = new URL(n.raw_link); proto = u.protocol.replace(":", ""); host = u.host; } catch(e) { host = "(链接待解析)"; }
+      return `<tr>
+        <td><b>${n.name}</b></td>
+        <td><span class="badge b-acc">${proto || "未知"}</span></td>
+        <td class="mono muted">${host}</td>
+        <td class="muted mono">${(n.created_at||"").replace("T"," ").slice(0,19)}</td>
+        <td class="ta-r"><button class="btn sm danger" onclick="delExternal(${n.id})">删除</button></td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="empty">暂无外部节点 —— 在上方粘贴链接导入后显示</td></tr>`;
+  } catch(e){}
+}
+async function delExternal(id) {
+  const n = EXT.find(x => x.id === id);
+  const name = n ? n.name : "#" + id;
+  if (!(await ask("删除外部节点", `删除「${name}」？它将从订阅中移除，不影响任何运行中的配置。`))) return;
+  try { await req("/api/external-nodes/" + id, { method:"DELETE" }); toast("已删除"); loadExternal(); }
+  catch(e){ toast(e.message, "err"); }
+}
+
+/* ---- 应用 / 修订 / 日志 ---- */
+async function dryRun() {
+  try {
+    const j = await req("/api/apply/dry-run", { method:"POST", body:{ core:$("ap_core").value } });
+    viewContent("预检结果 · " + $("ap_core").value,
+      j.content + "\n\n—— 校验: " + (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验"));
+  } catch (e) { toast(e.message, "err"); }
+}
+async function applyCfg() {
+  const core = $("ap_core").value;
+  if (!(await ask("应用配置", "将把「" + core + "」的配置渲染 → 内核校验 → 原子替换 → 重启内核。校验失败时运行中的配置不会受任何影响。继续？"))) return;
+  try {
+    const j = await req("/api/apply", { method:"POST", body:{ core, note:"web apply" } });
+    toast(`应用成功 · 修订 #${j.revision_id} · 校验${j.validated?"通过":"跳过"} · 内核${j.restarted?"已重启":"未重启"}`);
+    loadRevisions(); loadStatus();
+  } catch (e) {
+    toast(e.message, "err");
+    toast("运行中的配置未被修改，服务不受影响", "info");
+    loadRevisions();
+  }
+}
+async function rollback() {
+  if (!(await ask("回滚配置", "将恢复到最近一次自动备份并重启内核，确定？"))) return;
+  try { const j = await req("/api/rollback", { method:"POST", body:{ core:$("ap_core").value } });
+    toast("已从 " + j.restored_from + " 恢复"); loadRevisions();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function loadRevisions() {
+  try {
+    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=20");
+    $("revtbody").innerHTML = j.map(r => `<tr>
+      <td class="mono">#${r.id}</td><td><span class="badge b-acc">${r.core}</span></td>
+      <td><span class="badge ${r.status==="applied"?"b-ok":r.status==="pending"?"b-warn":"b-err"}">${r.status}</span></td>
+      <td>${r.note}</td><td class="muted mono">${(r.created_at||"").replace("T"," ").slice(0,19)}</td>
+      <td class="ta-r"><button class="btn sm" onclick="viewRevision(${r.id})">查看</button></td></tr>`).join("")
+      || `<tr><td colspan="6" class="empty">暂无修订记录</td></tr>`;
+  } catch(e){}
+}
+async function viewRevision(id) {
+  try {
+    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=50");
+    const r = j.find(x => x.id === id);
+    if (r) viewContent("修订 #" + r.id + " · " + r.status, r.detail || r.content || "（无详情）");
+  } catch(e){}
+}
+async function loadLogs() {
+  try { const j = await req("/api/logs?core=" + $("lg_core").value + "&lines=80");
+    $("lgout").textContent = (j.logs||[]).join("\n") || "（暂无日志）";
+    $("lgout").scrollTop = $("lgout").scrollHeight;
+  } catch (e) { $("lgout").textContent = e.message; }
+}
+
+/* ---- 设置 ---- */
+async function loadCerts() {
+  try {
+    const j = await req("/api/certs");
+    const el = $("certinfo");
+    if (!j.length) { el.classList.add("hide"); return; }
+    el.classList.remove("hide");
+    el.textContent = j.map(c => `${c.domain}: ${c.error ? "错误: " + c.error : "有效期至 " + String(c.not_after).replace("T"," ").slice(0,16)} · ${c.file}`).join("\n");
+  } catch(e){}
+}
+async function issueCert() {
+  try {
+    const j = await req("/api/certs/issue", { method:"POST" });
+    $("certmsg").textContent = j.msg || "已触发";
+    toast("已触发签发检查（HTTP-01 需域名解析到本机且 :80 可用）", "info");
+    setTimeout(loadCerts, 6000);
+    setTimeout(loadCerts, 20000);
+    setTimeout(() => { $("certmsg").textContent = ""; }, 10000);
+  } catch(e){ toast(e.message, "err"); }
+}
+async function selfUpdate() {
+  if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
+  toast("下载中…", "info");
+  try {
+    await req("/api/self-update", { method:"POST", body:{ url:$("up_url").value, sha256:$("up_sha").value } });
+    toast("更新完成，面板重启中，5 秒后刷新页面");
+    setTimeout(() => location.reload(), 5000);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function loadSettings() {
+  try {
+    const j = await req("/api/settings");
+    $("s_binsingbox").value = j.bin_singbox || ""; $("s_binxray").value = j.bin_xray || "";
+    $("s_binmihomo").value = j.bin_mihomo || ""; $("s_host").value = j.public_host || "";
+    $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
+    $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
+    $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
+  } catch(e){}
+}
+
+/* ================= 组件更新与版本管理 ================= */
+let compData = null;
+async function loadComponents() {
+  try {
+    compData = await req("/api/components");
+    const rows = [];
+    const p = compData.panel;
+    rows.push(`<tr><td><b>panel</b>（本面板）</td><td class="mono">${p.version}</td><td><span class="badge b-ok">运行中</span></td>
+      <td class="ta-r"><button class="btn sm" onclick="fetchVersions('panel')">版本列表</button>
+      <button class="btn sm" onclick="panelRollbackDlg()">回滚</button></td></tr>`);
+    for (const c of compData.cores) {
+      const st = c.running ? '<span class="badge b-ok">运行中</span>'
+        : c.version_error ? `<span class="badge b-warn" title="${c.version_error}">二进制异常</span>`
+        : '<span class="badge b-idle">未运行</span>';
+      const primary = c.bin_set
+        ? `<button class="btn sm" onclick="fetchVersions('${c.component}')">版本列表</button>`
+        : `<button class="btn sm primary" onclick="fetchVersions('${c.component}', true)">一键安装</button><span class="muted" style="font-size:11.5px"> 装到面板专用目录，与系统现有二进制隔离</span>`;
+      rows.push(`<tr>
+        <td><b>${c.component}</b><div class="muted mono" style="font-size:11.5px">${c.bin || "未配置路径"}</div></td>
+        <td class="mono">${c.version || '<span class="muted">未知</span>'}</td>
+        <td>${st}</td>
+        <td class="ta-r">${primary}
+          ${c.backups && c.backups.length ? `<button class="btn sm" onclick="coreRollbackDlg('${c.component}')">回滚(${c.backups.length})</button>` : ""}</td></tr>`);
+    }
+    $("updtbody").innerHTML = rows.join("");
+  } catch(e){ $("updtbody").innerHTML = `<tr><td colspan="4" class="muted">加载失败</td></tr>`; }
+}
+
+/* 版本列表弹窗（复用通用内容弹窗思路，独立实现带选择） */
+let verList = [], verInstallMode = false;
+async function fetchVersions(comp, install = false) {
+  verInstallMode = install;
+  toast("正在获取版本列表…", "info");
+  try {
+    const j = await req("/api/updates/versions?component=" + comp);
+    verList = j.releases || [];
+    if (!verList.length) { toast("版本列表为空", "warn"); return; }
+    const opts = verList.map((r,i)=>`<option value="${i}">${r.tag}${r.sha256?" ✔":" "}</option>`).join("");
+    $("vs_component").textContent = comp;
+    $("vs_title").firstChild.textContent = install ? "安装 " : "更新 ";
+    $("vs_confirm").textContent = install ? "安装选中版本" : "更新到选中版本";
+    $("vs_select").innerHTML = opts;
+    $("vs_url").value = ""; $("vs_sha").value = "";
+    $("vs_confirm").disabled = false;
+    openModal("mVersions");
+  } catch(e){ toast(e.message, "err"); }
+}
+function pickVersion() {
+  const r = verList[+$("vs_select").value];
+  if (!r) return;
+  $("vs_url").value = r.url || ""; $("vs_sha").value = r.sha256 || "";
+  if (!r.url) $("vs_url").placeholder = `将按官方地址自动下载 ${r.tag}`;
+}
+async function confirmVersionUpdate() {
+  const comp = $("vs_component").textContent;
+  const ver = verList[+$("vs_select").value]?.tag || "";
+  const url = $("vs_url").value;
+  if (!ver && !url) { toast("请选择版本或填写 URL", "warn"); return; }
+  const isPanel = comp === "panel";
+  const action = verInstallMode ? "安装" : "更新";
+  if (!(await ask(action + " " + comp,
+    verInstallMode
+      ? `确认下载 ${comp} ${ver || "指定版本"} 并安装到面板专用目录（data/bin/${comp}/）？\n不触碰系统里其他服务使用的二进制。`
+      : `确认把 ${comp} ${ver ? "更新/降级到 " + ver : "更新到指定 URL 版本"}？\n全程安全保护：验证 → 校验 → 备份 → 替换 → 健康检查，失败自动回滚。`))) return;
+  $("vs_confirm").disabled = true;
+  toast(verInstallMode ? "下载与安装中，请稍候…" : "下载与更新中，请稍候（视网络可能需要 1-3 分钟）…", "info");
+  try {
+    if (isPanel) {
+      await req("/api/self-update", { method:"POST", body:{ url, sha256:$("vs_sha").value } });
+      closeModal("mVersions");
+      toast("更新完成，面板重启中，5 秒后刷新页面");
+      setTimeout(() => location.reload(), 5000);
+    } else {
+      const j = await req("/api/cores/" + comp + "/update", { method:"POST", body:{ version: url ? "" : ver, url, sha256:$("vs_sha").value } });
+      closeModal("mVersions");
+      toast(j.installed
+        ? `${comp} ${j.version} 已安装到面板专用目录（${j.target}），在「设置」中即可看到路径`
+        : `${comp} 已更新：${j.version}${j.restarted ? "，进程已重启且健康检查通过" : ""}`, "ok");
+      loadComponents(); loadStatus();
+    }
+  } catch(e){ toast(e.message, "err"); $("vs_confirm").disabled = false; }
+}
+
+async function panelRollbackDlg() {
+  try {
+    const j = await req("/api/panel/backups");
+    const all = [...(j.backups||[])];
+    const opts = all.map(b=>`<option>${b}</option>`).join("")
+      + (j.bak_exists ? `<option value="__bak__">${"(最近一次自更新备份) *.bak"}</option>` : "");
+    if (!opts) { toast("暂无历史备份（更新过才会有）", "warn"); return; }
+    $("rb_select").innerHTML = opts;
+    openModal("mRollback");
+  } catch(e){ toast(e.message, "err"); }
+}
+async function doPanelRollback() {
+  let b = $("rb_select").value;
+  if (!(await ask("回滚面板", `确认回滚到 ${b} 并重启？数据与配置不受影响。`))) return;
+  try {
+    if (b === "__bak__") {
+      // exe.bak 模式：直接用 self-update 的 URL 不适用 —— 后端 panel/rollback 仅支持版本化备份，
+      // exe.bak 通过重启脚本恢复；这里提示用户
+      toast("最近备份请通过恢复 exe.bak 的方式手动还原，或选择版本化备份", "warn");
+      return;
+    }
+    await req("/api/panel/rollback", { method:"POST", body:{ backup:b } });
+    closeModal("mRollback");
+    toast("回滚完成，面板重启中，5 秒后刷新页面");
+    setTimeout(() => location.reload(), 5000);
+  } catch(e){ toast(e.message, "err"); }
+}
+
+async function coreRollbackDlg(comp) {
+  const c = (compData?.cores||[]).find(x=>x.component===comp);
+  const bs = c?.backups || [];
+  if (!bs.length) { toast("暂无备份", "warn"); return; }
+  const pick = prompt(`回滚 ${comp}，可用备份（复制一份粘贴）：\n\n${bs.join("\n")}\n\n输入要恢复的备份名：`);
+  if (!pick) return;
+  if (!(await ask("回滚内核", `确认把 ${comp} 回滚到 ${pick}？将自动重启并通过健康检查。`))) return;
+  try {
+    const j = await req("/api/cores/" + comp + "/rollback", { method:"POST", body:{ backup:pick } });
+    toast(`${comp} 已回滚到 ${j.restored}，健康检查通过`, "ok");
+    loadComponents(); loadStatus();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+async function saveUpdateSettings() {
+  try {
+    await req("/api/settings", { method:"PUT", body:{ gh_mirror:$("s_gh_mirror").value, panel_update_index:$("s_panel_index").value } });
+    $("updsetmsg").textContent = "已保存"; setTimeout(()=>$("updsetmsg").textContent="", 2500);
+  } catch(e){ toast(e.message, "err"); }
+}
+async function saveSettings() {
+  const body = { bin_singbox:$("s_binsingbox").value, bin_xray:$("s_binxray").value,
+    bin_mihomo:$("s_binmihomo").value, public_host:$("s_host").value,
+    stats_enabled:$("s_stats").checked?"1":"0", stats_secret:$("s_stats_secret").value,
+    acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
+  if ($("s_pass").value) body.admin_pass = $("s_pass").value;
+  try { await req("/api/settings", { method:"PUT", body }); toast("设置已保存（统计开关需应用后生效）"); }
+  catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 启动 ================= */
+if (TOKEN) {
+  if (DEMO) showApp();
+  else fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
+    .then(r => r.ok ? showApp() : showLogin()).catch(showLogin);
+} else showLogin();
+</script>
+</body>
+</html>

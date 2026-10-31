@@ -1,0 +1,10 @@
+# 构建产物（二进制通过 GitHub Releases 发布，不入库）
+triune-panel
+triune-panel-*
+deploy/triune-panel-linux-*
+data/
+downloads/
+*.bak
+*.update-new
+*.rollback-new
+.DS_Store

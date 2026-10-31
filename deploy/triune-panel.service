@@ -1,0 +1,27 @@
+# Triune Panel systemd 服务单元
+# 安装：
+#   sudo cp triune-panel /opt/triune-panel/triune-panel
+#   sudo cp triune-panel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now triune-panel
+
+[Unit]
+Description=Triune Panel (mihomo/sing-box/xray 管理面板)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# 面板监听 :2087，数据目录 /opt/triune-panel/data
+# 内核二进制建议放 /usr/local/bin/{sing-box,xray,mihomo}，路径在面板"设置"里填
+ExecStart=/opt/triune-panel/triune-panel -addr :2087 -data /opt/triune-panel/data
+Restart=on-failure
+RestartSec=3
+User=root
+LimitNOFILE=65535
+
+# 加固（内核进程由面板 fork，保留网络与进程权限）
+NoNewPrivileges=false
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
