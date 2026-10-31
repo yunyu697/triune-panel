@@ -90,6 +90,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sub/{token}", a.handleSub)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致
+		// "明明升级了，界面还是旧的"。API 走 JSON 不受影响。
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(a.DataDir, "web", "index.html"))
 	})
 	return mux

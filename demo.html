@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- triune-panel-web/v0.8.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -1059,7 +1060,7 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.0-demo",
+    version:"v0.8.1-demo",
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -3408,10 +3409,16 @@ window.addEventListener("resize", () => { if (typeof redrawCharts === "function"
 /* ================= 图表引擎（纯 Canvas，无外部依赖） ================= */
 function chartSetup(cv, h) {
   const dpr = window.devicePixelRatio || 1;
-  const W = Math.max(220, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600);
+  // 先清掉上次的内联宽度，让 clientWidth 反映 CSS（100%）测出的真实容器宽；
+  // 否则窗口变窄后画布永远是旧宽度。旧实现强制最小 220px 且只设 height 不设
+  // width，窄容器（内核状态环/迷你走势图）里 220px 的位图被 CSS 压回 ~100px，
+  // 圆环被水平压缩成竖椭圆——这就是"图表变形"的根因。
+  cv.style.width = "";
+  const W = Math.max(80, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600);
   const H = h || 200;
   cv.width = Math.round(W * dpr);
   cv.height = Math.round(H * dpr);
+  cv.style.width = W + "px";
   cv.style.height = H + "px";
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3446,16 +3453,22 @@ function fmtRate(b) {
 function drawFlowChart(cv, points, tipEl) {
   const { ctx, W, H } = chartSetup(cv, cv.id === "ov_chart" ? 268 : 236);
   if (!points || !points.length) return;
-  const pad = { l: 52, r: 10, t: 14, b: 24 };
-  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const maxV = Math.max(1, ...points.map(p => p.up + p.down));
   const nice = niceCeil(maxV);
   const n = points.length;
-  const step = cw / Math.max(1, n - 1);
   const cUp = cssVar("--chart-up"), cDn = cssVar("--chart-down");
   const cGrid = cssVar("--grid"), cText = cssVar("--muted");
   ctx.font = "11px " + (cssVar("--font") || "sans-serif");
   ctx.textBaseline = "middle";
+
+  // Y 轴刻度先算好并测量最宽标签，动态决定左留白——
+  // 否则 "46.57 GB" 这类长标签会被画布左缘裁掉首位数字，看起来像刻度错乱
+  const tickLabels = [];
+  for (let i = 0; i <= 4; i++) tickLabels.push(fmtBytes(nice * i / 4));
+  let yw = 0; tickLabels.forEach(t => yw = Math.max(yw, ctx.measureText(t).width));
+  const pad = { l: Math.min(W - 120, Math.ceil(yw) + 14), r: 10, t: 14, b: 24 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const step = cw / Math.max(1, n - 1);
 
   // 网格 + Y 轴刻度
   for (let i = 0; i <= 4; i++) {
@@ -3463,7 +3476,7 @@ function drawFlowChart(cv, points, tipEl) {
     ctx.strokeStyle = cGrid; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad.l, y + .5); ctx.lineTo(W - pad.r, y + .5); ctx.stroke();
     ctx.fillStyle = cText; ctx.textAlign = "right";
-    ctx.fillText(fmtBytes(nice * i / 4), pad.l - 8, y);
+    ctx.fillText(tickLabels[i], pad.l - 8, y);
   }
   const X = i => pad.l + step * i;
   const Y = v => pad.t + ch - ch * (v / nice);
@@ -3569,12 +3582,15 @@ function drawLiveChart(cv, hist) {
     ctx.textAlign = "center"; ctx.fillText("等待采样数据…", W / 2, H / 2);
     return;
   }
-  const pad = { l: 44, r: 8, t: 10, b: 16 };
-  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const max = Math.max(1, ...hist.map(h => Math.max(h.up, h.down)));
   const cUp = cssVar("--chart-up"), cDn = cssVar("--chart-down"), cGrid = cssVar("--grid");
   ctx.font = "10px " + (cssVar("--font") || "sans-serif");
   ctx.textBaseline = "middle";
+  // 速率标签动态留白，避免长标签（如 "12.5 MB/s"）被左缘裁切
+  let yw = 0;
+  for (let i = 0; i <= 2; i++) yw = Math.max(yw, ctx.measureText(fmtRate(max * i / 2) + "/s").width);
+  const pad = { l: Math.min(W - 100, Math.ceil(yw) + 12), r: 8, t: 10, b: 16 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   for (let i = 0; i <= 2; i++) {
     const y = pad.t + ch - ch * i / 2;
     ctx.strokeStyle = cGrid; ctx.lineWidth = 1;
