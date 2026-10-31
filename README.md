@@ -5,7 +5,7 @@
 > 下载：[Releases](https://github.com/yunyu697/triune-panel/releases) ·
 > 离线演示：`demo.html`（浏览器直接打开，内置模拟数据，可交互体验全部功能）
 
-## 核心目标：根治 3x-ui 式"升级配置失效"
+## 核心目标：升级 / 变更永不导致配置失效
 
 | 防线 | 机制 |
 |---|---|
