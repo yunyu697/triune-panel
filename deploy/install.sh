@@ -115,7 +115,14 @@ systemctl enable --now "$SERVICE"
 # ---- 健康检查 ----
 sleep 1.5
 if systemctl is-active --quiet "$SERVICE"; then
-  IP=$(curl -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "<服务器IP>")
+  # 访问地址：优先取本机默认路由源 IP（不受系统代理干扰）；
+  # 是内网地址时再探测公网出口 IP（--noproxy 防止代理服务器 IP 混入）。
+  IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="src"){print $(i+1)}}' | head -1)
+  case "$IP" in
+    ""|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*)
+      IP=$(curl --noproxy '*' -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || true) ;;
+  esac
+  [[ -z "$IP" ]] && IP="<服务器IP>"
   echo ""
   echo "✔ Triune Panel 安装并启动成功"
   echo "  访问:      http://$IP:2087"
