@@ -163,11 +163,7 @@ v0.6 已验证：
 curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
 ```
 
-GitHub 直连慢的服务器，加镜像环境变量：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo GH_PROXY=https://ghfast.top bash
-```
+GitHub 直连慢时脚本会**自动依次尝试多个加速镜像**（ghfast.top / gh-proxy.com / ghproxy.net / gh-proxy.net / gh.ddlc.top），无需手动配置；也可指定镜像：`| sudo GH_PROXY=https://ghfast.top bash`。
 
 指定架构：`| sudo bash -s -- arm64`。重复执行即**原地升级**（只替换面板二进制，`/opt/triune-panel/data` 数据原样保留）。
 
@@ -176,6 +172,18 @@ curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/i
 - 访问 `http://<服务器IP>:2087`（默认 `admin/admin`，**立即改密码**）
 - 日志：`journalctl -u triune-panel -f`
 - 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）
+
+### 一键卸载
+
+```bash
+# 默认保留数据目录（可随时重装恢复全部数据）
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+
+# 连数据一起彻底删除（不可恢复）
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash -s -- --purge
+```
+
+卸载会自动停止面板及其托管的内核进程、删除 systemd 服务单元与二进制；交互终端下会二次确认是否删除数据，管道执行默认保留。
 
 ### 手动部署
 

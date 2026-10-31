@@ -8,8 +8,8 @@
 # 指定架构（默认自动检测）:
 #   curl -fsSL .../install.sh | sudo bash -s -- arm64
 #
-# GitHub 直连慢时用镜像（环境变量）:
-#   curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
+# GitHub 直连慢时自动尝试多个加速镜像（ghfast.top / gh-proxy.com 等），
+# 也可手动指定:  curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
 #
 # 离线模式：脚本同目录存在 triune-panel-linux-<arch> 时直接使用，不联网。
 # 升级安全：已有安装时只替换面板二进制，数据目录 /opt/triune-panel/data 原样保留。
@@ -20,6 +20,14 @@ REPO="yunyu697/triune-panel"
 INSTALL_DIR=/opt/triune-panel
 SERVICE=triune-panel.service
 GH_PROXY="${GH_PROXY:-}"
+# 内置 GitHub 加速镜像（依次尝试；GH_PROXY 指定者优先，直连兜底）
+MIRRORS=(
+  "https://ghfast.top/"
+  "https://gh-proxy.com/"
+  "https://ghproxy.net/"
+  "https://gh-proxy.net/"
+  "https://gh.ddlc.top/"
+)
 
 # ---- 架构检测 ----
 ARCH="${1:-}"
@@ -35,13 +43,16 @@ case "$ARCH" in amd64|arm64) ;; *) echo "✘ 架构参数只能是 amd64 或 arm
 BIN_NAME="triune-panel-linux-${ARCH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
-dl() { # dl <输出文件> <完整URL...>  依次尝试：镜像(若设置) → 直连
+dl() { # dl <输出文件> <完整URL...>  依次尝试：GH_PROXY(若设置) → 直连 → 内置镜像列表
   local out="$1"; shift
-  local url
+  local url base
   for url in "$@"; do
-    for base in ${GH_PROXY:+"$GH_PROXY/"} ""; do
-      echo "→ 下载 ${base}${url}"
-      if curl -fL --connect-timeout 8 --retry 2 -o "$out" "${base}${url}" 2>/dev/null; then
+    for base in ${GH_PROXY:+"$GH_PROXY/"} "" "${MIRRORS[@]}"; do
+      echo "→ 下载 ${base:-直连}${url}"
+      # --speed-time/--speed-limit: 15 秒内速度低于 10KB/s 判定失败，切换下一源
+      if curl -fL --connect-timeout 8 --retry 1 \
+           --speed-time 15 --speed-limit 10240 \
+           -o "$out" "${base}${url}" 2>/dev/null; then
         return 0
       fi
     done
@@ -59,7 +70,7 @@ else
   dl "$TMP_BIN" \
      "https://github.com/$REPO/releases/latest/download/$BIN_NAME" \
      "https://raw.githubusercontent.com/$REPO/main/deploy/$BIN_NAME" \
-     || { echo "✘ 下载失败：请检查网络，或设置 GH_PROXY 镜像重试（国内: GH_PROXY=https://ghfast.top）";
+     || { echo "✘ 直连与镜像均下载失败：请检查网络，或设置 GH_PROXY 指定可用镜像重试（如 GH_PROXY=https://ghfast.top）";
           rm -f "$TMP_BIN"; exit 1; }
 fi
 chmod +x "$TMP_BIN"
