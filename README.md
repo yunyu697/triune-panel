@@ -176,11 +176,15 @@ GitHub 直连慢时脚本会**自动依次尝试多个加速镜像**（ghfast.to
 ### 一键卸载
 
 ```bash
-# 默认保留数据目录（可随时重装恢复全部数据）
+# 默认卸载，保留数据目录（可随时重装恢复全部数据）
 curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
 
-# 连数据一起彻底删除（不可恢复）
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash -s -- --purge
+# raw 直连慢时，用加速镜像拉取卸载脚本（任选其一）
+curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash
+
+# 连数据一起彻底删除（不可恢复）：以上任一命令改为 ... | sudo bash -s -- --purge
 ```
 
 卸载会自动停止面板及其托管的内核进程、删除 systemd 服务单元与二进制；交互终端下会二次确认是否删除数据，管道执行默认保留。
