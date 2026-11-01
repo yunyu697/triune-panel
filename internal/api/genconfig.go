@@ -519,7 +519,11 @@ type customSetReq struct {
 }
 
 type genReq struct {
-	Core        string         `json:"core"` // mihomo | singbox
+	Core string `json:"core"` // mihomo | singbox
+	// CoreVersion 仅 sing-box 有意义：1.11 与 1.12+ 的配置结构不兼容，
+	// 必须知道目标版本才能生成正确的 JSON（见 sbversion.go 的实测表）。
+	// mihomo 忽略此字段——它的 url-test / rule-providers 语法各版本稳定。
+	CoreVersion string         `json:"core_version"`
 	Target      string         `json:"target"`
 	InboundIDs  []int64        `json:"inbound_ids"`
 	Scenario    string         `json:"scenario"`
@@ -601,11 +605,31 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 
 	// 解析规则集选择 + 自定义规则集
 	sets, warns := normalizeSets(q)
+
+	// sing-box 必须先定版本：1.11 与 1.12+ 是两套 JSON。
+	ver := defaultSBVersion
+	if q.Core == "singbox" {
+		var err error
+		ver, err = parseSBVersion(q.CoreVersion)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		if !ver.atLeast(minSBVersion.Major, minSBVersion.Minor) {
+			fail(w, 400, fmt.Sprintf(
+				"sing-box %s 不支持：1.10 及以前没有路由 action，配置结构完全不同（block/dns 出站 + inet4_address）。请选 1.11 或更高。", ver))
+			return
+		}
+		if note := versionNote(ver); note != "" {
+			warns = append(warns, "sing-box "+ver.String()+"："+note)
+		}
+	}
+
 	var g *generator
 	if q.Core == "mihomo" {
 		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns)
 	} else {
-		g = genSingbox(q.Target, nodes, sets, q.CustomRules, &warns)
+		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns)
 	}
 
 	var content string
@@ -622,12 +646,19 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	if safeName == "config--" {
 		safeName = "config"
 	}
-	writeJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"filename":     fmt.Sprintf("%s-%s.%s", safeName, q.Core, map[string]string{"mihomo": "yaml", "singbox": "json"}[q.Core]),
 		"content":      content,
 		"content_type": ct,
 		"warnings":     warns,
-	})
+	}
+	// 版本信息回传给前端显示：用户得知道这份配置是给哪个版本写的，
+	// 否则拿 1.14 的 JSON 去喂 1.11 只会得到一句看不懂的 FATAL。
+	if q.Core == "singbox" {
+		resp["core_version"] = ver.String()
+		resp["version_note"] = versionNote(ver)
+	}
+	writeJSON(w, 200, resp)
 }
 
 // ==================== 规则集归一化 ====================
@@ -933,8 +964,24 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 
 // ==================== sing-box 生成器 ====================
 
-func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string) *generator {
+// sbDNSServers DNS 服务器定义。1.12 起是 type+server 的新格式，
+// 1.11 只认 address 字符串；写错一边就是启动 FATAL，所以单独抽出来。
+func sbDNSServers(caps sbCaps) []any {
+	if caps.NewDNSFormat {
+		return []any{
+			map[string]any{"type": "https", "tag": "remote", "server": "8.8.8.8", "detour": "PROXY"},
+			map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5", "detour": "direct"},
+		}
+	}
+	return []any{
+		map[string]any{"tag": "remote", "address": "https://8.8.8.8/dns-query", "detour": "PROXY"},
+		map[string]any{"tag": "local", "address": "223.5.5.5", "detour": "direct"},
+	}
+}
+
+func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string) *generator {
 	router := target != "client"
+	caps := capsFor(ver)
 
 	// DNS 分流需要 geosite-cn（国内域名走本地 DNS）：用户未勾选时自动补充，
 	// 否则 DNS 规则会引用一个不存在的 rule_set 导致 sing-box 启动失败
@@ -952,6 +999,8 @@ func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules [
 			nodeTags = append(nodeTags, o["tag"].(string))
 		}
 	}
+	// 注意：这里必须是 urltest（连写），不是 mihomo 的 url-test。
+	// 两边同名不同写法，混用会让内核在启动时直接报 unknown outbound type。
 	outbounds = append(outbounds,
 		map[string]any{"type": "urltest", "tag": "Auto", "outbounds": toAnySlice(nodeTags),
 			"url": "http://www.gstatic.com/generate_204", "interval": "5m"},
@@ -964,9 +1013,6 @@ func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules [
 	routeRules := []any{
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 	}
-	// 返回规则的出站字段：REJECT 用 action（block 出站已在 1.13 移除）
-	ruleReject := func() map[string]any { return map[string]any{"action": "reject"} }
-	_ = ruleReject
 	outboundOf := func(p string) string {
 		switch p {
 		case "DIRECT":
@@ -1026,24 +1072,25 @@ func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules [
 		dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-private"}, "server": "local"})
 	}
 	dns := map[string]any{
-		// sing-box 1.12+ 新 DNS server 格式（旧 address 格式已在 1.14 移除）
-		"servers": []any{
-			map[string]any{"type": "https", "tag": "remote", "server": "8.8.8.8", "detour": "PROXY"},
-			map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5", "detour": "direct"},
-		},
-		"rules": dnsRules,
-		"final": "remote",
+		"servers": sbDNSServers(caps),
+		"rules":   dnsRules,
+		"final":   "remote",
 	}
 
 	inbounds := []any{}
 	if router {
-		inbounds = append(inbounds, map[string]any{
+		tun := map[string]any{
 			"type": "tun", "tag": "tun-in",
 			"address":      []any{"172.19.0.1/30"},
 			"auto_route":   true,
 			"strict_route": true,
-			"stack":        "mixed",
-		})
+		}
+		// 1.15 起 sing-tun 用自有协议栈，stack 字段废弃（1.17 移除）。
+		// 写了不会报错，但会在日志里刷 deprecated 警告，干净起见直接不写。
+		if caps.TunStack {
+			tun["stack"] = "mixed"
+		}
+		inbounds = append(inbounds, tun)
 	}
 	inbounds = append(inbounds, map[string]any{
 		"type": "mixed", "tag": "mixed-in",
@@ -1051,18 +1098,24 @@ func genSingbox(target string, nodes []*link.Node, sets []normSet, customRules [
 		"listen_port": 7890,
 	})
 
+	route := map[string]any{
+		"rules":                 routeRules,
+		"rule_set":              ruleSets,
+		"final":                 "PROXY",
+		"auto_detect_interface": true,
+	}
+	// 1.12 才有 default_domain_resolver。1.11 写这个字段是 unknown field，
+	// 直接 FATAL——这是实测踩到的，不是理论差异。
+	if caps.DomainResolver {
+		route["default_domain_resolver"] = map[string]any{"server": "local"}
+	}
+
 	doc := map[string]any{
 		"log":       map[string]any{"level": map[bool]string{true: "info", false: "warn"}[router], "timestamp": true},
 		"dns":       dns,
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
-		"route": map[string]any{
-			"rules":                   routeRules,
-			"rule_set":                ruleSets,
-			"final":                   "PROXY",
-			"auto_detect_interface":   true,
-			"default_domain_resolver": map[string]any{"server": "local"},
-		},
+		"route":     route,
 	}
 
 	// JSON 无注释；说明放 UI 提示与 README

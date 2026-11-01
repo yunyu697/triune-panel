@@ -102,6 +102,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inbounds/{id}/export", a.write(a.handleInboundExport))
 	mux.HandleFunc("GET /api/export/catalog", a.write(a.handleExportCatalog))
 	mux.HandleFunc("POST /api/export/config", a.write(a.handleExportConfig))
+	// 自检会调用本机内核二进制，属于「能让服务器跑东西」的接口，按 write 档
+	mux.HandleFunc("POST /api/export/verify", a.write(a.handleExportVerify))
 	// 客户端列表：只读账号也放行，但响应是**脱敏副本**（凭据与订阅令牌置空）。
 	// 之前整条挡在 write 档外，代价是只读账号连「谁用了多少流量」都看不到；
 	// 真正敏感的只有那两列，把整页关掉属于用大炮打蚊子。

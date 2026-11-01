@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.9.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -683,6 +683,13 @@ canvas{display:block;width:100%}
             </div>
           </div>
         </div>
+        <div id="g_sbver_wrap" style="margin-top:14px;display:none">
+          <label>sing-box 版本<span class="hint" style="margin-left:8px">决定 DNS 格式与路由字段，选错客户端直接起不来</span></label>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <select id="g_sbver" class="input" style="width:150px" onchange="onSBVerChange()"></select>
+            <span class="muted" id="g_sbver_note" style="font-size:12.5px;flex:1;min-width:240px"></span>
+          </div>
+        </div>
         <p class="muted" id="gen_target_note" style="font-size:12.5px;margin:2px 0 14px"></p>
         <div><label>选择入站（可多选，节点名 = 入站名-用户名）</label>
           <div class="inb-pick" id="gen_inbounds"></div>
@@ -728,8 +735,12 @@ canvas{display:block;width:100%}
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button class="btn primary" onclick="genGenerate()">生成配置</button>
           <button class="btn" id="gen_dl" onclick="genDownload()" disabled>下载文件</button>
+          <button class="btn" id="gen_verify" onclick="genVerify()" disabled
+                  title="用面板上装的内核跑一次官方 check，验证这份配置能不能被加载">用本机内核校验</button>
           <span class="muted" id="gen_fn"></span>
         </div>
+        <p class="muted hide" id="gen_vres" style="font-size:12.5px;margin:10px 0 0"></p>
+        <p class="muted hide" id="gen_check" style="font-size:12.5px;margin:6px 0 0"></p>
         <pre class="log hide" id="gen_out" style="max-height:360px;overflow:auto;margin-top:12px"></pre>
       </div>
     </section>
@@ -3802,7 +3813,12 @@ if (DEMO) {
 async function mockRoute(path, opts) {
   await new Promise(r => setTimeout(r, 220));
   const m = opts.method || "GET";
-  const [, api, rest] = path.match(/\/api\/([^/?]*)(.*)?/) || [];
+  // 注意 (.*)? 在没匹配到内容时给的是 null 而不是 ""：
+  // 旧写法 `const [,api,rest] = ...` 会让 /api/inbounds 这类无子路径的请求
+  // 拿到 rest === null，接着 rest.includes(...) 抛 TypeError。
+  // 因为调用方几乎都 `catch(e){}`，症状是「演示页某块永远空白」，很难查。
+  const mt = path.match(/\/api\/([^/?]*)(.*)?/) || [];
+  const api = mt[1] || "", rest = mt[2] || "";
   const q = Object.fromEntries(new URLSearchParams(path.split("?")[1] || ""));
   if (api === "login") {
     // 演示 TOTP 两步登录：任意账密 → 返回 need_2fa，输入 123456 放行
@@ -4288,6 +4304,18 @@ async function exportInboundDownload(fmt) {
 /* ---- 配置生成器 ---- */
 let genCatalog = null, genPolicies = {}, genResult = null;
 let genCore = "mihomo", genTarget = "client", genScenario = "", genChecked = {}, genClosed = {};
+/* sing-box 各版本的配置结构不同，必须让用户明确选。1.11 与 1.12+ 是两套 JSON：
+   1.11 的 DNS 用 address、没有 default_domain_resolver；写错一边内核直接 FATAL。
+   1.12/1.13/1.14 实测配置完全一致，所以不要按「每个版本都不一样」去理解。 */
+const SB_VERS = [
+  { v: "1.11", note: "已停止维护（1.11.15 为最后一版），旧 DNS address 格式" },
+  { v: "1.12", note: "稳定版，配置与 1.13 / 1.14 完全一致" },
+  { v: "1.13", note: "稳定版，配置与 1.12 / 1.14 完全一致" },
+  { v: "1.14", note: "当前最新稳定版" },
+  { v: "1.15", note: "预览版（alpha），不写 tun.stack" },
+  { v: "1.16", note: "尚未发布，按 1.15 的规则生成" }
+];
+let genSBVer = "1.14";
 const GEN_TARGET_NOTES = {
   client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。",
   "main-router": "主路由模式：启用 TUN 接管全机流量 + DNS 劫持 :53 + 流量嗅探，局域网设备零配置；建议先在单设备上验证配置。",
@@ -5930,6 +5958,8 @@ async function loadGen() {
     if (genCatalog) { renderScenarios(); renderSets(); }
   }
   genTargetNote();
+  renderSBVerSelect();
+  syncSBVerVisibility();
 }
 
 function renderScenarios() {
@@ -6043,10 +6073,36 @@ function genTargetNote() {
   $("gen_target_note").textContent = GEN_TARGET_NOTES[genTarget] || "";
 }
 
+/* 版本选择只在 sing-box 下出现：mihomo 的 url-test / rule-providers 语法
+   各版本稳定，不需要让用户在无关的选项上做决定。 */
+function renderSBVerSelect() {
+  const sel = $("g_sbver");
+  sel.innerHTML = SB_VERS.map(o =>
+    `<option value="${o.v}"${o.v === genSBVer ? " selected" : ""}>sing-box ${o.v}</option>`).join("");
+  onSBVerChange();
+}
+function onSBVerChange() {
+  const sel = $("g_sbver");
+  if (sel) genSBVer = sel.value;
+  const cur = SB_VERS.find(o => o.v === genSBVer);
+  $("g_sbver_note").textContent = cur ? cur.note : "";
+  // 换版本后旧结果已失效，避免用户把 1.11 的 JSON 当成 1.14 的下走
+  genResult = null;
+  $("gen_dl").disabled = true;
+  $("gen_verify").disabled = true;
+  $("gen_out").classList.add("hide");
+  $("gen_vres").classList.add("hide");
+  $("gen_check").classList.add("hide");
+}
+function syncSBVerVisibility() {
+  $("g_sbver_wrap").style.display = genCore === "singbox" ? "" : "none";
+}
+
 $("g_core_seg").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   genCore = b.dataset.v;
   [...$("g_core_seg").children].forEach(x => x.classList.toggle("on", x === b));
+  syncSBVerVisibility();
   renderSets(); filterSets();
   if (genScenario) applyScenario(genScenario);
 });
@@ -6071,7 +6127,7 @@ function addCustomSetRow(name, url, beh, pol) {
   if (pol) d.querySelector(".cs-pol").value = pol;
   $("gen_csets").appendChild(d);
 }
-let genLast = null;
+let genLast = null, genLastCore = "singbox";
 async function genGenerate() {
   const core = genCore, target = genTarget;
   const ids = [...document.querySelectorAll("#gen_inbounds input:checked")].map(i => +i.value);
@@ -6085,24 +6141,80 @@ async function genGenerate() {
     policy: r.querySelector(".cs-pol").value
   })).filter(s => s.name && s.url);
   const body = { core, target, inbound_ids: ids, scenario: genScenario || "custom", sets, custom_rules, custom_sets };
+  if (core === "singbox") body.core_version = genSBVer;
   toast("生成中…", "info");
   try {
     let j;
     if (DEMO) {
       await new Promise(r => setTimeout(r, 600));
       j = { filename: `demo-${target}-${body.scenario}-${core}.${core === "mihomo" ? "yaml" : "json"}`,
-            content: demoGenConfig(core, target), warnings: [] };
+            content: demoGenConfig(core, target, genSBVer), warnings: [] };
+      if (core === "singbox") {
+        const o = SB_VERS.find(x => x.v === genSBVer);
+        j.core_version = genSBVer;
+        j.version_note = o ? o.note : "";
+      }
     } else {
       j = await req("/api/export/config", { method: "POST", body });
     }
     genLast = j;
+    genLastCore = core;
     $("gen_out").classList.remove("hide");
     $("gen_out").textContent = j.content;
     $("gen_fn").textContent = j.filename;
     $("gen_dl").disabled = false;
+    $("gen_verify").disabled = false;
+    // 新配置还没校验过，先清掉上一次的结论，避免张冠李戴
+    $("gen_check").classList.add("hide");
+    // 版本信息常驻显示，不塞进 toast：用户可能几分钟后才去复制配置，
+    // 那时候得还能看出这份 JSON 是给哪个版本写的。
+    if (j.core_version) {
+      const vres = $("gen_vres");
+      vres.classList.remove("hide");
+      vres.innerHTML = `按 <b>sing-box ${escHtml(j.core_version)}</b> 生成` +
+        (j.version_note ? ` · <span style="color:var(--warn)">${escHtml(j.version_note)}</span>` : "");
+    } else {
+      $("gen_vres").classList.add("hide");
+    }
     (j.warnings || []).forEach(w => toast(w, "warn"));
     if (!(j.warnings || []).length) toast("生成完成：" + j.filename);
   } catch(e){ toast(e.message, "err"); }
+}
+
+/* 用面板上装的内核跑官方 check。这是唯一能证明「这份配置真的能加载」的办法，
+   比任何静态检查都硬。但它校验的是**本机装的版本**，未必等于刚选的版本，
+   所以结果里必须把实际版本打出来，不能让人误以为验的就是客户端那个版本。 */
+async function genVerify() {
+  if (!genLast) return;
+  const core = genLastCore;
+  const box = $("gen_check");
+  box.classList.remove("hide");
+  box.textContent = "校验中…";
+  try {
+    let j;
+    if (DEMO) {
+      await new Promise(r => setTimeout(r, 700));
+      j = { ok: true, core, version: "sing-box version " + genSBVer + "（演示）", skipped: false, output: "" };
+    } else {
+      j = await req("/api/export/verify", { method: "POST", body: { core, content: genLast.content } });
+    }
+    if (j.skipped) {
+      box.innerHTML = `<span style="color:var(--warn)">跳过：${escHtml(j.reason || "面板未配置内核")}</span>`;
+      return;
+    }
+    const who = j.version ? `（${escHtml(j.version)}）` : "";
+    if (j.ok) {
+      box.innerHTML = `<span style="color:var(--ok)">✓ 内核校验通过</span>${who}` +
+        ` <span class="muted">· 只验证能否加载，不联网、不校验节点凭据是否有效</span>`;
+    } else {
+      box.innerHTML = `<span style="color:var(--err)">✗ 内核拒绝这份配置</span>${who}`;
+      $("gen_out").classList.remove("hide");
+      $("gen_out").textContent = (genLast.content || "") +
+        "\n\n──────── 校验输出 ────────\n" + (j.output || "（无输出）");
+    }
+  } catch(e){
+    box.innerHTML = `<span style="color:var(--err)">校验失败：${escHtml(e.message)}</span>`;
+  }
 }
 function genDownload() {
   if (!genLast) return;
@@ -6112,7 +6224,7 @@ function genDownload() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
-function demoGenConfig(core, target) {
+function demoGenConfig(core, target, ver) {
   if (core === "mihomo") return `# Triune Panel 生成 | mihomo | ${target}（演示数据）
 mode: rule
 mixed-port: 7890
@@ -6146,16 +6258,57 @@ rule-providers:
 rules:
   - RULE-SET,geosite-cn,DIRECT
   - MATCH,PROXY`;
-  return JSON.stringify({
-    log: { level: "info" },
-    inbounds: [{ type: target === "client" ? "mixed" : "tun", tag: "in" }],
-    outbounds: [
-      { type: "selector", tag: "PROXY", outbounds: ["Auto", "demo-hk-user1"] },
-      { type: "vless", tag: "demo-hk-user1", server: "demo.example.com", server_port: 443,
-        uuid: "a1b2c3d4-1111-2222-3333-444455556666", tls: { enabled: true } }
+
+  /* 演示数据也按版本走真实分支，否则用户切到 1.11 看到的仍是 1.14 的写法，
+     演示页就失去了「先看一眼长什么样」的意义。 */
+  const [maj, min] = String(ver || "1.14").split(".").map(Number);
+  const geq = (a, b) => maj > a || (maj === a && min >= b);
+  const newDNS = geq(1, 12), noStack = geq(1, 15);
+  const router = target !== "client";
+
+  const dnsServers = newDNS
+    ? [{ type: "https", tag: "remote", server: "8.8.8.8", detour: "PROXY" },
+       { type: "udp", tag: "local", server: "223.5.5.5", detour: "direct" }]
+    : [{ tag: "remote", address: "https://8.8.8.8/dns-query", detour: "PROXY" },
+       { tag: "local", address: "223.5.5.5", detour: "direct" }];
+
+  const inbounds = [];
+  if (router) {
+    const tun = { type: "tun", tag: "tun-in", address: ["172.19.0.1/30"], auto_route: true, strict_route: true };
+    if (!noStack) tun.stack = "mixed";   // 1.15 起该字段废弃
+    inbounds.push(tun);
+  }
+  inbounds.push({ type: "mixed", tag: "mixed-in", listen: router ? "0.0.0.0" : "127.0.0.1", listen_port: 7890 });
+
+  const route = {
+    rules: [
+      { protocol: "dns", action: "hijack-dns" },
+      { rule_set: ["geosite-cn"], outbound: "direct" },
+      { ip_cidr: ["192.168.0.0/16", "10.0.0.0/8"], outbound: "direct" }
     ],
-    route: { rules: [{ rule_set: ["geosite-cn"], outbound: "direct" }], final: "PROXY" },
-    "_note": `演示数据 | ${target}`
+    rule_set: [{
+      type: "remote", tag: "geosite-cn", format: "binary",
+      url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+      download_detour: "direct", update_interval: "86400s"
+    }],
+    final: "PROXY",
+    auto_detect_interface: true
+  };
+  if (newDNS) route.default_domain_resolver = { server: "local" };
+
+  return JSON.stringify({
+    log: { level: "info", timestamp: true },
+    dns: { servers: dnsServers, rules: [{ rule_set: ["geosite-cn"], server: "local" }], final: "remote" },
+    inbounds,
+    outbounds: [
+      { type: "urltest", tag: "Auto", outbounds: ["demo-hk-user1"],
+        url: "http://www.gstatic.com/generate_204", interval: "5m" },
+      { type: "selector", tag: "PROXY", outbounds: ["Auto", "demo-hk-user1"], default: "Auto" },
+      { type: "vless", tag: "demo-hk-user1", server: "demo.example.com", server_port: 443,
+        uuid: "a1b2c3d4-1111-2222-3333-444455556666", tls: { enabled: true } },
+      { type: "direct", tag: "direct" }
+    ],
+    route
   }, null, 2);
 }
 
