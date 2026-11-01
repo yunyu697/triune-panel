@@ -210,10 +210,15 @@ body[data-role="admin"] .need-owner{display:none!important}
 .card h3{font-size:15px;font-weight:650;margin-bottom:15px;display:flex;align-items:center;gap:9px;letter-spacing:.2px}
 .card h3 .spacer{flex:1}
 .card h3 .hint{font-size:11.5px;font-weight:400;color:var(--muted)}
-/* 设置页分组条 */
-.set-tabs{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+/* 设置页分组条：钉在顶栏下面，卡片从它底下滚过去。
+   顶栏本身是 sticky 的，高度随字号/窄屏换行会变，所以 top 用 JS 量出来
+   的 --topbar-h，别写死像素。背景用 --bg 与页面同色，滚过去的内容才被
+   盖住而不留一条缝。 */
+.set-tabs{position:sticky;top:var(--topbar-h,74px);z-index:12;display:flex;align-items:center;gap:16px;
+  flex-wrap:wrap;margin:0 0 18px;padding:12px 0 14px;background:var(--bg);
+  box-shadow:0 14px 18px -20px rgba(0,0,0,.55)}
 .set-tabs[hidden]{display:none}
-.set-tabs-hint{font-size:12.5px}
+.set-tabs-hint{font-size:13px;line-height:1.5;flex:1;min-width:200px}
 .card[hidden]{display:none}
 /* 卡片底部操作条：把「保存」这类按钮和上方的说明文字隔开 */
 .card-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -371,6 +376,20 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .tag-chip .x:hover{opacity:1;color:var(--err)}
 .tag-empty{font-size:12.5px;color:var(--muted)}
 .seg.sm button{padding:3px 9px;font-size:12px}
+/* 大号分段控件：设置页分组用。图标 + 文字、15px、44px 高，
+   比 .seg 的 13px/28px 明显一档，远看也能认出当前在哪一组。
+   放在 .seg 之后：两者选择器权重相同，靠源序覆盖基础尺寸。 */
+.seg-lg{padding:5px;gap:5px;border-radius:15px}
+.seg-lg button{display:inline-flex;align-items:center;gap:9px;font-size:15px;font-weight:600;
+  padding:11px 22px;border-radius:11px;letter-spacing:.3px}
+.seg-lg button svg{width:17px;height:17px;opacity:.75}
+.seg-lg button:hover svg{opacity:1}
+.seg-lg button.on svg{opacity:1}
+/* 选中态用主色浅底 + 主色描边，不用 .seg 的「白卡片」——
+   深色主题里 --card 比 --hover 还深，白卡片那套会反过来变成「凹进去」。
+   与 .tag-chip.on 的选中语言保持一致。 */
+.seg-lg button.on{background:var(--acc-soft);color:var(--acc-text);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 42%,transparent)}
 
 /* 表格里的小下拉（选安装分支）：外观贴近旁边的 .btn.sm，别做成一个突兀的表单控件 */
 .sel-sm{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;line-height:1.5;width:auto;max-width:104px;
@@ -916,13 +935,23 @@ canvas{display:block;width:100%}
 
     <!-- 设置 -->
     <section id="v-settings" class="view">
-      <!-- 分组：整页十张卡片一屏放不下，按「改什么」切成三组，
-           进来先看常用，其余各归其位。选中的分组记在 localStorage。 -->
+      <!-- 分组：整页十张卡片一屏放不下，按「改什么」切成三组。
+           这条钉在顶栏下面不跟着滚——滚到哪张卡都还能切组。
+           选中的分组记在 localStorage。 -->
       <div class="set-tabs">
-        <div class="seg" id="set_sect_seg">
-          <button type="button" data-sect="common" class="on">常用</button>
-          <button type="button" data-sect="security">安全</button>
-          <button type="button" data-sect="maintain">运维</button>
+        <div class="seg seg-lg" id="set_sect_seg">
+          <button type="button" data-sect="common" class="on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+            <span>常用</span>
+          </button>
+          <button type="button" data-sect="security">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m8.5 11.5 2.5 2.5 4.5-4.5"/></svg>
+            <span>安全</span>
+          </button>
+          <button type="button" data-sect="maintain">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span>运维</span>
+          </button>
         </div>
         <span class="muted set-tabs-hint" id="set_sect_hint"></span>
       </div>
@@ -3899,7 +3928,10 @@ function goto(v) {
   if (v === "overview") setTimeout(loadOverview, 30);
   if (v === "audit") loadAudit();
   if (v === "configs") loadSavedConfigs();
-  if (v === "settings") setTimeout(setSectSaved, 30);
+  if (v === "settings") setTimeout(() => {
+    syncTopbarH();     // 进页面时补量一次：登录前量到的是 0
+    setSectSaved();
+  }, 30);
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -8805,6 +8837,22 @@ let setBarCur = null;
 /* ---- 设置页分组 ----
    整页十张卡片一屏放不下：常用（基础设置 / 通知）、安全（人、密码、登录）、
    运维（证书与更新）。切换只动 [data-sect] 卡片的 hidden，不动数据。 */
+
+/* 分组条钉在顶栏下面，top 要等于顶栏实际高度。顶栏高度随字号、窄屏换行变化，
+   写死像素迟早对不齐，所以量出来塞进 --topbar-h。 */
+function syncTopbarH() {
+  const tb = document.querySelector(".topbar");
+  // 登录页时 #app 是 hide 的，量出来是 0——别拿 0 去覆盖，留 CSS 里的兜底值
+  if (!tb || !tb.offsetHeight) return;
+  document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
+}
+syncTopbarH();
+window.addEventListener("resize", syncTopbarH);
+if (window.ResizeObserver) {
+  const tb = document.querySelector(".topbar");
+  if (tb) new ResizeObserver(syncTopbarH).observe(tb);
+}
+
 const SET_SECTS = {
   common:   "内核路径、节点公开地址、统计与通知",
   security: "账号密码、二次验证、登录设备与管理员",
