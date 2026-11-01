@@ -106,3 +106,61 @@ func tags(rels []Release) []string {
 	}
 	return out
 }
+
+// TestComparePrerelease 预发布段必须按 semver 规则比，不能比字符串。
+// 字典序会把 alpha.9 排在 alpha.13 前面（'9' > '1'），v1.0.3 之前
+// 「预发布」分支默认选中的就是 alpha.9 —— 用户看到的第一条不是最新构建。
+func TestComparePrerelease(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"alpha.13", "alpha.9", 1},    // 数值比较：13 > 9
+		{"alpha.9", "alpha.13", -1},   // 反过来
+		{"alpha.10", "alpha.9", 1},    // 10 > 9（字典序会判成 10 < 9）
+		{"alpha.13", "alpha.13", 0},   // 完全相等
+		{"alpha", "alpha.1", -1},      // 段数少的更低
+		{"alpha.1", "alpha.beta", -1}, // 纯数字段低于字母段
+		{"beta.17", "beta.15", 1},
+		{"rc.5", "rc.4", 1},
+	}
+	for _, c := range cases {
+		if got := comparePrerelease(c.a, c.b); got != c.want {
+			t.Errorf("comparePrerelease(%q,%q) = %d，期望 %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// TestSortReleasesAlphaOrdering 真实回归：sing-box 同一版本下一串 alpha，
+// 最新的 alpha.13 必须排在第一条（预发布分支默认选中它）。
+func TestSortReleasesAlphaOrdering(t *testing.T) {
+	rels := []Release{
+		{Tag: "v1.15.0-alpha.9", Prerelease: true},
+		{Tag: "v1.15.0-alpha.13", Prerelease: true},
+		{Tag: "v1.15.0-alpha.1", Prerelease: true},
+		{Tag: "v1.14.4"},
+		{Tag: "v1.14.3"},
+	}
+	sortReleases(rels)
+	want := []string{"v1.15.0-alpha.13", "v1.15.0-alpha.9", "v1.15.0-alpha.1", "v1.14.4", "v1.14.3"}
+	for i := range want {
+		if rels[i].Tag != want[i] {
+			t.Fatalf("排序结果 %v，期望 %v", tags(rels), want)
+		}
+	}
+}
+
+// TestSortReleasesRollingTag 滚动 tag（mihomo 的 Prerelease-Alpha）用
+// updated_at 排序：它的 published_at 停在首次创建，只有资产刷新时间会前进，
+// 只按 published_at 会把最新的 alpha 构建排到列表最末。
+func TestSortReleasesRollingTag(t *testing.T) {
+	rels := []Release{
+		{Tag: "Prerelease-Alpha", Prerelease: true,
+			PublishedAt: "2024-08-12T17:01:02Z", UpdatedAt: "2026-10-30T09:51:01Z"},
+		{Tag: "nightly-20250901", PublishedAt: "2025-09-01T00:00:00Z"},
+	}
+	sortReleases(rels)
+	if rels[0].Tag != "Prerelease-Alpha" {
+		t.Fatalf("滚动 tag 应按 updated_at 排在最前，实际 %v", tags(rels))
+	}
+}

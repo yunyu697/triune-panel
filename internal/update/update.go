@@ -42,6 +42,17 @@ type Release struct {
 	AssetURLs   map[string]string `json:"-"`
 	Prerelease  bool              `json:"prerelease"`             // 预发布（alpha/beta/rc）
 	PublishedAt string            `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
+	// UpdatedAt 资产最后一次刷新的时间（滚动 tag 用；普通 release 与 PublishedAt 相同）。
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// stamp 排序兜底用的时间戳：滚动 tag（mihomo Prerelease-Alpha）的
+// published_at 停在首次发布，只有 updated_at 会随新构建前进，取较晚的一个。
+func (r Release) stamp() string {
+	if r.UpdatedAt > r.PublishedAt {
+		return r.UpdatedAt
+	}
+	return r.PublishedAt
 }
 
 // 版本分支：GitHub Releases 是稳定版与预发布混在一起的列表，
@@ -104,6 +115,59 @@ func parseSemver(tag string) (nums [3]int, pre string, ok bool) {
 	return nums, pre, true
 }
 
+// comparePrerelease 按 semver 2.0 规则比较两段预发布标识，返回 1 / 0 / -1。
+//
+// 这里**不能**用字符串比较：字典序里 "alpha.9" > "alpha.13"（'9' > '1'），
+// 版本序里正好相反。v1.0.3 之前 prerelease 段直接比字符串，于是面板把
+// v1.15.0-alpha.9 当成「最新预发布」排在 v1.15.0-alpha.13 前面，
+// 「预发布」分支默认选中的是一个已经过期的构建。
+//
+// 规则（与 semver 规范一致）：
+//   - 按 . 分段逐段比较；
+//   - 两段都是数字 → 按数值比（9 < 13）；
+//   - 数字段 < 字母段（alpha.1 < alpha.beta）；
+//   - 都是字母 → 按 ASCII 比；
+//   - 前缀全等时，段数少的更新（alpha < alpha.1）。
+func comparePrerelease(a, b string) int {
+	if a == b {
+		return 0
+	}
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		x, y := as[i], bs[i]
+		xn, xerr := strconv.Atoi(x)
+		yn, yerr := strconv.Atoi(y)
+		switch {
+		case xerr == nil && yerr == nil:
+			if xn != yn {
+				if xn > yn {
+					return 1
+				}
+				return -1
+			}
+		case xerr == nil: // 纯数字段优先级低于字母/数字混合段
+			return -1
+		case yerr == nil:
+			return 1
+		default:
+			if x != y {
+				if x > y {
+					return 1
+				}
+				return -1
+			}
+		}
+	}
+	switch {
+	case len(as) > len(bs):
+		return 1
+	case len(as) < len(bs):
+		return -1
+	}
+	return 0
+}
+
 // newerThan 报告 a 是否应排在 b 前面（版本号降序）。
 // 同一版本号下正式版优先于预发布（1.15.0 > 1.15.0-alpha.13）。
 func newerThan(a, b Release) bool {
@@ -119,13 +183,15 @@ func newerThan(a, b Release) bool {
 			return ap == ""
 		}
 		if ap != bp {
-			return ap > bp
+			if c := comparePrerelease(ap, bp); c != 0 {
+				return c > 0
+			}
 		}
 	}
 	if aok != bok {
 		return aok
 	}
-	return a.PublishedAt > b.PublishedAt
+	return a.stamp() > b.stamp()
 }
 
 // sortReleases 按版本号降序重排（认不出的 tag 退化为按发布时间）。
@@ -142,7 +208,11 @@ type ghReleases []struct {
 	Draft       bool   `json:"draft"`
 	Prerelease  bool   `json:"prerelease"`
 	PublishedAt string `json:"published_at"`
-	Assets      []struct {
+	// UpdatedAt 只对「滚动 tag」有意义：mihomo 的 Prerelease-Alpha 是一个
+	// 固定的 tag，每次有新构建就替换资产，published_at 永远停在 2024-08，
+	// 只有 updated_at 会跟着新构建走。排序兜底取两者较晚的一个。
+	UpdatedAt string `json:"updated_at"`
+	Assets    []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -190,6 +260,7 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 			Notes:       r.Body,
 			Prerelease:  r.Prerelease || (ok && pre != ""),
 			PublishedAt: r.PublishedAt,
+			UpdatedAt:   r.UpdatedAt,
 		}
 		for _, a := range r.Assets {
 			rel.Assets = append(rel.Assets, a.Name)
