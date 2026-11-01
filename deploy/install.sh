@@ -101,7 +101,7 @@ if [[ "${1:-}" == "--reset-password" || "${1:-}" == "reset-password" ]]; then
   shift
   RP_BIN="$INSTALL_DIR/triune-panel"
   if [[ ! -x "$RP_BIN" ]]; then
-    echo "✘ 未找到可执行文件 $RP_BIN，请先安装面板（或不带参数运行本脚本）"
+    echo "✘ 未找到可执行文件 ${RP_BIN}，请先安装面板（或不带参数运行本脚本）"
     exit 1
   fi
   if [[ "$(id -u)" -eq 0 ]]; then exec "$RP_BIN" reset-password --data "$INSTALL_DIR/data" "$@"; fi
@@ -168,7 +168,20 @@ fi
 case "$ARCH" in amd64|arm64) ;; *) echo "✘ 架构参数只能是 amd64 或 arm64"; exit 1 ;; esac
 
 BIN_NAME="triune-panel-linux-${ARCH}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+
+# 脚本自身是否是「真实文件」。
+# 管道执行（curl ... | bash）时 BASH_SOURCE 为空、$0=bash，dirname 会落到 "."
+# 再 pwd 出来就是**执行命令时的当前目录**。早前用它判定离线模式，结果只要
+# 当前目录里躺着一个旧的 triune-panel-linux-<arch>，重跑安装就会静默装回旧版本
+# （离线模式没有目标 tag，连版本比对都跳过）。所以离线判定必须区分这两者。
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_IS_FILE=1
+else
+  SCRIPT_DIR="$(pwd)"
+  SCRIPT_IS_FILE=0
+fi
 
 # ============================================================
 # 版本解析：先确定"要装哪个版本"，再按 tag 拼固定 URL。
@@ -305,9 +318,32 @@ dl() { # dl <输出文件> <期望sha256> <完整URL>
 
 # ---- 获取二进制 ----
 TMP_BIN=$(mktemp)
-if [[ -f "$SCRIPT_DIR/$BIN_NAME" ]]; then
-  echo "→ 离线模式：使用本地 $SCRIPT_DIR/$BIN_NAME"
-  cp "$SCRIPT_DIR/$BIN_NAME" "$TMP_BIN"
+
+# 离线模式的判定（见上文 SCRIPT_IS_FILE 的说明）：
+#   · TRIUNE_OFFLINE=1  —— 显式要求离线，找不到包就报错，不偷偷联网
+#   · 脚本是真实文件、且同目录有对应架构的包 —— 即「下载了 install.sh + 二进制」的用法
+#   · 管道执行（curl | bash）一律走在线，**不再**因为当前目录里有同名文件就离线
+OFFLINE_BIN=""
+if [[ "${TRIUNE_OFFLINE:-0}" == "1" ]]; then
+  for cand in "$SCRIPT_DIR/$BIN_NAME" "$(pwd)/$BIN_NAME"; do
+    [[ -f "$cand" ]] && { OFFLINE_BIN="$cand"; break; }
+  done
+  if [[ -z "$OFFLINE_BIN" ]]; then
+    echo ""
+    echo "✘ 指定了 TRIUNE_OFFLINE=1，但没找到 $BIN_NAME"
+    echo "  查找位置: $SCRIPT_DIR/ 与 $(pwd)/"
+    echo "  请把 $BIN_NAME 放到上述目录之一，或去掉 TRIUNE_OFFLINE 走在线安装"
+    echo ""
+    rm -f "$TMP_BIN"; exit 1
+  fi
+elif [[ "$SCRIPT_IS_FILE" -eq 1 && -f "$SCRIPT_DIR/$BIN_NAME" ]]; then
+  OFFLINE_BIN="$SCRIPT_DIR/$BIN_NAME"
+fi
+
+if [[ -n "$OFFLINE_BIN" ]]; then
+  echo "→ 离线模式：使用本地 $OFFLINE_BIN"
+  echo "  ⚠ 离线模式不联网核对最新版本，只保证「不降级」；要装最新版请走在线安装"
+  cp "$OFFLINE_BIN" "$TMP_BIN"
 else
   echo "→ 检测架构: $ARCH"
 
@@ -405,9 +441,52 @@ if [[ -n "$OLD_VER" && -n "$GOT_VER" && "$GOT_VER" != "$OLD_VER" ]]; then
 fi
 
 # ---- 停旧服务（升级场景）----
-if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then
-  echo "→ 检测到已有安装，停止旧服务（数据目录保留）"
-  $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
+# 必须在替换二进制之前确认旧进程真的退出了。
+# 只发 systemctl stop 而不确认的话，旧进程会继续攥着被替换掉的 inode 跑：
+# 磁盘上是新二进制、页面还是旧版本，而脚本后面还会误报「启动成功」。
+UNIT_EXISTS=0
+if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then UNIT_EXISTS=1; fi
+if [[ "$UNIT_EXISTS" -eq 1 ]]; then
+  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    echo "→ 检测到已有安装，停止旧服务（数据目录保留）"
+    $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      systemctl is-active --quiet "$SERVICE" 2>/dev/null || break
+      sleep 1
+    done
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+      echo ""
+      echo "✘ 旧服务没停下来，已中止（否则会装上一个不生效的新版本）"
+      echo "  请手动处理后再重跑："
+      echo "    sudo systemctl stop $SERVICE"
+      echo "    sudo systemctl status $SERVICE --no-pager"
+      echo ""
+      rm -f "$TMP_BIN"; exit 1
+    fi
+  fi
+fi
+
+# 端口仍被占用 = 还有别的进程在服务面板（手动 nohup / screen / 容器 / 别的单元名）。
+# 这种状态下换二进制同样不生效，先把占用者告诉用户，而不是等 systemd 起不来。
+port_listener() {
+  if command -v ss >/dev/null 2>&1; then
+    $SUDO ss -lptnH "sport = :$PANEL_PORT" 2>/dev/null | head -3
+  elif command -v lsof >/dev/null 2>&1; then
+    $SUDO lsof -nP -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -3
+  elif command -v netstat >/dev/null 2>&1; then
+    $SUDO netstat -lptn 2>/dev/null | grep -E "[:.]$PANEL_PORT[[:space:]]" | head -3
+  fi
+}
+LISTENER="$(port_listener || true)"
+if [[ -n "$LISTENER" ]]; then
+  echo ""
+  echo "✘ 端口 $PANEL_PORT 仍被占用，新版本不会生效（旧进程还在服务）"
+  echo "  占用者："
+  printf '%s\n' "$LISTENER" | sed 's/^/    /'
+  echo "  处理：结束该进程后重跑本脚本；若它就是面板本体，"
+  echo "        sudo kill <PID>   或   sudo systemctl stop <它的服务名>"
+  echo ""
+  rm -f "$TMP_BIN"; exit 1
 fi
 
 # ---- 安装目录准备：不存在则创建，存在但不可写则修正属主 ----
@@ -542,7 +621,10 @@ rm -f "$UNIT_TMP"
 # ---- 启停服务（无 systemd 的环境跳过，给出手动启动指引）----
 if command -v systemctl >/dev/null 2>&1; then
   $SUDO systemctl daemon-reload
-  $SUDO systemctl enable --now "$SERVICE"
+  $SUDO systemctl enable "$SERVICE" >/dev/null 2>&1 || true
+  # 用 restart 而不是 enable --now：后者对「已经在运行」的单元是空操作，
+  # 于是升级时会出现「二进制换了、进程没换」。restart 对未运行的单元等价于 start。
+  $SUDO systemctl restart "$SERVICE"
   SERVICE_STARTED=1
 else
   SERVICE_STARTED=0
@@ -721,8 +803,57 @@ else
   echo "→ 未检测到 systemd，跳过每日自动备份（可手动: tar czf backup.tar.gz -C $INSTALL_DIR data）"
 fi
 
-# ---- 健康检查 ----
-sleep 1.5
+# ---- 健康检查：确认「跑起来的」就是刚装的那个版本 ----
+# 光看 systemd 说 active 不够——单元可能是旧进程在撑着（这正是
+# 「更新完打开还是旧版本」的成因）。直接问面板自己：/api/public/info
+# 返回的是**运行中二进制**的 Version，不是磁盘上的文件。
+RUNNING_VER=""
+if [[ "$SERVICE_STARTED" -eq 1 ]]; then
+  _try=0
+  while [[ "$_try" -lt 24 ]]; do
+    if command -v curl >/dev/null 2>&1; then
+      RUNNING_VER=$(curl -s --noproxy '*' --connect-timeout 2 --max-time 3 \
+        "http://127.0.0.1:$PANEL_PORT/api/public/info" 2>/dev/null \
+        | sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1) || true
+      # 没解析出 JSON 字段就当作「还没起来」（返回的是错误页/空串）
+      case "$RUNNING_VER" in ""|*'{'*|*'"'*) RUNNING_VER="" ;; esac
+    fi
+    if [[ -n "$RUNNING_VER" ]]; then break; fi
+    sleep 0.5
+    _try=$((_try + 1))
+  done
+else
+  sleep 1.5
+fi
+
+if [[ "$SERVICE_STARTED" -eq 1 && -n "$GOT_VER" && -n "$RUNNING_VER" && "$RUNNING_VER" != "$GOT_VER" ]]; then
+  PID_NOW=$(systemctl show -p MainPID --value "$SERVICE" 2>/dev/null || true)
+  EXE_NOW=$(readlink "/proc/${PID_NOW}/exe" 2>/dev/null || true)
+  echo ""
+  echo "✘ 版本对不上：已安装 ${GOT_VER}，但正在运行的是 ${RUNNING_VER}"
+  echo "  这说明新二进制已落盘，但旧进程没被换掉（页面会一直显示旧版本）。"
+  echo "  诊断信息："
+  echo "    服务主进程: PID=${PID_NOW:-未知}"
+  case "$EXE_NOW" in
+    *"(deleted)"*) echo "    实际可执行: ${EXE_NOW}  ← 文件已被替换，进程仍在跑旧 inode" ;;
+    "")            echo "    实际可执行: 未知" ;;
+    *)             echo "    实际可执行: ${EXE_NOW}" ;;
+  esac
+  echo "    端口占用:"
+  port_listener | sed 's/^/      /' || true
+  echo "  处理："
+  echo "    sudo systemctl restart $SERVICE"
+  echo "    curl -s --noproxy '*' http://127.0.0.1:$PANEL_PORT/api/public/info"
+  echo "  仍不行请把上面几行贴出来（多半是还有别的进程在服务这个端口）。"
+  echo ""
+  exit 1
+fi
+
+if [[ "$SERVICE_STARTED" -eq 1 && -z "$RUNNING_VER" ]] \
+   && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+  echo "⚠ 装完了，但没能从 /api/public/info 读到运行中版本（curl 不可用或面板未监听 ${PANEL_PORT}）"
+  echo "  请自行核对: curl -s http://127.0.0.1:$PANEL_PORT/api/public/info"
+fi
 
 # 访问地址探测：
 #   1) 先取本机默认路由源 IP（不受系统代理干扰）——云服务器上这通常是内网 IP；
@@ -875,6 +1006,9 @@ if systemctl is-active --quiet "$SERVICE"; then
   echo ""
   echo "✔ Triune Panel 安装并启动成功"
   echo "  已安装版本: $GOT_VER${TAG:+  (目标版本 $TAG)}"
+  if [[ -n "$RUNNING_VER" ]]; then
+    echo "  运行中版本: $RUNNING_VER  （已核对，与磁盘一致）"
+  fi
   if [[ "$LISTEN_MODE" == "local" ]]; then
     echo "  访问:      仅监听 127.0.0.1:${PANEL_PORT}（local 模式，不暴露公网）"
     echo "             本机执行: ssh -L $PANEL_PORT:127.0.0.1:$PANEL_PORT user@server"
