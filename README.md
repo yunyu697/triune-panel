@@ -1,69 +1,243 @@
 # Triune Panel
 
 [![CI](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/yunyu697/triune-panel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/yunyu697/triune-panel)](https://github.com/yunyu697/triune-panel/releases)
 
-三内核（**mihomo / sing-box / xray**）统一管理面板，Go 单二进制 + 内置 Web UI。
+三内核（**mihomo / sing-box / xray**）统一管理面板 —— Go 单二进制 + 内置 Web UI。
+一条命令装完，不需要另配数据库、反向代理或前端构建。
 
-> 下载：[Releases](https://github.com/yunyu697/triune-panel/releases) ·
-> 离线演示：`demo.html`（浏览器直接打开，内置模拟数据，可交互体验全部功能）
-
-## 核心目标：升级 / 变更永不导致配置失效
-
-| 防线 | 机制 |
-|---|---|
-| 1. 意图/产物分离 | 数据库只存"用户意图"（入站、用户、透传字段），运行时配置文件是每次从 DB 渲染的**产物**，面板升级不碰产物 |
-| 2. 应用前强制校验 | 渲染结果先写临时文件，调用内核自带校验（`sing-box check` / `xray run -test` / `mihomo -t`），**失败即终止，运行中配置零改动** |
-| 3. 原子替换 | 校验通过后 `os.Rename` 原子替换，不存在半写状态 |
-| 4. 自动备份 + 回滚 | 每次替换前自动备份到 `data/revisions/<core>/`，一键回滚 |
-| 5. 修订审计 | 每次渲染的完整配置作为 `ConfigRevision` 存 DB，任何变更可追溯 |
-| 6. 迁移只增不删 | schema 版本化、前向兼容；未知字段以 JSON 原样保留，升级不丢数据 |
+> **下载** [Releases](https://github.com/yunyu697/triune-panel/releases) ·
+> **离线演示** [`demo.html`](demo.html)（浏览器直接打开，内置模拟数据，所有功能可点） ·
+> **更新日志** [CHANGELOG.md](CHANGELOG.md) ·
+> **已知限制** [见文末](#已知限制与未验证项)
 
 ## 快速开始
 
-```bash
-# 编译（需 Go 1.23+，国内加速：export GOPROXY=https://goproxy.cn,direct）
-go build -o triune-panel ./cmd/server
-
-# 运行（默认端口 10010；默认账号 admin/admin，首次登录会强制要求修改）
-./triune-panel -addr :10010 -data ./data
-
-# 交叉编译 Linux 服务器
-GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server
-```
-
-1. 登录 → **设置**：填三个内核的二进制路径（未填的内核跳过校验但功能可用）
-2. **入站**：创建入站（默认"停用"，确认无误后启用）
-3. **用户**：创建用户并勾选入站，获得订阅链接 `/sub/<token>`
-4. **应用/修订**：先"预检"（渲染+校验不生效），再"应用"（校验→原子替换→重启内核）
-
-## 忘记密码
-
-面板不提供网页端"找回密码"（那等于把账号入口暴露到公网，而且 SMTP 配置本身就在面板里）。
-忘记密码时在服务器上直接重置——**需要 SSH 权限，这本来就是面板的最高权限**：
+**装到服务器**——自动识别架构、下载二进制、配 systemd、放行防火墙、部署每日备份：
 
 ```bash
-# 方式一：已安装的面板（systemd）
-sudo /opt/triune-panel/triune-panel reset-password
-
-# 方式二：不用记路径，走安装脚本直通
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
-  | sudo bash -s -- --reset-password
-
-# 方式三：自定义密码（避免命令行留下历史，走标准输入）
-echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --password-stdin
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
 ```
 
-默认行为：
+装完访问 `http://<服务器IP>:10010`。**随机管理密码只在安装结束时打印一次**，请立即保存。
+重复执行即原地升级，`/opt/triune-panel/data` 数据原样保留。
+（完整选项：指定架构 / 指定版本 / 仅本机监听 / 自定义目录 → [部署到 VPS](#部署到-vps)）
 
-| 行为 | 说明 |
+**只想先看看界面**——不用装任何东西，直接打开 [`demo.html`](demo.html)。
+
+**本机编译试用**：
+
+```bash
+go build -o triune-panel ./cmd/server            # 需 Go 1.23+；国内加速 export GOPROXY=https://goproxy.cn,direct
+./triune-panel -addr :10010 -data ./data         # 默认账号 admin/admin，首次登录强制改密
+
+GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉编译到服务器
+```
+
+**上手四步**：
+
+1. **设置** → 填三个内核的二进制路径（没装就点「一键安装」，见下）
+2. **入站** → 创建（默认「停用」，确认无误后启用）
+3. **用户** → 建号并勾选入站，拿到订阅链接 `/sub/<token>`
+4. **应用/修订** → 先「预检」（渲染 + 校验但不生效），再「应用」（校验 → 原子替换 → 重启内核）
+
+内核不用自己装：设置里 **一键安装** 会把 sing-box / xray / mihomo 下载到面板专用目录
+`data/bin/<内核>/`，**与系统里现有代理服务的二进制完全隔离**，互不影响。
+
+## 能力一览
+
+| 领域 | 能做什么 |
 |---|---|
-| 生成 16 位随机密码并打印一次 | 字符集去掉 `0O1lI` 等易混淆字符；`--password-stdin` 可自定义 |
-| **同时关闭登录二次验证** | 丢手机和忘密码常是同一场事故，否则改完密码仍进不去；要保留加 `--keep-2fa` |
-| 只影响**超级管理员**账号 | 改的是 `admin_users` 里那条 `owner`；`--user` 可顺带把 owner 改名 |
-| 该账号的会话立即失效 | 密码哈希变化 → 指纹不匹配，旧 token 立刻 401，无需重启；其他管理员不受影响 |
-| 密码以 bcrypt 哈希入库 | v0.8.7 起不再明文存储；旧版遗留的明文密码在下次登录时自动升级 |
+| **入站** | 三内核随时互切 · 协议按内核联动 · 端口自动放行防火墙 · 连通性自检 |
+| **用户** | 配额/到期自动停用 · 三种订阅格式 · 二维码 · 令牌重置 · 批量导出 |
+| **生成** | mihomo / sing-box · sing-box 版本矩阵 · 规则标签 · 本机内核实校 |
+| **保存** | 命名保存（存参数不只存文件）· 随时下载 · 重新生成先比差异 |
+| **安全** | bcrypt · 2FA · 防爆破 · 三角色 RBAC · 会话管理 · 90 天审计 |
+| **观测** | 流量统计与图表 · 实时速率 · Prometheus · 变更通知 · `/healthz` |
+| **运维** | 一键装卸 · `status`/`doctor`/`backup`/`restore` · 备份加密与异地 |
+| **更新** | 面板与三内核任意版本升降 · 14 个镜像可选可测速 · 失败自动回滚 |
 
-> 重置命令直接改 SQLite，**面板可以继续运行**（WAL + busy_timeout），不用停服务。
+## 核心设计：升级 / 变更永不导致配置失效
+
+这是整个面板的第一原则——改配置、升级面板，都不该把正在跑的服务弄挂。
+
+| 防线 | 机制 |
+|---|---|
+| ① 意图/产物分离 | 数据库只存"用户意图"（入站、用户、透传字段），运行时配置文件是每次从 DB 渲染的**产物**，面板升级不碰产物 |
+| ② 应用前强制校验 | 渲染结果先写临时文件，调用内核自带校验（`sing-box check` / `xray run -test` / `mihomo -t`），**失败即终止，运行中配置零改动** |
+| ③ 原子替换 | 校验通过后 `os.Rename` 原子替换，不存在半写状态 |
+| ④ 自动备份 + 回滚 | 每次替换前自动备份到 `data/revisions/<core>/`，一键回滚 |
+| ⑤ 修订审计 | 每次渲染的完整配置作为 `ConfigRevision` 存 DB，任何变更可追溯 |
+| ⑥ 迁移只增不删 | schema 版本化、前向兼容；未知字段以 JSON 原样保留，升级不丢数据 |
+
+## 适用边界（先看这几条）
+
+不想让人装完才发现，所以放在前面。完整 19 条见 [已知限制与未验证项](#已知限制与未验证项)。
+
+- **ACME 真实签发未做端到端验证**：代码路径完整（lego + Let's Encrypt HTTP-01），但开发环境没有公网域名与 80 端口。首次启用 HTTPS 前请按第 1 条自查。
+- **每用户限速做不到**：三个内核都没有这个能力。用量控制请用 `quota_gb`（真会被执行）；要限速只能在内核之外做（`tc` / 上游交换机 / 云厂商带宽上限）。
+- **云厂商安全组不归面板管**：面板只能改本机防火墙（firewalld / ufw / iptables），控制台要自己放行；iptables 规则重启不保留。
+- **会话只存在内存**：面板重启后所有设备要重新登录。这是刻意的——换来「旧 token 不可能残留」。
+- **订阅与导出依赖 `public_host`**：没填就回退成请求的 Host，所以用内网 IP / localhost 访问面板时，生成的节点地址不可用。
+- **CSP 挡不住内联脚本注入**：单文件 UI 有 126 处内联事件，只能开 `'unsafe-inline'`。当前防线是掐死变现路径（`connect-src 'self'`）。
+- **下载镜像与主题列表都会过期**：镜像还可能返回被替换过的文件，要求强保证就填 `sha256` 或干脆走官方地址。
+
+## 目录
+
+**上手**
+
+- [部署到 VPS](#部署到-vps) — 一键部署、镜像自动择优、防「装到旧版本」、权限排错、卸载、手动部署、健康检查
+- [命令行工具](#命令行工具) — `status` / `doctor` / `backup` / `restore`，含 [备份加密](#备份加密) 与 [异地备份](#异地备份可选)
+- [忘记密码](#忘记密码) — 离线重置，不用登面板
+
+**网络与访问**
+
+- [挂在反向代理后面](#挂在反向代理后面nginx--caddy--traefik) — nginx / Caddy / Traefik 下的真实 IP 与防爆破计数
+- [安全响应头](#安全响应头) — CSP、HSTS、点击劫持防护，以及为什么开了 `'unsafe-inline'`
+
+**日常使用**
+
+- [反向导入现有链接](#反向导入现有链接迁移不失效) · [订阅输出](#订阅输出)
+- [配置生成](#配置生成客户端) · [配置管理](#配置管理保存下载重新生成) · [规则标签](#规则标签快捷套用)
+- [界面主题](#界面主题亮暗--色彩方案) · [组件更新与下载镜像](#组件更新与下载镜像)
+
+**协作与可观测**
+
+- [管理员与角色](#管理员与角色) · [登录设备](#登录设备会话管理) · [登出与会话](#登出与会话)
+- [审计日志](#审计日志) · [变更通知](#变更通知邮件--webhook) · [监控指标](#监控指标prometheus)
+
+**参考**
+
+- [已知限制与未验证项](#已知限制与未验证项) · [架构](#架构) · [目录约定](#目录约定) · [版本历史](#版本历史)
+
+## 部署到 VPS
+
+### 一键部署（推荐）
+
+在 VPS 上执行一条命令（自动识别架构，下载二进制，配置 systemd 并启动）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
+```
+
+GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地址 + 多个加速镜像」（ghfast.top / gh-proxy.com / gh-proxy.org / ghproxy.cn / gh-proxy.net / ghproxy.net / gh.ddlc.top / ghproxy.link）统一候选池，运行时对**真实 Release 资产**做 Range 探测（剔除返回 200 + HTML 挑战页的假镜像），自动选择实测最快的源下载，失败自动切换次优，无需手动配置；也可指定镜像跳过探测：`| sudo GH_PROXY=https://ghfast.top bash`。
+
+指定架构：`| sudo bash -s -- arm64`；指定版本：`| sudo bash -s -- amd64 v0.8.0`。重复执行即**原地升级**（只替换面板二进制，`/opt/triune-panel/data` 数据原样保留；已安装版本更高时**拒绝降级**）。
+
+#### 防「装到旧版本」（镜像缓存问题）
+
+加速镜像/CDN 会缓存 `releases/latest` 这条 302 重定向——仓库发了新 Release 后，缓存期内镜像仍会把请求导向旧 tag，于是「装到的还是旧版本」。脚本用三道闸保证版本正确：
+
+1. **先解析真实 tag 再下载**：通过 GitHub API（退路：latest 302 的 Location）解析出最新 tag，按 `releases/download/<tag>/<file>` 不可变 URL 下载，**不使用 `releases/latest/download`**；
+2. **sha256 完整性校验**：从 Release 资产 digest（退路：随 Release 附带的 `sha256sums.txt`）取得期望值，下载后不符即换下一个源——实测有镜像会返回 HTTP 200 但内容是截断文件或 HTML 挑战页，仅凭状态码无法识别；
+3. **版本号终检 + 拒绝降级**：安装前运行 `-version`，必须等于目标 tag；且不得低于已安装版本。
+
+安装成功提示会直接显示**已安装版本**，可立即核对。
+
+安装完成后：
+
+- 访问 `http://<服务器IP>:10010`。**全新安装会自动生成随机管理密码并在安装完成时打印一次**（不再使用默认 admin/admin），请立即保存；首次用默认密码登录时会强制要求修改
+- 端口：面板默认监听 **10010**（安装时可用 `TRIUNE_PANEL_PORT=端口` 覆盖）；
+  安装脚本会自动检测并放行本机防火墙（ufw / firewalld / iptables），
+  **云服务器还需在厂商控制台安全组放行同一端口**（机器内无法代改）
+- 仅本机监听：`TRIUNE_LISTEN=local` 安装后面板只绑定 `127.0.0.1`，不暴露公网，
+  本机 `ssh -L 10010:127.0.0.1:10010 user@server` 后访问 `http://127.0.0.1:10010`
+- 自动备份：安装时自动部署 systemd timer，**每日 03:30 打包数据目录到
+  `backups/`（保留最近 7 份）**；手动备份 `sudo bash /opt/triune-panel/backup.sh`
+- 公网 IP：安装完成时自动探测显示（全部 `--noproxy` 直连探测，绝不会被
+  系统代理污染显示成代理 IP）；探测失败时会给出自查指引
+- 日志：`journalctl -u triune-panel -f`
+- 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）；
+  有域名时建议 **设置 → ACME 证书 → 一键启用 HTTPS**（首次签发前先看[已知限制与未验证项](#已知限制与未验证项)第 1 条）
+
+> 注意：在线安装依赖匿名访问 GitHub，要求仓库为 **Public**；私有仓库所有源（含镜像）都会返回 404，请将仓库设为 Public，或改用「手动部署」离线安装。
+
+#### 权限说明（避免 `Permission denied`）
+
+安装需要写入 `/opt/triune-panel` 与 `/etc/systemd/system`，这两个位置需要 root。脚本已做健壮化处理，**忘记加 `sudo` 也能装**——特权步骤会逐条交给 `sudo` 执行：
+
+```bash
+# 忘记 sudo 也没问题：脚本内部会对写目录/写 systemd/启服务这些动作自动提权
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | bash
+```
+
+常见报错与对应处理：
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `install: cannot create regular file '/opt/triune-panel/triune-panel': Permission denied` | 目录已存在（此前用 root 装过）但当前用户无写权限 | 加 `sudo` 重跑，或让脚本自动提权 |
+| 提示当前用户无写权限、且系统无 `sudo` | rootless 容器 | 用 `TRIUNE_INSTALL_DIR` 装到用户目录 |
+| 提示二进制无法执行 | 架构不匹配 | 显式指定架构：`... \| bash -s -- amd64` |
+
+安装目录可自定义（无需 root，适合 rootless 环境）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
+  | TRIUNE_INSTALL_DIR=~/triune-panel bash
+```
+
+自定义目录时 systemd 单元的 `ExecStart` 会自动跟随实际路径；卸载脚本同样支持 `TRIUNE_INSTALL_DIR`。
+
+### 一键卸载
+
+```bash
+# 首选：安装时卸载脚本已落地在服务器本地，直接执行（无需联网，不受仓库可见性影响）
+sudo bash /opt/triune-panel/uninstall.sh            # 默认卸载，保留数据目录（可随时重装恢复全部数据）
+sudo bash /opt/triune-panel/uninstall.sh --purge    # 连数据一起彻底删除（不可恢复）
+
+# 直通：用安装脚本一行卸载（本地有卸载脚本用本地的，没有则自动在线拉取）
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash -s -- --uninstall
+
+# 备用：本地脚本已丢时在线拉取（原始地址+镜像写在同一条命令里，逐个尝试自动择优）
+for u in \
+  https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://gh-proxy.org/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
+  https://ghproxy.cn/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh; do
+  curl -fsSL "$u" | sudo bash && break
+done
+```
+
+卸载会自动停止面板及其托管的内核进程、删除 systemd 服务单元与二进制；交互终端下会二次确认是否删除数据，管道执行默认保留。
+
+### 手动部署
+
+```bash
+# 1. 下载二进制（或上传本地 deploy/ 目录）
+curl -LO https://github.com/yunyu697/triune-panel/releases/latest/download/triune-panel-linux-amd64
+chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local/bin/triune-panel
+
+# 2. 运行（也可自行编写 systemd unit，参考 deploy/triune-panel.service）
+sudo triune-panel -addr :10010 -data /opt/triune-panel/data
+```
+
+### 健康检查
+
+`GET /healthz` 免认证、极轻量（一次 `SELECT 1`），供 systemd、uptime 监控、
+负载均衡或云厂商健康探针使用：
+
+```bash
+$ curl -s http://127.0.0.1:10010/healthz
+{"db":"ok","status":"ok","time":"2026-10-31T21:20:00+08:00","uptime_sec":3600,"version":"v0.8.8"}
+```
+
+- **200 + `status:ok`**：进程与数据库都正常。
+- **503 + `status:degraded`**：进程活着但数据库打不开（盘满、库被删、权限不对），
+  此时面板的每个接口都会报错，探针应当报警而不是显示健康。
+- 只暴露「是否可用 / 版本号 / 运行时长」，不含任何配置或用户数据；
+  版本号本来就在 `/api/public/info` 公开。
+
+systemd 部署时可在启动后自检一次（可选，`deploy/triune-panel.service` 默认不启用）：
+
+```ini
+[Service]
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do curl -fsS --noproxy "*" http://127.0.0.1:10010/healthz >/dev/null && exit 0; sleep 1; done; exit 1'
+```
+
+外部监控（Uptime Kuma / 云监控 / Prometheus blackbox）直接探 `/healthz`，
+按 HTTP 状态码判活即可，不用带 token。注意 `--noproxy '*'`：本机配了
+`http_proxy` 时 curl 会绕道代理，探活结果会骗人。
 
 ## 命令行工具
 
@@ -74,9 +248,19 @@ triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证�
 triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
 triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase] [--upload REMOTE]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
 triune-panel restore <归档.tar.gz[.age]> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
-triune-panel reset-password      # 见上一节
+triune-panel reset-password      # 见下文「忘记密码」
 triune-panel version
 ```
+
+- **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
+  所以 `sudo triune-panel status` 在任意目录下都能找到 systemd 安装的实例。
+- **`--json`** 便于脚本/监控取值；退出码 `0` 成功、`1` 执行失败、`2` 用法错误
+  （`doctor` 有 `fail` 项时返回 1，可直接接告警）。
+- **刻意不做** `apply` / 切换内核这类命令：内核进程由 daemon 托管，CLI 裸跑会抢端口、
+  让 daemon 的内存状态与磁盘不一致，必须走面板的 API（`/api/apply`、`/api/switch-core`）。
+- **CI**（`.github/workflows/ci.yml`）：每次推送跑 `go vet` + `go test` + 三平台交叉编译
+  + 二进制 `-version` 格式校验（install.sh 靠 `awk '{print $2}'` 取版本做终检，
+  格式一变安装脚本就会误判"装到旧版本"）+ shellcheck 扫 `deploy/` 脚本。
 
 ### 备份与恢复
 
@@ -213,16 +397,34 @@ rclone copy r2:triune-backups/triune-data-20261101-030000.tar.gz.age ./
 sudo triune-panel restore ./triune-data-20261101-030000.tar.gz.age --passphrase-file /etc/triune-panel/backup.pass
 ```
 
+## 忘记密码
 
-- **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
-  所以 `sudo triune-panel status` 在任意目录下都能找到 systemd 安装的实例。
-- **`--json`** 便于脚本/监控取值；退出码 `0` 成功、`1` 执行失败、`2` 用法错误
-  （`doctor` 有 `fail` 项时返回 1，可直接接告警）。
-- **刻意不做** `apply` / 切换内核这类命令：内核进程由 daemon 托管，CLI 裸跑会抢端口、
-  让 daemon 的内存状态与磁盘不一致，必须走面板的 API（`/api/apply`、`/api/switch-core`）。
-- **CI**（`.github/workflows/ci.yml`）：每次推送跑 `go vet` + `go test` + 三平台交叉编译
-  + 二进制 `-version` 格式校验（install.sh 靠 `awk '{print $2}'` 取版本做终检，
-  格式一变安装脚本就会误判"装到旧版本"）+ shellcheck 扫 `deploy/` 脚本。
+面板不提供网页端"找回密码"（那等于把账号入口暴露到公网，而且 SMTP 配置本身就在面板里）。
+忘记密码时在服务器上直接重置——**需要 SSH 权限，这本来就是面板的最高权限**：
+
+```bash
+# 方式一：已安装的面板（systemd）
+sudo /opt/triune-panel/triune-panel reset-password
+
+# 方式二：不用记路径，走安装脚本直通
+curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
+  | sudo bash -s -- --reset-password
+
+# 方式三：自定义密码（避免命令行留下历史，走标准输入）
+echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --password-stdin
+```
+
+默认行为：
+
+| 行为 | 说明 |
+|---|---|
+| 生成 16 位随机密码并打印一次 | 字符集去掉 `0O1lI` 等易混淆字符；`--password-stdin` 可自定义 |
+| **同时关闭登录二次验证** | 丢手机和忘密码常是同一场事故，否则改完密码仍进不去；要保留加 `--keep-2fa` |
+| 只影响**超级管理员**账号 | 改的是 `admin_users` 里那条 `owner`；`--user` 可顺带把 owner 改名 |
+| 该账号的会话立即失效 | 密码哈希变化 → 指纹不匹配，旧 token 立刻 401，无需重启；其他管理员不受影响 |
+| 密码以 bcrypt 哈希入库 | v0.8.7 起不再明文存储；旧版遗留的明文密码在下次登录时自动升级 |
+
+> 重置命令直接改 SQLite，**面板可以继续运行**（WAL + busy_timeout），不用停服务。
 
 ## 挂在反向代理后面（nginx / Caddy / Traefik）
 
@@ -303,263 +505,6 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 
 刻意**不下发** `Cross-Origin-Resource-Policy`：`/sub/<token>` 会被各种订阅客户端
 拉取，其中一些是浏览器里的 Web 面板，CORP 会把它们挡掉，收益小于风险。
-
-## 登出与会话
-
-`POST /api/logout` 会**在服务端销毁会话**（前端登出按钮会先调它再清 localStorage）。
-只清本地存储是假登出——token 在剩余有效期（24 小时）内仍可被任何拿到它的人使用。
-
-会话存在内存里，面板重启即全部失效。改密会让该账号的**密码指纹**变化，
-于是**这个账号**的旧会话立刻失效，其他管理员不受影响
-（这也是密码泄漏后踢掉攻击者会话的手段，代价是这个账号要重新登录）。
-登出只销毁当前这一个会话，同一账号在其他设备上的会话不受影响。登出会记一条审计。
-
-## 登录设备（会话管理）
-
-v0.9.7 起「设置 → 登录设备」能看到当前在线的全部会话，并**挑一台踢掉**。
-在此之前，发现陌生登录只有一条路：改密码——那是霰弹枪，把这个人的所有设备
-连同自己一起打下来，而且看不出到底有几台设备在线。
-
-```
-GET    /api/sessions            列出在线会话
-DELETE /api/sessions/{id}       吊销指定会话
-DELETE /api/sessions            吊销「我」除当前之外的全部会话（退出其他设备）
-```
-
-列表字段：设备（UA 压缩成「Chrome · macOS」「脚本 · Python」这类可读形式，原文放
-`title`）、账号、角色、IP、登录时间、最后活跃、是否当前会话、是否可吊销。
-当前会话置顶，其余按最后活跃倒序——最该被注意的（还在动的）排前面。
-
-几个刻意的设计：
-
-- **凭据永不外发**。对外只有 `id`，它是 `sha256("triune-sid-v1|"+token)` 的前 16 位，
-  吊销时服务端自己算哈希比对。把 token 发给前端，等于给任何能看一眼面板的人
-  一把万能钥匙。
-- **不能踢比自己高的**。`owner` 可踢所有人；`admin` 可踢 `admin` / `viewer`，
-  但**不能踢 `owner`**——否则一个被钓鱼的管理员就能把超级管理员锁在门外，
-  面板直接失去管理能力。自己的会话永远可以踢（「我在外面登录过，全退掉」）。
-- **只读账号只看自己**。`viewer` 调列表只返回自己的会话：别人的登录 IP 和
-  设备本身是情报，不该顺手给出去。但「退出其他设备」对他开放——管自己的登录
-  不是改配置。
-- **改密 / 停用 / 删除账号会顺手清内存**。指纹校验本来就是兜底（旧 token 下一个
-  请求就 401），但内存里留着僵尸会话会让列表撒谎，所以同时清掉，并把
-  「吊销 N 个会话」写进审计详情。
-- **审计留痕**：每次吊销记 `session.revoke`，详情带被踢会话的 sid 前缀、IP 与设备名；
-  越权吊销记 `fail`。审计页的动作筛选里有「登录设备」一档。
-
-```bash
-# 只看不发请求也能核对：会话存在内存，重启面板即清空
-curl -H "Authorization: Bearer $TOKEN" https://panel.example.com/api/sessions
-```
-
-### 登录历史（谁在什么时候从哪来过）
-
-会话表只回答「现在谁还连着」。「上周三凌晨谁从哪个 IP 登录过」得看审计。
-v0.9.8 起同一张设置页里有一张**按人聚合**的表，不用再去审计页翻几百条：
-
-```
-GET /api/login-history?days=7&user=<可选>
-```
-
-每个人一行：成功 / 失败次数、来源 IP、最近一次成功与失败，点「时间线」看逐条记录
-（时间 + 结果 + IP + 说明）。`days` 默认 7，上限 90（审计保留期）。
-
-两条统计口径值得说清楚：
-
-- **来源 IP 只算成功的登录**。失败尝试多半来自扫描器，混进「这个人用过的 IP」里
-  会让人误以为自己的账号被人用过——那是最容易引起恐慌的假信号。
-- **一次最多扫 500 条**审计。超出时返回 `truncated: true`，界面会明说「更早的没统计
-  进来」，而不是假装这就是全部。
-
-`viewer` 只能看到自己的记录，带 `?user=` 也越不了权。
-
-## 管理员与角色
-
-v0.9.6 起面板支持多管理员账号。在这之前只有一个账号（凭据存在 `settings` 里），
-审计日志的「操作人」永远是同一个名字——多人运维只能共享密码，
-出了问题无法追溯到底是谁改的。
-
-| 角色 | 能做什么 |
-|---|---|
-| 超级管理员 `owner` | 全部权限，外加管理管理员账号、清空审计、整面板回滚。**唯一**，不能删除 / 降级 / 停用 |
-| 管理员 `admin` | 入站、用户、应用与回滚、设置、证书、版本更新、导出、审计查看 |
-| 只读 `viewer` | 概览、入站列表、**用户列表（脱敏：无凭据 / 无订阅令牌）**、流量、日志、组件状态、自己的登录设备与登录历史；任何写操作返回 403 |
-
-几个刻意的设计：
-
-- **唯一超级管理员**：`owner` 由数据库迁移播种，接口层不允许新建第二个，也不允许
-  删除 / 降级 / 停用。把最后一个 owner 弄掉，面板就永久失去「管理账号」的能力，
-  只能靠命令行救回来。
-- **账号级密码**：每个账号独立 bcrypt 哈希。改密只让**自己**的会话失效
-  （v0.9.5 及以前是全局 `session_epoch`，A 改密码会把 B 一起踢下线）。
-- **即时生效**：会话每次请求都回库校验「账号还在、还启用、密码哈希没变」。
-  停用或删除一个管理员，他正在用的浏览器下一个请求就 401——不必等 token 过期。
-- **越权留痕**：只读账号调写接口返回 403，并记一条 `rbac.deny` 审计。
-  反复试探权限边界通常不是手滑，不记的话面板上完全看不出来。
-- **脱敏而不是关门**（v0.9.8）：`GET /api/clients` 对 `viewer` 不再 403，而是返回
-  把 `credential` / `sub_token` 置空的副本，并带 `masked: true`。只读账号本来就要
-  盯用量和配额，把整页关掉只会逼人去求管理员截图；真正敏感的只有那两列。
-- **初始密码**：新建账号时密码留空由服务端生成 16 位随机密码，只在创建响应里
-  出现一次；列表接口永远不返回密码哈希与 TOTP 密钥。
-- **2FA 按人**：TOTP 密钥存在账号上，没绑验证器的人登录时**跳过**这一步，
-  不会因为同事绑了 TOTP 就把自己锁在外面；邮箱验证码仍是面板级单收件人。
-
-审计日志因此多了「操作人」列。登录失败时记的是**被尝试的用户名**——
-「有人在猜 alice 的密码」和「有人在猜 root 的密码」是两条不同的线索。
-
-升级兼容：v0.9.5 及以前库里的 `admin_user` / `admin_pass_hash` 由迁移 v4 原样
-搬进 `admin_users` 作为 `owner`，用户名和密码都不变，升级后直接用原账号登录。
-
-```bash
-# 忘记 owner 密码（无需登录，直接改库里的 owner 账号）
-sudo triune-panel reset-password             # 生成随机密码并打印
-sudo triune-panel reset-password --user me   # 顺带把 owner 改名
-```
-
-## 变更通知（邮件 / Webhook）
-
-审计只解决「事后能查」，前提是有人想起来去查。半夜有人把入站端口改成 22、
-给陌生账号加了 100GB 配额，等下次登录才看到就太晚了。v0.9.8 起关键写操作之后
-会推一条摘要出去：**谁、什么时候、改了什么**，设置项还带字段级 diff。
-
-在「设置 → 变更通知」配置：
-
-| 设置项 | 说明 |
-|---|---|
-| `notify_email` | 收件邮箱，留空 = 不发邮件（复用 2FA 里配置的 SMTP 通道） |
-| `notify_webhook` | Webhook 地址，留空 = 不推。POST 一个 JSON，`X-Triune-Event: change` |
-| `notify_events` | 订阅哪些事件，逗号分隔；留空 = 默认集合 |
-
-默认集合是 `settings,inbound,client,admin,apply,session`——**刻意不含 `login`**：
-登录本来就频繁，失败尝试又有防爆破兜底，把它也推出去收件箱很快就没人看了。
-
-Webhook 报文长这样：
-
-```json
-{
-  "panel": "panel.example.com",
-  "version": "v0.9.8",
-  "time": "2026-11-01 03:55:48",
-  "event": {
-    "actor": "admin",
-    "action": "settings.update",
-    "target": "public_host,smtp_pass",
-    "detail": "修改设置",
-    "diff": [
-      "public_host: (空) → panel.example.com",
-      "smtp_pass: 已变更（不显示值）"
-    ]
-  }
-}
-```
-
-三条设计约束：
-
-- **绝不阻塞主操作**。通知走 goroutine，8 秒超时，失败只打日志——推送服务挂了
-  不该让人连「改个设置」都失败。
-- **敏感值打码**。判定是「键名包含 `pass` / `secret` / `token` / `key`」而不是白名单：
-  将来加个 `smtp_xxx_pass` 之类的新键，忘了登记白名单就会把密钥发到邮箱里。
-  凭据与订阅令牌同理，只报「已更换」。
-- **diff 只比关键字段**。入站比名称/内核/协议/端口/传输/TLS/启用/草稿，用户比
-  名称/配额/到期/启用；`settings` 全文太长且含凭据，整段塞进邮件没人看。
-
-「发送测试」会**同步**投递一条并把错误原样返回（`{"ok":false,"errors":[...]}`）：
-配了 Webhook 却因为地址写错一直静默失败，比没有这个功能更糟。
-
-## 监控指标（Prometheus）
-
-面板内置 `/metrics`，输出 Prometheus 文本格式。**默认关闭**——没配令牌就返回 403，
-升级不会凭空多出一个「知道地址就能看用户列表和流量」的接口。
-
-在「设置 → 基础设置 → 指标访问令牌」点「生成」（24 字节随机数 → 48 位十六进制），
-保存后即生效：
-
-```bash
-curl -H "Authorization: Bearer <令牌>" http://127.0.0.1:10010/metrics
-```
-
-Prometheus 侧：
-
-```yaml
-scrape_configs:
-  - job_name: triune-panel
-    scrape_interval: 30s
-    static_configs:
-      - targets: ["panel.example.com:10010"]
-    authorization:
-      type: Bearer
-      credentials_file: /etc/prometheus/triune-metrics.token   # 内容就是那个令牌
-```
-
-也接受 `?token=<令牌>`（有些采集器不方便加 header），但 query 更容易出现在
-访问日志里，优先用 header。
-
-### 指标一览
-
-| 指标 | 类型 | 说明 |
-|---|---|---|
-| `triune_up` | gauge | 进程存活，恒为 1 |
-| `triune_build_info{version,go_version}` | gauge | 构建信息 |
-| `triune_uptime_seconds` | gauge | 运行时长 |
-| `triune_db_up` | gauge | 数据库可查询（1=正常） |
-| `triune_go_goroutines` / `triune_go_heap_alloc_bytes` | gauge | 排查 goroutine 泄漏与内存增长 |
-| `triune_clients_total{enabled}` | gauge | 用户数 |
-| `triune_inbounds_total{core,enabled}` | gauge | 入站数（草稿计入 `enabled="false"`） |
-| `triune_core_running{core}` | gauge | 内核进程是否在跑 |
-| `triune_client_enabled{client}` | gauge | 单用户是否启用 |
-| `triune_client_traffic_bytes{client,direction}` | counter | 单用户累计上下行 |
-| `triune_client_quota_bytes{client}` | gauge | 单用户配额（0=不限量） |
-| `triune_client_expires_timestamp_seconds{client}` | gauge | 到期时间（仅设置了到期的用户） |
-| `triune_cert_expiry_timestamp_seconds{domain}` / `triune_cert_valid{domain}` | gauge | 证书到期与是否有效 |
-| `triune_traffic_up_bytes_per_second` / `triune_traffic_down_bytes_per_second` | gauge | 最近一个采样周期的总速率 |
-
-几条常用告警：
-
-```yaml
-- alert: TriunePanelDown
-  expr: triune_up == 0
-  for: 2m
-- alert: TriuneCertExpiringSoon
-  expr: (triune_cert_expiry_timestamp_seconds - time()) < 14 * 86400
-- alert: TriuneClientQuotaAlmostFull
-  expr: triune_client_traffic_bytes{job="triune-panel"} / on(client) triune_client_quota_bytes > 0.9
-```
-
-### 两个注意点
-
-- **标签值会转义**。用户名字由你输入，`"` `\` 换行都会被正确转义——否则一个叫
-  `x"} 1\ntriune_fake 999` 的用户就能往指标里塞任意行，伪造出不存在的序列。
-- **单用户指标是逐用户展开的**，标签基数等于用户数。几百人以内没问题；
-  上千人时建议在 Prometheus 侧用 `metric_relabel_configs` 丢掉
-  `triune_client_*`，只保留聚合指标。
-- 指标里**不含**任何凭据、订阅令牌或设置里的密钥（有测试守着）。
-
-## 审计日志
-
-面板里 **审计** 页记录关键操作，用于事后追查「谁在什么时候动了什么」：
-
-| 类别 | 记录内容 |
-|---|---|
-| 登录 | 成功 / 失败 / 锁定期拒绝 / 账号停用，含**真实来源 IP**（反代下按 `trusted_proxies` 解析） |
-| 账号安全 | 改密（含 CLI `reset-password`）、启用/关闭 2FA、管理员增删改（`admin`） |
-| 会话 | 吊销登录会话（`session.revoke`，含被踢会话的 IP 与设备名，越权吊销记 `fail`） |
-| 权限 | 越权访问被拒（`rbac.deny`，含角色与目标端点） |
-| 配置变更 | 设置项改动（**只记键名不记值**）、入站与用户的增删改、订阅令牌重置 |
-| 发布动作 | 应用配置（成功/失败）、回滚、内核切换、版本更新、数据恢复 |
-
-设计取舍：
-
-- **只记动作，不记值**。`smtp_pass` / `stats_secret` / 密码一旦进日志就等于明文落盘，
-  比不记更糟。审计里的设置条目长这样：`target: public_host,smtp_pass`，
-  只说明改了哪几个键。
-- **按人追溯**。v0.9.6 起 `actor` 是真实登录账号；登录失败记被尝试的用户名，
-  匿名场景记 `anonymous`——不会再出现「所有人都是 admin」这种无法追查的记录。
-- **旁路**。写审计失败只打日志，不会让主操作失败——审计用于追查，不用于拦截。
-- **清空也留痕**。点「清空审计」后列表里会剩一条 `audit.clear`，说明是谁在什么时候清的
-  （该操作仅超级管理员可执行）。
-- **保留 90 天**，面板启动后每 12 小时清理一次过期记录，避免长期运行把库撑大。
-
-接口：`GET /api/audit?prefix=login&result=fail&limit=100&offset=0`、`DELETE /api/audit`（仅 owner）。
 
 ## 反向导入现有链接（迁移不失效）
 
@@ -843,609 +788,262 @@ RFC 5987 的 `filename*=UTF-8''%E5%AE%B6...`。老浏览器用前者，现代浏
 测速接口只接受 `https://github.com/` 开头的地址——它会把 URL 交给十几个第三方
 站点去请求，放开任意地址等于把面板变成公开的探活器。
 
-## 架构
+## 管理员与角色
+
+v0.9.6 起面板支持多管理员账号。在这之前只有一个账号（凭据存在 `settings` 里），
+审计日志的「操作人」永远是同一个名字——多人运维只能共享密码，
+出了问题无法追溯到底是谁改的。
+
+| 角色 | 能做什么 |
+|---|---|
+| 超级管理员 `owner` | 全部权限，外加管理管理员账号、清空审计、整面板回滚。**唯一**，不能删除 / 降级 / 停用 |
+| 管理员 `admin` | 入站、用户、应用与回滚、设置、证书、版本更新、导出、审计查看 |
+| 只读 `viewer` | 概览、入站列表、**用户列表（脱敏：无凭据 / 无订阅令牌）**、流量、日志、组件状态、自己的登录设备与登录历史；任何写操作返回 403 |
+
+几个刻意的设计：
+
+- **唯一超级管理员**：`owner` 由数据库迁移播种，接口层不允许新建第二个，也不允许
+  删除 / 降级 / 停用。把最后一个 owner 弄掉，面板就永久失去「管理账号」的能力，
+  只能靠命令行救回来。
+- **账号级密码**：每个账号独立 bcrypt 哈希。改密只让**自己**的会话失效
+  （v0.9.5 及以前是全局 `session_epoch`，A 改密码会把 B 一起踢下线）。
+- **即时生效**：会话每次请求都回库校验「账号还在、还启用、密码哈希没变」。
+  停用或删除一个管理员，他正在用的浏览器下一个请求就 401——不必等 token 过期。
+- **越权留痕**：只读账号调写接口返回 403，并记一条 `rbac.deny` 审计。
+  反复试探权限边界通常不是手滑，不记的话面板上完全看不出来。
+- **脱敏而不是关门**（v0.9.8）：`GET /api/clients` 对 `viewer` 不再 403，而是返回
+  把 `credential` / `sub_token` 置空的副本，并带 `masked: true`。只读账号本来就要
+  盯用量和配额，把整页关掉只会逼人去求管理员截图；真正敏感的只有那两列。
+- **初始密码**：新建账号时密码留空由服务端生成 16 位随机密码，只在创建响应里
+  出现一次；列表接口永远不返回密码哈希与 TOTP 密钥。
+- **2FA 按人**：TOTP 密钥存在账号上，没绑验证器的人登录时**跳过**这一步，
+  不会因为同事绑了 TOTP 就把自己锁在外面；邮箱验证码仍是面板级单收件人。
+
+审计日志因此多了「操作人」列。登录失败时记的是**被尝试的用户名**——
+「有人在猜 alice 的密码」和「有人在猜 root 的密码」是两条不同的线索。
+
+升级兼容：v0.9.5 及以前库里的 `admin_user` / `admin_pass_hash` 由迁移 v4 原样
+搬进 `admin_users` 作为 `owner`，用户名和密码都不变，升级后直接用原账号登录。
+
+```bash
+# 忘记 owner 密码（无需登录，直接改库里的 owner 账号）
+sudo triune-panel reset-password             # 生成随机密码并打印
+sudo triune-panel reset-password --user me   # 顺带把 owner 改名
+```
+
+## 登录设备（会话管理）
+
+v0.9.7 起「设置 → 登录设备」能看到当前在线的全部会话，并**挑一台踢掉**。
+在此之前，发现陌生登录只有一条路：改密码——那是霰弹枪，把这个人的所有设备
+连同自己一起打下来，而且看不出到底有几台设备在线。
 
 ```
-cmd/server          入口（flag: -addr -data）
-internal/model      数据模型（Inbound/Client/ExternalNode/ConfigRevision）
-internal/store      SQLite（modernc 纯 Go 驱动）+ 版本化迁移
-internal/core       内核抽象 Core 接口 + 渲染流水线（校验→原子替换→备份）
-  ├─ singbox        sing-box renderer
-  ├─ xray           xray renderer
-  └─ mihomo         mihomo renderer（listeners 模式，vless 入站不支持会明确报错）
-internal/link       分享链接反向解析 + 订阅导出（vless/vmess/trojan/ss/hy2/tuic）
-internal/proc       内核进程 supervisor（启停/重启/日志）
-internal/api        HTTP API + 订阅服务
-internal/webui      go:embed 内置单页 UI（data/web/index.html 可覆盖）
+GET    /api/sessions            列出在线会话
+DELETE /api/sessions/{id}       吊销指定会话
+DELETE /api/sessions            吊销「我」除当前之外的全部会话（退出其他设备）
 ```
 
-## 目录约定
+列表字段：设备（UA 压缩成「Chrome · macOS」「脚本 · Python」这类可读形式，原文放
+`title`）、账号、角色、IP、登录时间、最后活跃、是否当前会话、是否可吊销。
+当前会话置顶，其余按最后活跃倒序——最该被注意的（还在动的）排前面。
+
+几个刻意的设计：
+
+- **凭据永不外发**。对外只有 `id`，它是 `sha256("triune-sid-v1|"+token)` 的前 16 位，
+  吊销时服务端自己算哈希比对。把 token 发给前端，等于给任何能看一眼面板的人
+  一把万能钥匙。
+- **不能踢比自己高的**。`owner` 可踢所有人；`admin` 可踢 `admin` / `viewer`，
+  但**不能踢 `owner`**——否则一个被钓鱼的管理员就能把超级管理员锁在门外，
+  面板直接失去管理能力。自己的会话永远可以踢（「我在外面登录过，全退掉」）。
+- **只读账号只看自己**。`viewer` 调列表只返回自己的会话：别人的登录 IP 和
+  设备本身是情报，不该顺手给出去。但「退出其他设备」对他开放——管自己的登录
+  不是改配置。
+- **改密 / 停用 / 删除账号会顺手清内存**。指纹校验本来就是兜底（旧 token 下一个
+  请求就 401），但内存里留着僵尸会话会让列表撒谎，所以同时清掉，并把
+  「吊销 N 个会话」写进审计详情。
+- **审计留痕**：每次吊销记 `session.revoke`，详情带被踢会话的 sid 前缀、IP 与设备名；
+  越权吊销记 `fail`。审计页的动作筛选里有「登录设备」一档。
+
+```bash
+# 只看不发请求也能核对：会话存在内存，重启面板即清空
+curl -H "Authorization: Bearer $TOKEN" https://panel.example.com/api/sessions
+```
+
+### 登录历史（谁在什么时候从哪来过）
+
+会话表只回答「现在谁还连着」。「上周三凌晨谁从哪个 IP 登录过」得看审计。
+v0.9.8 起同一张设置页里有一张**按人聚合**的表，不用再去审计页翻几百条：
 
 ```
-data/
-  triune.db                 真相源（用户意图）
-  cores/<core>/config.*      渲染产物 + 内核日志
-  revisions/<core>/*.bak     每次应用前的自动备份
-  web/index.html             可自定义的前端（覆盖嵌入版）
+GET /api/login-history?days=7&user=<可选>
 ```
 
-## 当前状态与后续计划
+每个人一行：成功 / 失败次数、来源 IP、最近一次成功与失败，点「时间线」看逐条记录
+（时间 + 结果 + IP + 说明）。`days` 默认 7，上限 90（审计保留期）。
 
-MVP 已验证：登录鉴权、入站/用户 CRUD、双模式导入、dry-run 预检、
-真实 sing-box 校验 + 原子应用 + 进程托管、三种订阅输出、修订历史。
+两条统计口径值得说清楚：
 
-v0.2 已验证（按序追加的能力）：
+- **来源 IP 只算成功的登录**。失败尝试多半来自扫描器，混进「这个人用过的 IP」里
+  会让人误以为自己的账号被人用过——那是最容易引起恐慌的假信号。
+- **一次最多扫 500 条**审计。超出时返回 `truncated: true`，界面会明说「更早的没统计
+  进来」，而不是假装这就是全部。
 
-1. **流量统计**：设置中开启统计并 apply 后，渲染注入 sing-box `clash_api` /
-   xray `StatsService`（本地 dokodemo :10085）/ mihomo `external-controller`，
-   后台每 30s 采样每用户上/下行增量，累计进 `traffic_counters`（总量）与
-   `traffic_daily`（按日），订阅 header `subscription-userinfo` 输出真实用量。
-2. **到期/配额自动禁用**：巡检循环发现到期或超配额用户即停用，
-   自动走 apply 流水线重新渲染受影响内核（有校验保护，失败不影响运行配置），
-   并记入修订历史。
-3. **ACME + Reality 工具**：lego 实现 Let's Encrypt HTTP-01 自动签发/续期，
-   证书落盘 `data/certs/<domain>/fullchain.pem + privkey.pem`（签发期间临时占用 :80）；
-   `POST /api/tools/reality-keypair`（调内核 x25519 生成）、`GET /api/tools/uuid`。
-4. **面板自更新**：`POST /api/self-update` 下载新二进制 → 可选 sha256 校验 →
-   备份为 `*.bak` → 原子替换 → `syscall.Exec` 无缝重启；数据/WAL 不受影响。
+`viewer` 只能看到自己的记录，带 `?user=` 也越不了权。
 
-> 注：已修复"schema 版本号未落库导致重启后迁移重跑"的 bug；
-> 迁移执行器对 `ALTER TABLE ADD COLUMN` 做列存在跳过，兼容存量库。
+## 登出与会话
 
-v0.3 已验证：
+`POST /api/logout` 会**在服务端销毁会话**（前端登出按钮会先调它再清 localStorage）。
+只清本地存储是假登出——token 在剩余有效期（24 小时）内仍可被任何拿到它的人使用。
 
-1. **流量图表**：`GET /api/traffic/daily?days=N&client_id=0` 返回补零的按日
-   上/下行序列；流量页内置纯 canvas 柱状图（无外部依赖，离线可用），
-   支持近 7/30/90 天切换；用户表增加配额用量进度条。
-2. **用户管理增强**：支持编辑配额（GB）、到期时间、凭据、关联入站，
-   一键启停；到期/超配额自动禁用联动。
-3. **部署物料**（`deploy/`）：Linux amd64/arm64 静态二进制（CGO 关闭，
-   任何发行版直接跑）、systemd unit、一键安装脚本 `install.sh`。
+会话存在内存里，面板重启即全部失效。改密会让该账号的**密码指纹**变化，
+于是**这个账号**的旧会话立刻失效，其他管理员不受影响
+（这也是密码泄漏后踢掉攻击者会话的手段，代价是这个账号要重新登录）。
+登出只销毁当前这一个会话，同一账号在其他设备上的会话不受影响。登出会记一条审计。
 
-v0.5 已验证：
+## 审计日志
 
-1. **内核随时安全切换**（`POST /api/switch-core`）：已运行的入站可在
-   sing-box / xray / mihomo 之间随时迁移。流程：内存预检（目标内核真实校验，
-   失败即拒、零影响）→ 提交 DB → 停旧内核释放端口 → 标准流水线启动新内核 →
-   健康检查（捕获端口冲突等"校验能过但起不来"的问题）→ 失败**自动回滚**
-   （DB 还原 + 旧内核重启）。切换/回滚全程记入修订历史；支持单入站或批量，
-   支持跨内核并存（原内核仍有入站时自动收缩配置继续运行）。
-   运行中的入站禁止通过普通编辑直接改内核字段，防止绕过安全流程。
-2. **全新 Web UI**：侧边栏布局、8 套主题（浅色/曜石/午夜/森野/玫瑰/暖阳/雾蓝/海盐）、
-   弹窗+Toast 交互、主题感知图表；`demo.html` 为内置模拟数据的离线交互演示。
-3. **全组件更新与任意版本管理**：面板与三个内核二进制均可更新/降级到任意版本
-   （`POST /api/cores/{name}/update`、`POST /api/self-update`）。安全链路：
-   下载（Content-Length 防截断 + 可选 sha256）→ 解压（tar.gz/zip/gz）→
-   新二进制可执行验证 → **用新二进制校验当前配置** → 备份旧版本 →
-   原子替换 → 重启 + 健康检查，任一环节失败**自动回滚**。
-   版本列表来自 GitHub Releases（支持 `gh_mirror` 下载镜像、`gh_api_base` API 镜像）；
-   面板支持版本索引清单 `panel_update_index`；历史版本可随时回滚
-   （`POST /api/cores/{name}/rollback`、`POST /api/panel/rollback`）。
-   v0.12.0 起面板的版本列表**开箱可用**（默认读内置官方仓库，不用先配
-   `panel_repo`），装/更新时还能选下载镜像并一键测速。
+面板里 **审计** 页记录关键操作，用于事后追查「谁在什么时候动了什么」：
 
-v0.6 已验证：
+| 类别 | 记录内容 |
+|---|---|
+| 登录 | 成功 / 失败 / 锁定期拒绝 / 账号停用，含**真实来源 IP**（反代下按 `trusted_proxies` 解析） |
+| 账号安全 | 改密（含 CLI `reset-password`）、启用/关闭 2FA、管理员增删改（`admin`） |
+| 会话 | 吊销登录会话（`session.revoke`，含被踢会话的 IP 与设备名，越权吊销记 `fail`） |
+| 权限 | 越权访问被拒（`rbac.deny`，含角色与目标端点） |
+| 配置变更 | 设置项改动（**只记键名不记值**）、入站与用户的增删改、订阅令牌重置 |
+| 发布动作 | 应用配置（成功/失败）、回滚、内核切换、版本更新、数据恢复 |
 
-1. **登录防爆破**：同一来源连续失败 5 次锁定 10 分钟（HTTP 429 + 明确提示），
-   登录成功自动清零；防暴力破解，锁定期内正确密码同样拒绝。
-2. **ACME 手动签发**：`POST /api/certs/issue` 立即触发签发/续期检查（无需等下一
-   检查周期）；保存 ACME 设置后也自动触发；设置页可查看证书状态与错误详情。
-   同时修复：API 与后台续期循环此前使用两个 certmgr 实例，API 永远查不到证书状态。
-3. **外部节点管理**：导入页新增外部节点列表（协议/地址/导入时间）与删除，
-   删除只影响订阅聚合，不触碰任何运行配置。
-4. **实时速率**：`GET /api/traffic/live` 基于采样差值输出实时上/下行速率，
-   概览页卡片每 10 秒自动刷新。
-5. **修复设置白名单**：`gh_mirror` / `gh_api_base` / `panel_repo` /
-   `panel_update_index` 此前不在 `PUT /api/settings` 白名单中，
-   「保存更新设置」静默无效；现已可正常保存与回显。
-6. **内核一键安装（v0.6.1）**：未配置二进制路径的内核，在
-   「设置 → 组件更新与版本管理」点「一键安装」，自动从官方 Release 下载并
-   安装到**面板专用目录** `data/bin/<内核>/`，路径自动回填设置 —— 与系统里
-   其他服务（如现有代理）使用的二进制完全隔离，互不影响。已实测：全新环境
-   一键安装 sing-box 1.14.4 约 8 秒完成，设置自动回填、版本正确识别。
-   之后该内核的更新/回滚都只作用于这份专用副本。
-   v0.11.0 起安装前可选**分支**（稳定版 / 预发布 / 全部），默认稳定版——
-   GitHub Releases 把 alpha/beta/rc 和正式版混在一张列表里，不区分分支的
-   「装最新」会把 `1.15.0-alpha` 直接装到生产面板上。
-7. **入站导出（v0.6.2）**：入站列表新增「导出」按钮，一键为该入站下所有
-   有效用户生成 `GET /api/inbounds/{id}/export`：分享链接（复制）、
-   Clash/mihomo YAML、sing-box outbounds JSON、入站 JSON（含下载文件名）。
-   多用户节点自动以「入站名-用户名」区分；草稿/停用/过期用户不导出。
-   同时修复未配置节点公开地址时，回退 Host 带面板端口导致链接地址畸形的
-   问题（订阅输出同步受益）。
+设计取舍：
 
-v0.7 已验证：
+- **只记动作，不记值**。`smtp_pass` / `stats_secret` / 密码一旦进日志就等于明文落盘，
+  比不记更糟。审计里的设置条目长这样：`target: public_host,smtp_pass`，
+  只说明改了哪几个键。
+- **按人追溯**。v0.9.6 起 `actor` 是真实登录账号；登录失败记被尝试的用户名，
+  匿名场景记 `anonymous`——不会再出现「所有人都是 admin」这种无法追查的记录。
+- **旁路**。写审计失败只打日志，不会让主操作失败——审计用于追查，不用于拦截。
+- **清空也留痕**。点「清空审计」后列表里会剩一条 `audit.clear`，说明是谁在什么时候清的
+  （该操作仅超级管理员可执行）。
+- **保留 90 天**，面板启动后每 12 小时清理一次过期记录，避免长期运行把库撑大。
 
-1. **配置生成器**（新页面「配置生成」）：多选入站 × 选择目标设备
-   （客户端 / 主路由 / 旁路由）× 场景预设，一键生成可直接使用的
-   mihomo（YAML）或 sing-box（JSON）完整配置。
-   - 目标模板：客户端=混合端口 7890 不启用 TUN；主路由=TUN 接管 +
-     auto-redirect + DNS 劫持 :53 + 嗅探；旁路由=TUN + 局域网监听，
-     设备网关指向本机即可接管
-   - 场景预设（6 种）：均衡日常 / 流媒体优先 / 游戏加速 / AI 服务 /
-     隐私优先 / 国内直连优先，预设自动勾选规则集与策略
-   - 规则集目录（18 个，基于 geosite/geoip 官方数据，自动定期更新），
-     每个规则集可独立选择 DIRECT / PROXY / REJECT 策略
-   - 自定义规则：`类型,值,策略`（DOMAIN/DOMAIN-SUFFIX/DOMAIN-KEYWORD/
-     IP-CIDR/GEOSITE/GEOIP…），GEOSITE/GEOIP 自动挂载对应在线规则集；
-     sing-box 侧自动转换为 domain_suffix / ip_cidr / rule_set / reject
-   - 自定义规则集：远程 URL + behavior + 策略，mihomo 按 .mrs/.yaml/.txt
-     推断格式，sing-box 建议 .srs
-   - 已用真实内核全矩阵校验：mihomo 1.19.33（`mihomo -t`）与
-     sing-box 1.14.4（`sing-box check`）6/6 通过（含 sing-box 1.12+ 新
-     DNS 格式、rule actions、uTLS、default_domain_resolver 等兼容处理）
-2. **修复**：sing-box 订阅/导出中 Reality 出站缺少 uTLS 导致无法初始化。
+接口：`GET /api/audit?prefix=login&result=fail&limit=100&offset=0`、`DELETE /api/audit`（仅 owner）。
 
-v0.8 已验证：
+## 变更通知（邮件 / Webhook）
 
-1. **规则集目录扩容到 107 个**（原 18 个）：覆盖基础分流、广告与隐私、
-   AI 服务、流媒体影音、社交通讯、游戏加速、开发与技术、金融商务、购物电商、
-   办公云服务、教育科研、生活服务共 12 个分组。
-   - 全部条目已对上游真实文件逐个校验（mihomo 侧 MetaCubeX/meta-rules-dat、
-     sing-box 侧 SagerNet/sing-geosite / sing-geoip），共 212 个下载地址全部可达
-   - **修复规则集 URL 拼写错误**：mihomo 应为 `geo/{geosite|geoip}/{name}.mrs`，
-     sing-box 应为 `geosite-{name}.srs` / `geoip-{name}.srs`（此前三种拼法均错位，
-     生成的是 404 链接）
-   - 按内核标注可用性（如 `geoip-private`、`category-porn` 仅 mihomo 上游提供），
-     切换内核时自动置灰并跳过，不会生成无效引用
-2. **场景预设扩容到 23 种**（原 6 种）：均衡日常 / 流媒体优先 / 游戏加速 /
-   AI 服务 / 隐私优先 / 国内直连优先 / 办公协作 / 开发调试 / 学术科研 /
-   金融证券 / 海淘电商 / 社交通讯 / 视频会议 / 低延迟精简 / 纯净拦截 /
-   出海商务 / 回国加速 / 青少年模式 / 音乐听歌 / 动漫追番 / 资讯聚合 /
-   智能家居直连 / 全局代理，每种预设附带说明、规则集与策略，内置自定义规则。
-3. **界面全面重设计**：渐变主色体系（8 套主题各配双色渐变）、玻璃拟态顶栏、
-   分组侧边导航与激活指示条、卡片渐变高光与分层阴影、圆角与排版层次全面提升。
-4. **仪表盘图表**（纯 Canvas 自绘，不依赖任何外部 CDN）：
-   - 近 14 天流量趋势：双序列平滑面积图 + 渐变填充 + 悬停十字线与浮层提示
-   - 实时速率双线滚动曲线 + KPI 卡内迷你趋势线
-   - 用户流量占比环形图（含中心总量）与流量排行榜
-   - 内核运行状态环形指示（运行中 / 待启动 / 未配置）
-   - 流量页柱状图同步升级为同风格面积图，主题切换即时重绘
-5. **配置生成器交互升级**：场景预设改为卡片网格（带分类标签与规则集数量），
-   规则集按分组折叠、显示「可用/总数」并支持关键词搜索，内核与目标改为分段控件。
-6. **修复**：sing-box 生成配置时 DNS 规则引用了未选中的 `geosite-cn` 导致
-   `sing-box check` 直接失败（未勾选时自动补充该规则集用于 DNS 分流）。
-7. **修复**：Reality 公钥此前只写入 `private_key`，导致生成的客户端配置公钥为空、
-   sing-box 校验失败；现兼容 `pbk` / `public_key` / `publicKey` 三种写法，
-   密钥工具也会同步写入 `pbk`。
-8. **已用真实内核全矩阵校验**：mihomo 1.19.33（`mihomo -t`）与
-   sing-box 1.14.4（`sing-box check`）**54/54 通过**（23 场景 × 2 内核、
-   全规则集 107/105 条 × 2 内核、3 种目标设备 × 2 内核）。
-9. **修复安装脚本权限问题**：此前以普通用户重跑安装时，
-   `install: cannot create regular file '/opt/triune-panel/triune-panel': Permission denied`
-   （目录已存在但属主为 root）。现在特权步骤逐条交给 `sudo` 执行，
-   忘记加 `sudo` 也能装；安装失败时输出当前用户 / 目录权限 / 磁盘空间的完整诊断；
-   新增 `TRIUNE_INSTALL_DIR` 自定义安装目录（rootless 环境可用）；
-   二进制不可执行（架构不匹配）时立即中止并提示正确架构。
+审计只解决「事后能查」，前提是有人想起来去查。半夜有人把入站端口改成 22、
+给陌生账号加了 100GB 配额，等下次登录才看到就太晚了。v0.9.8 起关键写操作之后
+会推一条摘要出去：**谁、什么时候、改了什么**，设置项还带字段级 diff。
 
-v0.12.0 已验证：
+在「设置 → 变更通知」配置：
 
-1. **修掉「面板无法获取版本列表」**：未配置 `panel_repo` 时不再 400，
-   落到内置官方仓库。实测空库直接查面板版本列表：`source=default`、21 条、
-   首条 `v0.11.0`，且 `url` 已按当前平台填好
-   （`.../download/v0.11.0/triune-panel-darwin-arm64`）。配了 `panel_repo`
-   则走配置并标 `source=github`。
-2. **下载镜像预设 + 测速**：14 个预设 + 官方地址共 15 个候选，
-   `GET /api/mirrors` 返回，`POST /api/mirrors/test` 并发探测。
-   实测本机：4 个可用（slink.ltd 981ms / gh-proxy.com 1246ms / ghfast.top 1369ms
-   / 官方 2676ms），11 个失败（403 / 429 / 证书过期 / 超时），
-   自动选中 981ms 那个。
-3. **踩了个探针坑并修掉**：最初拿 `github.com/robots.txt` 测，ghfast.top 与
-   gh-proxy.com 全报 403/404（它们只转发 release 路径），会得出「所有镜像都挂了」
-   的相反结论。改成探测真实下载地址（`Range: bytes=0-0` 只取首字节）后同一批
-   镜像全部返回 206。这条写成了单测 `TestProbeOneHitsRealPath`（断言镜像前缀
-   拼法 + Range 头 + 206 判可用）。
-4. **默认官方地址**：每次打开弹窗都重置为官方；测速后只保留可用项，
-   不可用的隐藏并计数提示。
-5. **镜像按次生效**：`mirror` 用指针字段区分「没传 / 传空串 / 传地址」，
-   实测三种语义各自正确；非法地址（缺 `https://`）在下载前就 400。
-6. **测速接口只收 github.com 地址**：`https://evil.example`、`http://github.com`
-   （非 https）、缺 version、面板组件缺 url 全部 400——这个接口会把地址交给
-   十几个第三方站点请求，不能当公开探活器用。
-7. **测试**：新增 10 个用例（镜像 5 + API 5），`internal/api` 覆盖率
-   46.5% → **46.8%**，`internal/update` 13.7% → **21.9%**，`-race` 无竞争。
+| 设置项 | 说明 |
+|---|---|
+| `notify_email` | 收件邮箱，留空 = 不发邮件（复用 2FA 里配置的 SMTP 通道） |
+| `notify_webhook` | Webhook 地址，留空 = 不推。POST 一个 JSON，`X-Triune-Event: change` |
+| `notify_events` | 订阅哪些事件，逗号分隔；留空 = 默认集合 |
 
-v0.11.0 已验证：
+默认集合是 `settings,inbound,client,admin,apply,session`——**刻意不含 `login`**：
+登录本来就频繁，失败尝试又有防爆破兜底，把它也推出去收件箱很快就没人看了。
 
-1. **内核一键安装可选分支**：`GET /api/updates/versions` 新增 `channel`
-   （`all` / `stable` / `prerelease`，默认 `all` 保持旧行为），响应带各分支
-   数量。实测假 GitHub 上 5 条 release（含 1 条草稿、2 条预发布）：
-   `all` 返回 5 条且草稿被丢掉、`stable` 3 条首条为 `v1.15.0`、
-   `prerelease` 2 条首条为 `v1.16.0-rc.1`；未知分支 400。
-2. **真实数据坐实了这个问题**：拿线上 GitHub 跑了一遍 sing-box 的版本列表，
-   首页 30 条里 **22 条是预发布**，`all` 的第一条是 `v1.15.0-alpha.9` ——
-   也就是说改动前的「一键安装」装的就是 alpha。现在默认 `stable`，
-   首条是 `v1.14.4`。mihomo 那边 30 条里只有 1 条预发布，首条 `v1.19.33`。
-2. **预发布不再混进「最新」**：GitHub 按创建时间返回，补丁回填会让第一条
-   不是最高版本，改为按版本号降序重排（`TestSortReleasesByVersion`）。
-   同版本号时正式版优先于 `-rc`。有些仓库发 alpha 不勾 pre-release 标记，
-   所以除 `prerelease` 字段外还从 tag 后缀判定（`TestUpdateVersionsMarksPrereleaseByTag`）。
-3. **前端分支切换在本地过滤**：一次拿全量，切分支不再等网络往返。实测无头
-   浏览器：稳定版 `[v1.10.0, v1.9.7, v1.9.5, v1.8.9]`、预发布
-   `[v1.11.0-alpha.2 · 预发布]`、全部按版本序合并；空分支的按钮自动禁用。
-4. **主题拆成亮暗 × 色彩方案**：8 个一维主题改成 2 模式 × 7 方案（共 14 套
-   调色板）。旧版色块只画一个主色，浅色与曜石看着都是蓝、点下去一个白底一个
-   黑底——这就是「显示的颜色与实际不符」的根因。
-5. **预览色从 CSS 变量实时读**（`getComputedStyle` 探针），预览与真实主题共用
-   一份定义。实测浅色/暗色两种模式下 7 张卡片的迷你界面与 6 个色点均正确，
-   暗色下森林选中态（绿色描边 + ✓）正常。
-6. **老用户配置迁移**：`triune_theme` → `triune_mode` + `triune_scheme`，
-   `LEGACY_THEME` 映射表覆盖全部 8 个旧 id，迁移后删除旧键。
-7. **顺手收拾界面**：「装到面板专用目录，与系统现有二进制隔离」原本挤在组件
-   表格的操作列里，把「一键安装」按钮顶到了表格外（实测被 `overflow-x:auto`
-   裁掉）；移到表格下方「装到哪里」一段，操作列只剩「分支下拉 + 一键安装」。
-   下拉原本被全局 `select{width:100%}` 撑成 182px，加 `width:auto` 后收回。
-8. **测试**：`internal/update` 从 0 个用例到 5 个（tag 解析 / 排序 / 分支过滤 /
-   归一化），`internal/api` 新增 2 个分支用例；覆盖率 46.1% → **46.5%**，
-   `internal/update` 13.7%；全量 `go test ./...` 通过。
+Webhook 报文长这样：
 
-v0.10.0 已验证：
+```json
+{
+  "panel": "panel.example.com",
+  "version": "v0.9.8",
+  "time": "2026-11-01 03:55:48",
+  "event": {
+    "actor": "admin",
+    "action": "settings.update",
+    "target": "public_host,smtp_pass",
+    "detail": "修改设置",
+    "diff": [
+      "public_host: (空) → panel.example.com",
+      "smtp_pass: 已变更（不显示值）"
+    ]
+  }
+}
+```
 
-1. **配置命名保存 + 配置管理页**：生成后点「保存配置」起名入库，
-   **配置管理** 页列出全部记录（名称 / 内核 / 目标 / 大小 / 保存人 / 更新时间 /
-   操作），支持搜索、下载、重新生成、改名、删除，底部显示「共 N 份（上限 200 份）」。
-   实测保存 → 列表 → 详情 → 下载 → 改名 → 删除全链路通，列表按名称排序。
-2. **参数与正文一起存**：`params` 存下当时的全部选择，`content` 存生成结果。
-   重新生成时用 `params` 原样再跑一次，再和新旧内容比对：一致就提示
-   「配置没有变化」，不一致先展示差异让人选「覆盖」还是「另存」。
-   实测只改备注时 `hash` 不变（`c0cfca93d22441a4 → c0cfca93d22441a4`），
-   说明比的是正文不是元信息。
-3. **中文文件名不乱码**：`Content-Disposition` 实测返回
-   `attachment; filename="-.json"; filename*=UTF-8''%E5%AE%B6%E5%AE%BD-...json`，
-   ASCII 回退与 RFC 5987 两套名字都在。前端用 `fetch` 带 `Authorization` 头再
-   `blob()` 落盘——直接 `location.href` 会 401（下载接口同样要鉴权）。
-4. **规则标签：单选替换 / 多选追加**：无头浏览器断言实测
-   `multi lines=5 uniq=5`（两个标签追加、无重复）；取消一个标签后
-   `lines=3 hasCN=false`（只移除该标签独有的行）；单选切换
-   `lines=3 first=DOMAIN-KEYWORD,doubleclick,REJECT`（整段替换）。
-5. **重复行自动去掉**：前端 `dedupeRules` + 服务端 `cleanRuleLines` 各做一遍。
-   实测两行相同的 `DOMAIN-SUFFIX,corp.example.com,DIRECT` 存进去只剩一行
-   （`count=2 rules='DOMAIN-SUFFIX,corp.example.com,DIRECT\nIP-CIDR,10.0.0.0/8,DIRECT'`）。
-   顺手修掉一个真 bug：`dedupeRules` 收到数组时被 `String()` 转成逗号连接的一行，
-   多选两个标签后所有规则挤成一整行——内核解析不了且不报错。
-6. **只读账号拿不到凭据**：`viewer` 访问 `GET /api/configs/1/download` 实测 403，
-   列表接口同样按 `write` 档拦截。配置里有节点密码，这不是「看着不方便」的问题。
-7. **审计照记**：实测审计里出现 `config` / `tag` 两类动作；不进变更通知。
-8. **端到端 40/40**（真实二进制 + 真实 HTTP + 真实文件下载），新增 8 个用例，
-   `internal/api` 覆盖率 44.3% → **46.1%**，`go test -race` 无竞争。
+三条设计约束：
 
-v0.9.9 已验证：
+- **绝不阻塞主操作**。通知走 goroutine，8 秒超时，失败只打日志——推送服务挂了
+  不该让人连「改个设置」都失败。
+- **敏感值打码**。判定是「键名包含 `pass` / `secret` / `token` / `key`」而不是白名单：
+  将来加个 `smtp_xxx_pass` 之类的新键，忘了登记白名单就会把密钥发到邮箱里。
+  凭据与订阅令牌同理，只报「已更换」。
+- **diff 只比关键字段**。入站比名称/内核/协议/端口/传输/TLS/启用/草稿，用户比
+  名称/配额/到期/启用；`settings` 全文太长且含凭据，整段塞进邮件没人看。
 
-1. **sing-box 版本感知生成**：`core_version` 字段 + 能力门限（`capsFor`）。
-   1.11 生成旧 DNS `address` 格式、不写 `default_domain_resolver`；1.12+ 用
-   `type`+`server` 并写 `default_domain_resolver`；1.15+ 不写 `tun.stack`。
-2. **五个真实内核交叉校验**：同一份生成结果分别喂给
-   `sing-box 1.11.15 / 1.12.25 / 1.13.21 / 1.14.4 / 1.15.0-alpha.13`，
-   全部 `check` 通过；`1.10.7` 确认被拒绝（`route.rules[0].action: unknown field`），
-   与「最低支持 1.11」的判定一致。
-3. **1.12 / 1.13 / 1.14 生成的配置逐字节相同**（`TestGenSingboxSameAcrossPatchVersions`）
-   —— 实测推翻了「每个版本都不一样」的直觉，也把门限表钉成了回归测试。
-4. **1.10 及以前明确 400**，错误信息写清原因（没有路由 action，需要另一套模板）；
-   非法版本号同样 400；mihomo 忽略 `core_version` 不报错。
-5. **内核自检**：`POST /api/export/verify` 用面板上的二进制跑官方 check。
-   实测未配置时返回 `skipped: true` + 原因；配置后返回 `ok: true` 与实际版本
-   `sing-box version 1.14.4`；塞入 `{"bogus_key":1}` 时如实返回内核的 FATAL 输出。
-6. **端到端 33/33**（真实二进制 + 真实 HTTP + 真实内核校验），新增 10 个用例，
-   `internal/api` 覆盖率 38.9% → 44.3%，`go test -race` 无竞争。
-7. **修掉一个演示模式的既有 bug**：`mockRoute` 里 `(.*)?` 不参与匹配时给的是
-   `null` 而不是 `""`，`/api/inbounds` 这类无子路径的请求会抛 TypeError。调用方
-   几乎都 `catch(e){}`，症状是「演示页某块永远空白」——生成器页因此一直没有入站
-   可选。改为 `mt[2] || ""` 后恢复正常。
+「发送测试」会**同步**投递一条并把错误原样返回（`{"ok":false,"errors":[...]}`）：
+配了 Webhook 却因为地址写错一直静默失败，比没有这个功能更糟。
 
-v0.9.8 已验证：
+## 监控指标（Prometheus）
 
-1. **只读账号脱敏视图**：`GET /api/clients` 对 `viewer` 从 403 改为返回脱敏副本
-   （`credential` / `sub_token` 置空 + `masked: true`），配额、到期、启用照常可见。
-   实测 viewer 拿到 200 且两列为空串、`masked=true`，POST 仍然 403；前端「用户」
-   页对只读角色隐藏「+ 新增用户」、凭据列渲染为「—」、启用列变成只读徽标。
-2. **登录历史按人聚合**：`GET /api/login-history?days=7` 从审计的 `login` 记录聚合出
-   成功/失败次数、来源 IP、最近成功/失败与逐条时间线。来源 IP 只统计成功登录；
-   一次最多扫 500 条，超出时 `truncated: true`。实测 owner 看到 2 人、viewer 只看
-   自己，带 `?user=admin` 也越不了权；10 天前的记录在 `days=1` 下不出现、`days=30`
-   下出现。
-3. **变更通知**：`notify_email` / `notify_webhook` / `notify_events` 三个设置项，
-   关键写操作后异步推送。实测本地 Webhook 收到 `settings.update`，diff 为
-   `public_host: (空) → panel.example.com` + `smtp_pass: 已变更（不显示值）`，
-   报文里搜不到明文密码；改入站端口收到 `端口: 443 → 22`；订阅改成只含 `inbound`
-   后设置变更不再推送；清空通道后完全静默；`POST /api/notify/test` 在未配置时提示
-   「还没配置任何通道」，上游返回 500 时如实回 `{"ok":false,"errors":["HTTP 500 ..."]}`。
-4. **端到端 28/28 通过**（真实二进制 + 真实 HTTP + 真实 UA + 真实 Webhook 接收端）；
-   新增 13 个用例（脱敏 1 + 登录历史 4 + 通知 8）；`internal/api` 覆盖率 35.8% → 38.9%。
+面板内置 `/metrics`，输出 Prometheus 文本格式。**默认关闭**——没配令牌就返回 403，
+升级不会凭空多出一个「知道地址就能看用户列表和流量」的接口。
 
-v0.9.7 已验证：
+在「设置 → 基础设置 → 指标访问令牌」点「生成」（24 字节随机数 → 48 位十六进制），
+保存后即生效：
 
-1. **登录设备页**：`GET /api/sessions` 列出在线会话（设备 / 账号 / IP / 登录时间 /
-   最后活跃），`DELETE /api/sessions/{id}` 精准踢单个，`DELETE /api/sessions`
-   一键退出自己其余设备。设置页新增「登录设备」卡片，所有角色可见。
-2. **凭据不外发**：对外标识是 `sha256("triune-sid-v1|"+token)[:8]` 的十六进制，
-   端到端实测响应体里搜不到任何 token 字样（有用例守着）。
-3. **吊销权限按等级**：实测 admin 踢 owner → 403「不能吊销同级或更高权限账号的会话」，
-   owner 踢 admin → 200 且被踢方下一个请求 401；owner 踢自己的手机端 → 200，
-   本机不受影响；不存在的 sid → 404（先定位再判权限，不泄漏也不误删）。
-4. **只读账号只看自己**：viewer 调列表只返回自己那 1 条；踢 owner 的会话 403；
-   「退出其他设备」可用（返回吊销 0 台）。
-5. **改密 / 停用 / 删除即清内存**：改密后旧 token 立即 401；停用账号后其在线会话
-   下一个请求 401，列表里也不再出现。
-6. **UA 压缩**：Chrome/macOS、Firefox/Windows、Safari/iOS、`python-requests`
-   分别渲染为 `Chrome · macOS` / `Firefox · Windows` / `Safari · iOS` / `脚本 · Python`。
-7. **端到端 30/30 通过**（真实二进制 + 真实 HTTP + 真实 UA，不是内存直调）；
-   `go test -race ./internal/api/` 无竞争；`internal/api` 覆盖率 32.8% → 35.8%。
+```bash
+curl -H "Authorization: Bearer <令牌>" http://127.0.0.1:10010/metrics
+```
 
-v0.9.6 已验证：
+Prometheus 侧：
 
-1. **多管理员 + 按人追溯**：账号从 `settings` 单槽迁到 `admin_users` 表（迁移 v4 播种
-   `owner`，老库的用户名与哈希原样搬过去，升级后原账号密码照常可用）。审计日志的
-   `Actor` 从此是真实登录人，不再永远是同一个 `admin`。
-2. **角色三级 + 显式声明**：`owner` / `admin` / `viewer`，路由分三档包装
-   （`auth` / `write` / `ownerOnly`）。刻意不按 HTTP 方法自动推断——`GET /api/clients`
-   和 `GET /api/inbounds/{id}/export` 都会吐凭据，靠方法推断一定会漏。
-3. **会话失效改为「每账号密码指纹」**：`session{uid, fp}`，每次请求回库校验账号存在 /
-   启用 / 哈希未变。停用或删除账号后旧会话下一个请求即 401；改密只踢自己，
-   不再像全局 `session_epoch` 那样把所有人一起踢下线。
-4. **越权与停用都留痕**：403 记 `rbac.deny`（含角色与目标端点）；登录失败记被尝试的
-   用户名；管理员增删改记 `admin`。实测审计输出：
-   `ops inbound.create ok` / `ops rbac.deny fail 角色 admin 越权访问（需要 超级管理员）`。
-5. **不可自伤**：owner 不能删除 / 降级 / 停用，也不能新建第二个；不能删除或停用自己。
-   接口层与 UI 双层拦截，实测均返回 400 并给出可读原因。
-6. **TOTP 密钥改为账号级**：没绑验证器的人登录时跳过第二步；关闭 2FA 只清自己的密钥。
-   暂存密钥改存内存（每账号一份），不再落 `settings`。
-7. **端到端实测**：出厂默认登录 → 首次设密码（原密码留空）→ 旧 token 401 →
-   新密码登录 → 新建 viewer/admin → 只读账号 GET 入站/流量 200、GET 客户端/设置/审计 403、
-   POST 403 → 停用后登录 403「账号已停用」→ 删除/降级 owner 400。
+```yaml
+scrape_configs:
+  - job_name: triune-panel
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["panel.example.com:10010"]
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/triune-metrics.token   # 内容就是那个令牌
+```
 
-v0.9.5 已验证：
+也接受 `?token=<令牌>`（有些采集器不方便加 header），但 query 更容易出现在
+访问日志里，优先用 header。
 
-1. **`/metrics`（Prometheus 文本格式）**：`internal/api/metrics.go` 输出 14 个指标家族，
-   覆盖进程（up / 构建信息 / 运行时长 / goroutine / 堆）、数据库可用性、用户与入站计数、
-   内核运行状态、单用户流量与配额、证书到期、实时总速率。
-2. **默认关闭 + 令牌鉴权**：没配 `metrics_token` 返回 403（附启用提示），配了之后
-   错误/缺失令牌一律 401，用 `crypto/subtle` 定长比较。刻意不做「本机免认证」——
-   面板常挂在 nginx 后面，那样等于任何能碰到反代的人都能拉指标。
-3. **标签值转义**：客户端名是用户输入，`"`、`\`、换行必须转义。否则一个叫
-   `x"} 1\ntriune_fake 999` 的用户就能往指标里注入伪造序列。有专门用例断言
-   「注入的名字不会变成独立一行」。
-4. **家族连续输出**：Prometheus 规范要求同一家族的 HELP/TYPE 与样本连成一组，
-   所以表头是「首次写样本时惰性输出」，且样本按家族分组而不是按用户交错。
-   有格式合规用例守着（这条用例在实现阶段真的抓到了交错输出的 bug）。
-5. **独立解析验证**：用官方 `github.com/prometheus/common/expfmt` 解析输出，
-   14 个家族全部识别、类型与样本数正确（不只靠自写校验）。
+### 指标一览
 
-v0.9.4 已验证：
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `triune_up` | gauge | 进程存活，恒为 1 |
+| `triune_build_info{version,go_version}` | gauge | 构建信息 |
+| `triune_uptime_seconds` | gauge | 运行时长 |
+| `triune_db_up` | gauge | 数据库可查询（1=正常） |
+| `triune_go_goroutines` / `triune_go_heap_alloc_bytes` | gauge | 排查 goroutine 泄漏与内存增长 |
+| `triune_clients_total{enabled}` | gauge | 用户数 |
+| `triune_inbounds_total{core,enabled}` | gauge | 入站数（草稿计入 `enabled="false"`） |
+| `triune_core_running{core}` | gauge | 内核进程是否在跑 |
+| `triune_client_enabled{client}` | gauge | 单用户是否启用 |
+| `triune_client_traffic_bytes{client,direction}` | counter | 单用户累计上下行 |
+| `triune_client_quota_bytes{client}` | gauge | 单用户配额（0=不限量） |
+| `triune_client_expires_timestamp_seconds{client}` | gauge | 到期时间（仅设置了到期的用户） |
+| `triune_cert_expiry_timestamp_seconds{domain}` / `triune_cert_valid{domain}` | gauge | 证书到期与是否有效 |
+| `triune_traffic_up_bytes_per_second` / `triune_traffic_down_bytes_per_second` | gauge | 最近一个采样周期的总速率 |
 
-1. **`PUT /api/inbounds/{id}` 也是同一个坑，且后果更重**：旧实现整对象解包再全列
-   UPDATE。`PUT {"name":"改名"}` 会把 `core`/`protocol`/`port`/`tag`/`settings`
-   全部清成零值（`settings` 变 `"{}"`、`port` 变 0），返回 200。
-2. **UI 编辑入站会把它顺手停用**：前端 `saveInbound()` 提交的 body 里没有
-   `enabled`/`draft`/`tag`，旧代码就用零值覆盖——在界面上改个名字，保存后该入站
-   变成「已停用」，自定义 tag 也丢了（渲染时会退化成 `in-<id>`）。
-   这条是日常操作路径，影响面比 API 调用大得多。
-3. **内核切换守卫会误伤**：旧守卫拿零值 `core` 去比，于是任何「只改名」的请求在
-   启用中的入站上都会收到「请使用 POST /api/switch-core」——调用方根本没想换内核。
-4. **改为部分更新**：先读当前记录，只覆盖请求里出现的键；真的想换内核仍然拦下来
-   并指向 `/api/switch-core`（那条路径有预检与失败回滚）；改不存在的入站返回 404。
-   防火墙端口对账逻辑不变，仍按「旧值 vs 新值」判断草稿转正与端口/协议变化。
+几条常用告警：
 
-v0.9.3 已验证：
+```yaml
+- alert: TriunePanelDown
+  expr: triune_up == 0
+  for: 2m
+- alert: TriuneCertExpiringSoon
+  expr: (triune_cert_expiry_timestamp_seconds - time()) < 14 * 86400
+- alert: TriuneClientQuotaAlmostFull
+  expr: triune_client_traffic_bytes{job="triune-panel"} / on(client) triune_client_quota_bytes > 0.9
+```
 
-1. **移除假的每用户限速字段**：`rate_limit_mbps` 从 `model.Client`、SQL 读写
-   与 API 响应中全部摘掉。此前它能写、能存库、能被 GET 回来，唯独内核不消费——
-   脚本传个「100」会以为限速生效，实际什么也没发生。
-2. **改为明确拒绝而不是静默忽略**：`POST/PUT /api/clients` 收到非零
-   `rate_limit_mbps` 返回 400，错误里写清「三个内核都没有这个能力」并指出
-   该用 `quota_gb`（超限自动停用）或在内核外做整形。传 0 或不传都放行。
-3. **修掉 `PUT /api/clients/{id}` 的数据丢失 bug**：旧实现把请求体解成完整的
-   `model.Client` 再整行 UPDATE，于是 `PUT {"quota_gb":42}` 会把没传的
-   `credential`、`sub_token` 清成空串、`enabled` 置为 false，**还返回 200**——
-   用户的订阅链接和登录凭据静默失效。现在改成真正的部分更新：先读当前记录，
-   只覆盖请求里出现的键；`expires_at: null` 表示清除到期时间，不传则保持。
-   改不存在的用户返回 404 而不是假装成功。
-4. **历史列兼容**：数据库里的 `rate_limit_mbps` 列保留（schema 版本号就是迁移
-   条目数，删条目会让已升级的库跳过后续迁移），但不再读写；旧库里该列有值也
-   不影响加载与更新，有回归测试守着。
-5. **列顺序回归测试**：`clientCols` 与 `scanClient` 的扫描顺序都是手写的，
-   改一处忘另一处会让字段静默串位（`enabled` 读到 `quota_gb` 上之类），
-   新增 CRUD round-trip 用例锁住。
+### 两个注意点
 
-v0.9.2 已验证：
-
-1. **异地备份**（`internal/backup/upload.go`）：`backup --upload <remote:path>`
-   经 rclone 把归档传到 S3 / R2 / B2 / WebDAV / SFTP / 网盘等，覆盖
-   「备份跟着磁盘一起没」这个加密解决不了的风险。
-   **上传后必回读校验**——传完用 `rclone lsjson` 读回远端字节数与本地比对，
-   不一致直接报错（网络截断不一定体现在 rclone 退出码里）。
-2. **远端轮转是显式开关**：`--upload-keep N` 默认 0（不动远端任何文件）；
-   开启后只删 `triune-data-*.tar.gz[.age]`，远端目录里的其他文件一律不碰。
-3. **失败语义明确**：上传失败退出码 1（systemd timer 会报红），但输出会写明
-   「本地归档仍可用」，避免把"没传上去"误当成"已备份"。
-4. 安装脚本的每日备份支持 `backup.env` 里写 `TRIUNE_BACKUP_REMOTE`，
-   与 `backup.pass` 组合即「加密 + 异地」全套。
-
-v0.9.1 已验证：
-
-1. **安全响应头**（`internal/api/security.go`）：CSP、`X-Frame-Options`、`nosniff`、
-   `Referrer-Policy`、`Permissions-Policy`、COOP 统一下发，连 401/404 响应也带
-   （中间件包在最外层）。HSTS 只在确实走 HTTPS 时下发，且反代场景下只采信
-   **可信代理**发来的 `X-Forwarded-Proto`——否则公网伪造一个头就能让面板给
-   HTTP 连接下发 HSTS，把用户锁死。
-2. **服务端登出**（`POST /api/logout`）：此前只有前端清 localStorage，token 在
-   剩余 24 小时内仍然有效，且没有任何单独吊销手段（只能改密踢掉全部会话）。
-   现在登出会真正删除会话并记审计，其他设备的会话不受影响。
-3. **鉴权矩阵测试**（`internal/api/auth_test.go`）：52 个受保护端点逐一断言
-   匿名访问必须 401（新增路由忘了包 `a.auth()` 会被这条测试逮住），外加
-   过期会话、改密后旧会话失效、伪造 token、401 不回显 token、登出只影响当前会话。
-4. **浏览器实测**：Chrome 真实跑「登录 → 强制改密 → 重新登录 → 切页 → 登出」，
-   控制台**零 CSP 违规、零 JS 报错**，界面完整渲染（证明 `'unsafe-inline'`
-   确实放行了 126 处内联事件），登出后旧 token 立即 401。
-
-v0.9.0 已验证：
-
-1. **备份加密**（`internal/backup/crypt.go` + `cmd/server/passphrase.go`）：age 口令模式
-   （scrypt + X25519），流式 `tar → gzip → age` 写入，归档名加 `.age`。
-   归档是标准 age 格式，`age -d` 可独立解密（已用官方 `age` 源码编译出 CLI 交叉验证：
-   解出的 tar.gz 内容与原始数据一致）。口令四种来源：`--passphrase-file` >
-   `--passphrase-stdin` > `TRIUNE_BACKUP_PASSPHRASE` > 交互无回显；
-   不接受命令行明文参数。口令不足 12 位直接拒绝且不留半个文件。
-   `restore` 按魔数自动识别加密与否，改名骗不过去；恢复前备份沿用同一口令。
-2. **修掉一个 WAL 相关的恢复 bug**：面板的库是 WAL 模式，停服后最后一个事务
-   常常还在 `triune.db-wal` 里没合并回主库。`restore` 的 schema 只读校验原先只解
-   `triune.db`，于是把正常备份误判成「no such table: settings」并拒绝恢复
-   （数据其实完好）。现在 `ExtractDB` 连 `-wal`/`-shm` 一起解，实测 79 KB 真实库
-   加密备份 → 恢复 → `status` 全部正常。补了 `TestExtractDBCarriesWAL` 等回归用例。
-3. **每日自动备份改用 `triune-panel backup`**：原先 `deploy/install.sh` 里是裸
-   `tar czf`，既拿不到一致快照也不能加密。现在脚本调用二进制自身的 backup
-   （统一轮转与排除逻辑），把口令写进 `$INSTALL_DIR/backup.pass` 并 `chmod 600`
-   即自动加密。
-4. **WAL 提示**：`backup` 发现 `triune.db-wal` 非空时提示「已一并打包，但运行中
-   建议停服再备份」，避免用户误以为拿到了严格一致的快照。
-
-v0.8.9 已验证：
-
-1. **审计日志**（`internal/store/audit.go` + `internal/api/audit.go`）：新增 `audit_log`
-   表（schema v3）与「审计」页。记录登录（含失败与真实来源 IP）、改密、设置变更、
-   入站/用户增删改、应用与回滚、内核切换、版本更新、CLI 重置密码与数据恢复。
-   只记键名不记值；清空动作本身留痕；保留 90 天自动清理。
-2. **`/healthz` 免认证探活**：返回 `status/version/uptime_sec/db`，DB 打不开时
-   返回 **503 + degraded**（而不是 200），避免「进程活着但服务坏了」被监控当成健康。
-3. **证书到期 UI 标红**：证书卡片显示剩余天数并按 30 天/14 天分级上色，
-   14 天内与已过期直接标红并提示「自动续期可能已失败」，卡片标题旁给状态徽章。
-4. **systemd 加固**：`NoNewPrivileges` / `ProtectSystem` / `PrivateTmp` / `ProtectHome`
-   / `ProtectKernelTunables` / `RestrictSUIDSGID` / `UMask=0027` 等，
-   并用 `ReadWritePaths` 放开安装目录、数据目录与 `/usr/local/bin`（自更新与内核更新要用）。
-   同时修正模板里过时的 `-addr :2087` → `:10010`。
-5. **apply 流水线单测**（`internal/core/pipeline_test.go`）：覆盖未配二进制跳过校验、
-   **校验失败时运行配置零改动**（含临时文件不残留）、成功替换前自动备份、
-   dry-run 不落盘、回滚取最新备份、无备份时报错、未知内核报错。
-
-v0.8.8 已验证：
-
-1. **反向代理 IP 识别**（`internal/api/clientip.go`）：新增设置 `trusted_proxies`
-   （默认空 = 不信任任何代理，行为与旧版一致）。只有直连对端落在可信网段内才采信
-   `X-Forwarded-For` / `X-Real-IP`，且从右往左取第一个不可信地址，客户端伪造左侧无效。
-   `login_last_ip` 与登录防爆破计数键都改用真实客户端 IP。
-   设置页写入前整体校验，非法 CIDR/IP 直接 400，不会留下半套配置。
-2. 端到端实测（本地实例 + 伪造转发头）：配了 `127.0.0.1` 后 A 客户端失败 5 次被锁 429、
-   B 客户端不受影响；清空可信网段后伪造 `X-Forwarded-For: 6.6.6.6` 被忽略、
-   仍记为直连对端。
-
-v0.8.7 已验证：
-
-1. **忘记密码（离线重置）**：`triune-panel reset-password` 直接改本地 SQLite，
-   面板可继续运行。默认生成 16 位随机密码、**同时关闭 2FA**（丢设备场景）、
-   让所有已登录会话立即失效；`--password-stdin` 支持脚本化，
-   不接受命令行明文密码（会留在 shell 历史）。
-2. **命令行工具**：`status`（含 `--json`）、`doctor`（10 项环境自检，
-   有 fail 时退出码 1）、`backup`（纯 Go tar.gz，排除 backups 自身并按份数轮转）。
-   数据目录自动探测 `--data` → `TRIUNE_DATA` → `./data` → `/opt/triune-panel/data`。
-   刻意不提供 `apply` / 切换内核：内核进程归 daemon 管，CLI 裸跑会抢端口。
-3. **密码改为 bcrypt 哈希存储**：新增 `admin_pass_hash`，遗留明文槽只用于兼容——
-   登录命中明文时静默升级为哈希；安装脚本的 `bootstrap.creds` 首启即写成哈希，
-   明文不落库。密码最小长度 8 位。
-4. **会话纪元（session_epoch）**：改密/重置密码会更换纪元，旧 token 立即 401，
-   不需要重启面板；CLI 在另一个进程改库也能被运行中的 daemon 立刻感知。
-5. **前端**：改密后强制回登录页（旧会话已失效，避免"保存成功但下一步 401"的困惑）；
-   登录页直接给出忘记密码的命令提示。
-6. **`restore` 恢复命令**：`backup` 的另一半。四道保险——拒绝运行中恢复（端口探测）、
-   恢复前自动备份当前数据、归档 schema 版本不得高于当前二进制、拒绝路径穿越；
-   失败自动回滚，`backups/` 不参与替换。
-7. **CI**：GitHub Actions 跑 vet/test/三平台交叉编译/`-version` 格式校验/shellcheck，
-   堵住"推坏代码"与"版本字段格式被改坏导致安装脚本误判"两类事故。
-
-v0.8.6 已验证：
-
-1. **入站端口自动放行防火墙**（`internal/firewall`）：
-   - 新增入站时自动在生效防火墙放行其端口/协议；删除入站、修改端口或协议时
-     回收旧端口——回收前会检查是否仍有其它「已启用且非草稿」入站占用该端口，
-     避免误关仍在服务的端口。
-   - 后端探测顺序与安装脚本 `ensure_port_open` 一致：firewalld（running）→
-     ufw（active）→ iptables（INPUT 默认 DROP/REJECT）。三者皆无则视为系统
-     默认放行，函数直接返回 nil，不做任何操作（开发机 / 云安全组场景零副作用）。
-   - 协议推断：`hysteria2` / `tuic` 与 `quic` 传输走 UDP，其余 TCP。
-   - 全部操作幂等（已放行则跳过、规则不存在则忽略），失败只记日志不阻断 API。
-   - 设置页「基础设置」新增开关 `fw_auto`（默认开启，`fw_auto=0` 关闭）。
-   - 说明：ufw / firewalld 规则持久化，重启保留；iptables 规则重启不保留，
-     云厂商安全组需在控制台另行放行。
-2. **修复 `core.All()` 返回 nil 元素**：未 import 对应实现包（如单元测试）时，
-   `All()` 会返回含 nil 的切片，调用方 `range` 后取 `Name()` 直接空指针 panic；
-   现改为跳过未注册内核。
-3. **测试**：`firewall` 包协议推断与无后端零副作用断言；`api` 包补
-   `portInUseByOthers`（停用/草稿/不同协议均不计占用）与 `fw_auto`
-   设置读写回显用例（守住「PUT 能存、GET 不返回」的白名单不一致）。
-
-v0.8.5 已验证：
-
-1. **用户二维码分享**：
-   - 用户列表一键生成订阅链接二维码（手机 App 扫码即用）；
-   - 入站导出弹窗可对每个分享链接生成二维码（多用户时按钮切换），
-     支持下载 PNG 与复制链接；QR 生成器内嵌（MIT，无外部 CDN 依赖）。
-2. **入站连通性自检**：入站列表新增「自检」，四项只读探测逐项给出红黄绿结论：
-   配置状态（草稿/停用提示）→ 内核进程 → 端口监听（TCP 拨号 / UDP 独占绑定反证）→
-   TLS 握手与证书到期（Reality 标注为提示性）→ 公网可达（验证防火墙放行，
-   UDP 端口提示到安全组确认）。
-3. **流量排行与告警**：
-   - 流量表按用量降序排行（带序号），新增配额百分比与状态徽章
-     （接近配额 / 已达配额 / 3 天内到期 / 已到期），概览排行同步 ⚠/✕ 标记；
-   - 告警阈值可调（默认 80%，设置页「流量告警阈值」），越过阈值或配额时
-     经已配置的 SMTP 发送邮件提醒（同一级别只发一次，回落自动复位）。
-4. **订阅令牌重置**：用户列表「重置订阅」——旧订阅链接立即失效（实测 404），
-   新链接重新发放；用于链接泄露或换设备场景。
-5. **配置 diff 视图**：应用页新增「对比变更」，行级对比「运行中配置」与
-   「按当前意图重新渲染的配置」（LCS unified diff，绿增红删），无运行配置时
-   提示将全部新建；应用前先看差异，防误改。
-6. **订阅 URL 聚合（多节点）**：导入页新增「订阅 URL 聚合」——填入远端订阅
-   地址与前缀（可选）即可拉取并入外部节点：支持 base64 链接列表、明文分享
-   链接与 Clash YAML（vless/vmess/trojan/ss/hysteria2/tuic，Reality 参数
-   pbk/sid 完整转换）；已存在的节点自动跳过；仅聚合进订阅输出，
-   不改动本机任何内核配置。
-
-v0.8.4 已验证：
-
-1. **新增入站智能化**（尽可能零手填）：
-   - 协议改为下拉框，只显示当前内核实际支持的协议（与渲染器同步：
-     sing-box 9 种 / xray 3 种 / mihomo 8 种），切换内核自动联动；
-   - 打开弹窗即自动填充：名称（协议-端口）、推荐端口（冲突自动顺延）、
-     推荐传输与 TLS（如 vless+sing-box 默认 Reality 并自动生成密钥对）；
-   - 按 协议 × 传输 × TLS 联动出需要的字段：WS 路径（自动生成）、gRPC 服务名、
-     TLS 域名与证书路径、Reality 握手目标 / short_id、SS 加密方法、
-     xray VLESS flow，保存时自动并入 Settings JSON（高级透传区保留）。
-2. **版本列表显示 Release Notes**：组件更新弹窗选中版本即显示该版本
-   GitHub Release 说明（轻量 markdown 渲染），更新前先看变更。
-3. **渲染安全修复**：面板托管 / 客户端专用的 settings 键（`pbk`、`short_id`、
-   `flow`、`private_key` 等）不再原样透传到内核配置顶层——sing-box 严格
-   校验未知字段，多余顶层键会导致配置校验失败；`short_id` 现按结构写入
-   sing-box `tls.reality.short_id` / xray `realitySettings.shortIds`；
-   同时修复 sing-box 渲染器不支持 shadowsocks 入站的问题。
-
-v0.8.2 已验证：
-
-1. **登录二次验证（2FA）**：在账号密码之外追加一道验证，两种方式二选一：
-   - **TOTP 动态口令**：兼容 Google / Microsoft Authenticator、1Password、
-     FreeOTP 等常用验证器（RFC 6238，SHA1/6 位/30 秒，允许 ±1 周期时钟偏差）。
-     设置页生成密钥 → 验证器手动输入密钥绑定 → 输入当前口令确认启用。
-   - **邮箱验证码**：登录时向配置的邮箱发送 6 位验证码（5 分钟有效、
-     一次性使用、限 5 次尝试）。支持 465 端口 SSL 直连与 587 端口
-     STARTTLS，启用时自动发送测试邮件验证 SMTP 配置。
-   - 登录流程变为两步：账密正确后返回 `need_2fa`，前端展示验证码输入行；
-     验证失败同样计入登录防爆破锁定（5 次锁 10 分钟）。
-   - 验证码只存内存、不下发密钥（`totp_secret` 不出现在任何 GET 响应），
-     SMTP 密码留空保存表示沿用已存授权码。
-2. **配置生成器规则集「全选 / 清空」**：只作用于当前搜索过滤结果，
-   并自动跳过当前内核不可用的规则集，新勾选默认 PROXY 策略。
-
-v0.8.1 已验证：
-
-1. **修复「升级后界面还是旧版」**：面板启动时会把内嵌 UI 落地到
-   `data/web/index.html`，但旧逻辑"已存在即不覆盖"——从旧版本升级后
-   二进制是新的，磁盘上却一直是旧 UI 文件。现在内嵌页面带 build 标记
-   （`<!-- triune-panel-web/<ver> -->`），启动时标记缺失或版本不一致即覆盖；
-   同时静态页响应加 `Cache-Control: no-cache`，避免浏览器缓存旧界面。
-   自定义 UI 的用户：替换文件时请同步更新头部 build 标记为当前版本号。
-2. **修复仪表盘图表变形**：图表画布初始化强制最小 220px 宽且不设
-   `style.width`，窄容器（内核状态环 / KPI 迷你走势图 / donut）里宽位图被
-   CSS `width:100%` 压回实际宽度——圆环被压成竖椭圆。改为按容器实测宽度
-   初始化并显式设置画布尺寸；窗口缩放后重绘前先清除旧内联宽度再测量。
-3. **修复图表 Y 轴刻度被裁切**：长刻度标签（如 "46.57 GB"）按固定左留白
-   绘制会被画布左缘裁掉首位数字，看起来像刻度错乱。趋势图与实时速率图
-   均改为先测量最宽标签再动态决定左留白。
+- **标签值会转义**。用户名字由你输入，`"` `\` 换行都会被正确转义——否则一个叫
+  `x"} 1\ntriune_fake 999` 的用户就能往指标里塞任意行，伪造出不存在的序列。
+- **单用户指标是逐用户展开的**，标签基数等于用户数。几百人以内没问题；
+  上千人时建议在 Prometheus 侧用 `metric_relabel_configs` 丢掉
+  `triune_client_*`，只保留聚合指标。
+- 指标里**不含**任何凭据、订阅令牌或设置里的密钥（有测试守着）。
 
 ## 已知限制与未验证项
 
@@ -1563,131 +1161,43 @@ v0.8.1 已验证：
       但挡不住「能跑但被植入后门」的二进制。要求强保证就填 `sha256`
       （Release 页的 `sha256sums.txt` 里有），或者干脆走官方地址。
 
-## 部署到 VPS
+## 架构
 
-### 一键部署（推荐）
-
-在 VPS 上执行一条命令（自动识别架构，下载二进制，配置 systemd 并启动）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash
+```
+cmd/server          入口（flag: -addr -data）
+internal/model      数据模型（Inbound/Client/ExternalNode/ConfigRevision）
+internal/store      SQLite（modernc 纯 Go 驱动）+ 版本化迁移
+internal/core       内核抽象 Core 接口 + 渲染流水线（校验→原子替换→备份）
+  ├─ singbox        sing-box renderer
+  ├─ xray           xray renderer
+  └─ mihomo         mihomo renderer（listeners 模式，vless 入站不支持会明确报错）
+internal/link       分享链接反向解析 + 订阅导出（vless/vmess/trojan/ss/hy2/tuic）
+internal/proc       内核进程 supervisor（启停/重启/日志）
+internal/api        HTTP API + 订阅服务
+internal/webui      go:embed 内置单页 UI（data/web/index.html 可覆盖）
 ```
 
-GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地址 + 多个加速镜像」（ghfast.top / gh-proxy.com / gh-proxy.org / ghproxy.cn / gh-proxy.net / ghproxy.net / gh.ddlc.top / ghproxy.link）统一候选池，运行时对**真实 Release 资产**做 Range 探测（剔除返回 200 + HTML 挑战页的假镜像），自动选择实测最快的源下载，失败自动切换次优，无需手动配置；也可指定镜像跳过探测：`| sudo GH_PROXY=https://ghfast.top bash`。
+## 目录约定
 
-指定架构：`| sudo bash -s -- arm64`；指定版本：`| sudo bash -s -- amd64 v0.8.0`。重复执行即**原地升级**（只替换面板二进制，`/opt/triune-panel/data` 数据原样保留；已安装版本更高时**拒绝降级**）。
-
-#### 防「装到旧版本」（镜像缓存问题）
-
-加速镜像/CDN 会缓存 `releases/latest` 这条 302 重定向——仓库发了新 Release 后，缓存期内镜像仍会把请求导向旧 tag，于是「装到的还是旧版本」。脚本用三道闸保证版本正确：
-
-1. **先解析真实 tag 再下载**：通过 GitHub API（退路：latest 302 的 Location）解析出最新 tag，按 `releases/download/<tag>/<file>` 不可变 URL 下载，**不使用 `releases/latest/download`**；
-2. **sha256 完整性校验**：从 Release 资产 digest（退路：随 Release 附带的 `sha256sums.txt`）取得期望值，下载后不符即换下一个源——实测有镜像会返回 HTTP 200 但内容是截断文件或 HTML 挑战页，仅凭状态码无法识别；
-3. **版本号终检 + 拒绝降级**：安装前运行 `-version`，必须等于目标 tag；且不得低于已安装版本。
-
-安装成功提示会直接显示**已安装版本**，可立即核对。
-
-安装完成后：
-
-- 访问 `http://<服务器IP>:10010`。**全新安装会自动生成随机管理密码并在安装完成时打印一次**（不再使用默认 admin/admin），请立即保存；首次用默认密码登录时会强制要求修改
-- 端口：面板默认监听 **10010**（安装时可用 `TRIUNE_PANEL_PORT=端口` 覆盖）；
-  安装脚本会自动检测并放行本机防火墙（ufw / firewalld / iptables），
-  **云服务器还需在厂商控制台安全组放行同一端口**（机器内无法代改）
-- 仅本机监听：`TRIUNE_LISTEN=local` 安装后面板只绑定 `127.0.0.1`，不暴露公网，
-  本机 `ssh -L 10010:127.0.0.1:10010 user@server` 后访问 `http://127.0.0.1:10010`
-- 自动备份：安装时自动部署 systemd timer，**每日 03:30 打包数据目录到
-  `backups/`（保留最近 7 份）**；手动备份 `sudo bash /opt/triune-panel/backup.sh`
-- 公网 IP：安装完成时自动探测显示（全部 `--noproxy` 直连探测，绝不会被
-  系统代理污染显示成代理 IP）；探测失败时会给出自查指引
-- 日志：`journalctl -u triune-panel -f`
-- 下一步：**设置 → 组件更新与版本管理 → 一键安装内核**（sing-box / xray / mihomo 自动下载到面板专用目录，不碰系统现有二进制）；
-  有域名时建议 **设置 → ACME 证书 → 一键启用 HTTPS**（首次签发前先看[已知限制与未验证项](#已知限制与未验证项)第 1 条）
-
-> 注意：在线安装依赖匿名访问 GitHub，要求仓库为 **Public**；私有仓库所有源（含镜像）都会返回 404，请将仓库设为 Public，或改用「手动部署」离线安装。
-
-#### 权限说明（避免 `Permission denied`）
-
-安装需要写入 `/opt/triune-panel` 与 `/etc/systemd/system`，这两个位置需要 root。脚本已做健壮化处理，**忘记加 `sudo` 也能装**——特权步骤会逐条交给 `sudo` 执行：
-
-```bash
-# 忘记 sudo 也没问题：脚本内部会对写目录/写 systemd/启服务这些动作自动提权
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | bash
+```
+data/
+  triune.db                 真相源（用户意图）
+  cores/<core>/config.*      渲染产物 + 内核日志
+  revisions/<core>/*.bak     每次应用前的自动备份
+  web/index.html             可自定义的前端（覆盖嵌入版）
 ```
 
-常见报错与对应处理：
+## 版本历史
 
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| `install: cannot create regular file '/opt/triune-panel/triune-panel': Permission denied` | 目录已存在（此前用 root 装过）但当前用户无写权限 | 加 `sudo` 重跑，或让脚本自动提权 |
-| 提示当前用户无写权限、且系统无 `sudo` | rootless 容器 | 用 `TRIUNE_INSTALL_DIR` 装到用户目录 |
-| 提示二进制无法执行 | 架构不匹配 | 显式指定架构：`... | bash -s -- amd64` |
+完整更新日志见 [CHANGELOG.md](CHANGELOG.md)——每个条目都是「代码已实现 + 实测通过」，
+不是计划清单。发布说明与安装包在 [Releases](https://github.com/yunyu697/triune-panel/releases)。
 
-安装目录可自定义（无需 root，适合 rootless 环境）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh \
-  | TRIUNE_INSTALL_DIR=~/triune-panel bash
-```
-
-自定义目录时 systemd 单元的 `ExecStart` 会自动跟随实际路径；卸载脚本同样支持 `TRIUNE_INSTALL_DIR`。
-
-### 一键卸载
-
-```bash
-# 首选：安装时卸载脚本已落地在服务器本地，直接执行（无需联网，不受仓库可见性影响）
-sudo bash /opt/triune-panel/uninstall.sh            # 默认卸载，保留数据目录（可随时重装恢复全部数据）
-sudo bash /opt/triune-panel/uninstall.sh --purge    # 连数据一起彻底删除（不可恢复）
-
-# 直通：用安装脚本一行卸载（本地有卸载脚本用本地的，没有则自动在线拉取）
-curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/install.sh | sudo bash -s -- --uninstall
-
-# 备用：本地脚本已丢时在线拉取（原始地址+镜像写在同一条命令里，逐个尝试自动择优）
-for u in \
-  https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
-  https://ghfast.top/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
-  https://gh-proxy.com/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
-  https://gh-proxy.org/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh \
-  https://ghproxy.cn/https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh; do
-  curl -fsSL "$u" | sudo bash && break
-done
-```
-
-卸载会自动停止面板及其托管的内核进程、删除 systemd 服务单元与二进制；交互终端下会二次确认是否删除数据，管道执行默认保留。
-
-### 手动部署
-
-```bash
-# 1. 下载二进制（或上传本地 deploy/ 目录）
-curl -LO https://github.com/yunyu697/triune-panel/releases/latest/download/triune-panel-linux-amd64
-chmod +x triune-panel-linux-amd64 && sudo mv triune-panel-linux-amd64 /usr/local/bin/triune-panel
-
-# 2. 运行（也可自行编写 systemd unit，参考 deploy/triune-panel.service）
-sudo triune-panel -addr :10010 -data /opt/triune-panel/data
-```
-
-### 健康检查
-
-`GET /healthz` 免认证、极轻量（一次 `SELECT 1`），供 systemd、uptime 监控、
-负载均衡或云厂商健康探针使用：
-
-```bash
-$ curl -s http://127.0.0.1:10010/healthz
-{"db":"ok","status":"ok","time":"2026-10-31T21:20:00+08:00","uptime_sec":3600,"version":"v0.8.8"}
-```
-
-- **200 + `status:ok`**：进程与数据库都正常。
-- **503 + `status:degraded`**：进程活着但数据库打不开（盘满、库被删、权限不对），
-  此时面板的每个接口都会报错，探针应当报警而不是显示健康。
-- 只暴露「是否可用 / 版本号 / 运行时长」，不含任何配置或用户数据；
-  版本号本来就在 `/api/public/info` 公开。
-
-systemd 部署时可在启动后自检一次（可选，`deploy/triune-panel.service` 默认不启用）：
-
-```ini
-[Service]
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do curl -fsS --noproxy "*" http://127.0.0.1:10010/healthz >/dev/null && exit 0; sleep 1; done; exit 1'
-```
-
-外部监控（Uptime Kuma / 云监控 / Prometheus blackbox）直接探 `/healthz`，
-按 HTTP 状态码判活即可，不用带 token。注意 `--noproxy '*'`：本机配了
-`http_proxy` 时 curl 会绕道代理，探活结果会骗人。
+| 版本 | 主题 |
+|---|---|
+| v0.12.0 | 面板版本列表开箱可用；下载镜像可选可测速 |
+| v0.11.0 | 内核安装可选分支（稳定/预发布/全部）；主题拆成「亮暗 × 色彩方案」 |
+| v0.10.0 | 配置命名保存 + 配置管理页 + 规则标签 |
+| v0.9.x | 多管理员与 RBAC、在线会话与登录历史、变更通知、审计日志、Prometheus 指标 |
+| v0.8.x | 2FA、忘记密码、CLI、备份加密、防火墙自动放行、连通性自检、二维码 |
+| v0.7 – v0.5 | 配置生成器、内核随时互切、全新 Web UI、全组件更新与回滚 |
+| MVP – v0.3 | 登录鉴权、入站/用户 CRUD、双模式导入、预检应用、订阅、流量统计 |
