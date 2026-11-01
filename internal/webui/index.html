@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.12.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -470,6 +470,8 @@ td.num{font-variant-numeric:tabular-nums}
   font-size:13px;font-weight:600;transition:background var(--t-fast)}
 .set-group>.gh:hover{background:color-mix(in srgb,var(--acc) 8%,var(--hover))}
 .set-group>.gh .cnt{font-size:11px;color:var(--muted);font-weight:400;margin-left:auto}
+.set-group>.gh .gh-acts{display:flex;gap:6px;align-items:center;flex:0 0 auto;cursor:default}
+.set-group>.gh .gh-acts .btn{padding:2px 8px;font-size:11.5px;font-weight:500}
 .set-group>.gb{padding:10px 14px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:8px}
 .set-group.closed .gb{display:none}
 .set-row{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;transition:background var(--t-fast);
@@ -789,14 +791,15 @@ canvas{display:block;width:100%}
       <div class="card">
         <h3>规则集<span class="spacer"></span>
           <button class="btn sm" onclick="selectSets(true)" title="勾选当前筛选下所有可用规则集">全选</button>
-          <button class="btn sm" onclick="selectSets(false)" title="取消勾选全部规则集">清空</button>
+          <button class="btn sm" onclick="selectSets(false)" title="取消勾选当前筛选下的规则集">清空</button>
           <span class="hint" id="gen_sets_count"></span>
           <input id="gen_set_search" class="input" style="width:180px;padding:5px 10px;font-size:12.5px"
                  placeholder="搜索规则集…" oninput="filterSets()">
         </h3>
         <p class="muted" style="margin-bottom:12px">勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
-           「全选 / 清空」只作用于当前搜索结果，且自动跳过本内核不可用的规则集；
-           标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
+           <b>默认策略按规则集推荐值带出</b>：国内站点 / 私有网络 DIRECT、广告与追踪 REJECT、境外服务 PROXY，勾选后仍可逐条改。
+           每个分组标题右侧有本组「全选 / 清空」；顶部的「全选 / 清空」作用于当前搜索结果。
+           两者都会自动跳过本内核不可用的规则集——标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
         <div id="gen_sets"></div>
       </div>
 
@@ -4589,6 +4592,7 @@ async function exportInboundDownload(fmt) {
 
 /* ---- 配置生成器 ---- */
 let genCatalog = null, genPolicies = {}, genResult = null;
+let genSetOrder = [];
 let genCore = "mihomo", genTarget = "client", genScenario = "", genChecked = {}, genClosed = {};
 /* sing-box 各版本的配置结构不同，必须让用户明确选。1.11 与 1.12+ 是两套 JSON：
    1.11 的 DNS 用 address、没有 default_domain_resolver；写错一边内核直接 FATAL。
@@ -4613,643 +4617,750 @@ const DEMO_CATALOG = {
       "id": "geosite-cn",
       "name": "中国大陆域名",
       "group": "基础分流",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geoip-cn",
       "name": "中国大陆 IP",
       "group": "基础分流",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-private",
       "name": "局域网 / 私有域名",
       "group": "基础分流",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geoip-private",
       "name": "局域网 / 私有 IP",
       "group": "基础分流",
-      "cores": "mihomo"
+      "cores": "mihomo",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-geolocation-!cn",
       "name": "非中国大陆域名",
       "group": "基础分流",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-ads-all",
       "name": "广告域名（通用全量）",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-ads",
       "name": "广告域名（精简）",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-public-tracker",
       "name": "公共追踪器",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-telemetry",
       "name": "遥测 / 数据上报",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-consent-management",
       "name": "Cookie 同意管理",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-password-management",
       "name": "密码管理器",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-ip-geo-detect",
       "name": "IP 归属地检测",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-anticensorship",
       "name": "反审查站点",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-proxy-tunnels",
       "name": "代理隧道与中转",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-vpnservices",
       "name": "VPN 服务商",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-stun",
       "name": "STUN / TURN 服务",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "REJECT"
     },
     {
       "id": "geosite-category-ipfs",
       "name": "IPFS 节点",
       "group": "广告与隐私",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-openai",
       "name": "OpenAI / ChatGPT",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-anthropic",
       "name": "Anthropic / Claude",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-ai-!cn",
       "name": "AI 服务（海外）",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-ai-chat-!cn",
       "name": "AI 对话（海外）",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-ai-cn",
       "name": "AI 服务（国内）",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-ai-ru",
       "name": "AI 服务（俄罗斯区）",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-google-gemini",
       "name": "Google Gemini",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-perplexity",
       "name": "Perplexity",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-deepseek",
       "name": "DeepSeek",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-doubao",
       "name": "豆包 Doubao",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-bing",
       "name": "Bing / Copilot",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-huggingface",
       "name": "Hugging Face",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-notion",
       "name": "Notion",
       "group": "AI 服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-netflix",
       "name": "Netflix",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-disney",
       "name": "Disney+",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-youtube",
       "name": "YouTube",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-tiktok",
       "name": "TikTok",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-spotify",
       "name": "Spotify",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-hbo",
       "name": "HBO",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-bahamut",
       "name": "巴哈姆特动漫",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-twitch",
       "name": "Twitch",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-netease",
       "name": "网易云音乐",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-bilibili",
       "name": "哔哩哔哩",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-iqiyi",
       "name": "爱奇艺",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-youku",
       "name": "优酷",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-media",
       "name": "影音媒体站点",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-media-cn",
       "name": "国内影音站点",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-entertainment",
       "name": "娱乐站点",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-entertainment-cn",
       "name": "国内娱乐站点",
       "group": "流媒体影音",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-telegram",
       "name": "Telegram",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-twitter",
       "name": "X / Twitter",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-facebook",
       "name": "Facebook",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-instagram",
       "name": "Instagram",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-whatsapp",
       "name": "WhatsApp",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-line",
       "name": "LINE",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-discord",
       "name": "Discord",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-reddit",
       "name": "Reddit",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-viber",
       "name": "Viber",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-signal",
       "name": "Signal",
       "group": "社交通讯",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-games",
       "name": "游戏平台（综合）",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-games-cn",
       "name": "国内游戏平台",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-game-accelerator-cn",
       "name": "国内游戏加速服务",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-enhance-gaming",
       "name": "游戏加速增强",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-flight-simulator",
       "name": "模拟器类游戏",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-steam",
       "name": "Steam",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-epicgames",
       "name": "Epic Games",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-playstation",
       "name": "PlayStation",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-xbox",
       "name": "Xbox",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-nintendo",
       "name": "Nintendo",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-blizzard",
       "name": "暴雪战网",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-mihoyo",
       "name": "米哈游（HoYoPlay）",
       "group": "游戏加速",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-github",
       "name": "GitHub",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-gitlab",
       "name": "GitLab",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-docker",
       "name": "Docker Hub",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-golang",
       "name": "Go 语言站点",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-nodejs",
       "name": "Node.js / npm",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-jetbrains",
       "name": "JetBrains",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-dev",
       "name": "开发者站点",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-dev-cn",
       "name": "国内开发者站点",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-cdn-!cn",
       "name": "海外 CDN",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-cdn-cn",
       "name": "国内 CDN",
       "group": "开发与技术",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-finance",
       "name": "金融理财站点",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-bank-cn",
       "name": "国内银行",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-securities-cn",
       "name": "国内证券",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-cryptocurrency",
       "name": "加密货币",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-paypal",
       "name": "PayPal",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-stripe",
       "name": "Stripe",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-wise",
       "name": "Wise 转账",
       "group": "金融商务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-amazon",
       "name": "Amazon",
       "group": "购物电商",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-ebay",
       "name": "eBay",
       "group": "购物电商",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-pinduoduo",
       "name": "拼多多",
       "group": "购物电商",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-ecommerce",
       "name": "电商平台",
       "group": "购物电商",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-microsoft",
       "name": "Microsoft",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-google",
       "name": "Google",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-dropbox",
       "name": "Dropbox",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-zoom",
       "name": "Zoom 会议",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-onedrive",
       "name": "OneDrive",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-icloud",
       "name": "iCloud",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-companies",
       "name": "大型企业站点",
       "group": "办公云服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-scholar-cn",
       "name": "国内学术资源",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-scholar-!cn",
       "name": "海外学术资源",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-scholar-hk",
       "name": "港澳学术资源",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "PROXY"
     },
     {
       "id": "geosite-category-mooc-cn",
       "name": "国内慕课平台",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-education-cn",
       "name": "国内教育站点",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-documents-cn",
       "name": "国内文档站",
       "group": "教育科研",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-hospital-cn",
       "name": "国内医院与医疗",
       "group": "生活服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-food-cn",
       "name": "国内餐饮外卖",
       "group": "生活服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-logistics-cn",
       "name": "国内物流",
       "group": "生活服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-blog-cn",
       "name": "国内博客",
       "group": "生活服务",
-      "cores": "both"
+      "cores": "both",
+      "policy": "DIRECT"
     },
     {
       "id": "geosite-category-porn",
       "name": "成人内容（拦截用）",
       "group": "广告与隐私",
-      "cores": "mihomo"
+      "cores": "mihomo",
+      "policy": "REJECT"
     }
   ],
   scenarios: [
@@ -5445,7 +5556,7 @@ const DEMO_CATALOG = {
         },
         {
           "id": "geosite-deepseek",
-          "policy": "PROXY"
+          "policy": "DIRECT"
         },
         {
           "id": "geosite-huggingface",
@@ -6260,10 +6371,24 @@ function renderScenarios() {
   $("gen_scn_count").textContent = list.length + " 个预设";
 }
 
+/* 规则集的默认策略来自后端目录（国内站点 DIRECT / 广告追踪 REJECT）。
+   v1.0.0 之前这里一律按 PROXY 起手，勾「中国大陆域名」也会被塞进代理。 */
+function defaultPolicyOf(id) {
+  const def = ((genCatalog && genCatalog.sets) || []).find(s => s.id === id);
+  return (def && def.policy) || "PROXY";
+}
+
+function applySetChoice(s, on) {
+  if (on) {
+    genChecked[s.id] = true;
+    if (!genPolicies[s.id]) genPolicies[s.id] = defaultPolicyOf(s.id);
+  } else delete genChecked[s.id];
+}
+
 function setRowHTML(s) {
   const usable = coreHasSet(s);
   const on = !!genChecked[s.id];
-  const pol = genPolicies[s.id] || "PROXY";
+  const pol = genPolicies[s.id] || defaultPolicyOf(s.id);
   const tag = (s.cores && s.cores !== "both") ? `<span class="tagcore">仅 ${s.cores}</span>` : "";
   return `<div class="set-row${usable?"":" off"}" data-name="${(s.name||"").toLowerCase()} ${(s.id||"").toLowerCase()}">
     <label><input type="checkbox" class="gset" data-id="${s.id}" ${on?"checked":""} ${usable?"":"disabled"}
@@ -6278,18 +6403,52 @@ function setRowHTML(s) {
 function renderSets() {
   const groups = {};
   (genCatalog.sets||[]).forEach(s => (groups[s.group||"其他"] = groups[s.group||"其他"]||[]).push(s));
-  $("gen_sets").innerHTML = Object.entries(groups).map(([g, arr]) => {
+  const order = Object.keys(groups);
+  genSetOrder = order;             // 下标 → 分组名，供事件委托回查
+  $("gen_sets").innerHTML = order.map((g, gi) => {
+    const arr = groups[g];
     const usable = arr.filter(s => coreHasSet(s)).length;
+    const picked = arr.filter(s => genChecked[s.id]).length;
     const closed = genClosed[g] ? " closed" : "";
-    return `<div class="set-group${closed}" data-group="${g}">
-      <div class="gh" onclick="toggleGroup('${g}')">
+    /* 分组名不进内联 onclick：escHtml 不转义引号，名字一旦带引号就会破坏属性。
+       统一用 data-gi 下标 + 事件委托（见下方 #gen_sets 监听）。 */
+    return `<div class="set-group${closed}" data-gi="${gi}">
+      <div class="gh" title="点击展开 / 收起">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-        <span>${g}</span><span class="cnt">${usable}/${arr.length} 可用</span></div>
+        <span>${g}</span><span class="cnt">选中 ${picked}/${arr.length} · ${usable} 可用</span>
+        <span class="gh-acts">
+          <button class="btn sm ghost" data-gact="on" data-gi="${gi}" title="勾选本组内当前可见的可用规则集">全选</button>
+          <button class="btn sm ghost" data-gact="off" data-gi="${gi}" title="取消勾选本组全部规则集" ${picked?"":"disabled"}>清空</button>
+        </span></div>
       <div class="gb">${arr.map(setRowHTML).join("")}</div></div>`;
   }).join("");
   const picked = Object.keys(genChecked).filter(k => genChecked[k]).length;
   $("gen_sets_count").textContent = `已选 ${picked} / ${(genCatalog.sets||[]).length}`;
 }
+
+/* 分组全选 / 清空：只作用于本组内「当前搜索可见 + 本内核可用」的规则集，
+   与顶部整体全选保持同一套语义（按钮不触发分组折叠）。 */
+function selectGroup(gi, on) {
+  if (!genCatalog) return;
+  const g = genSetOrder[gi];
+  if (!g) return;
+  const q = ($("gen_set_search").value || "").trim().toLowerCase();
+  (genCatalog.sets || []).forEach(s => {
+    if ((s.group || "其他") !== g) return;
+    if (!coreHasSet(s)) return;
+    if (q && !((s.name || "") + " " + (s.id || "")).toLowerCase().includes(q)) return;
+    applySetChoice(s, on);
+  });
+  renderSets();
+  filterSets();
+}
+
+$("gen_sets").addEventListener("click", e => {
+  const act = e.target.closest("[data-gact]");
+  if (act) { e.stopPropagation(); selectGroup(+act.dataset.gi, act.dataset.gact === "on"); return; }
+  const h = e.target.closest(".gh");
+  if (h) toggleGroup(genSetOrder[+h.parentNode.dataset.gi]);
+});
 
 function toggleGroup(g) {
   genClosed[g] = !genClosed[g];
@@ -6298,13 +6457,12 @@ function toggleGroup(g) {
 }
 
 function toggleSet(id, on) {
-  if (on) { genChecked[id] = true; if (!genPolicies[id]) genPolicies[id] = "PROXY"; }
-  else delete genChecked[id];
+  applySetChoice((genCatalog.sets||[]).find(s => s.id === id) || { id }, on);
   renderSets();
   filterSets();
 }
 
-/* 全选 / 清空：只作用于当前搜索过滤结果，跳过本内核不可用的规则集（新勾选默认 PROXY） */
+/* 全选 / 清空：只作用于当前搜索过滤结果，跳过本内核不可用的规则集（默认策略取目录推荐值） */
 function selectSets(on) {
   if (!genCatalog) return;
   const q = ($("gen_set_search").value || "").trim().toLowerCase();
@@ -6314,8 +6472,7 @@ function selectSets(on) {
       const hay = ((s.name || "") + " " + (s.id || "")).toLowerCase();
       if (!hay.includes(q)) return;
     }
-    if (on) { genChecked[s.id] = true; if (!genPolicies[s.id]) genPolicies[s.id] = "PROXY"; }
-    else delete genChecked[s.id];
+    applySetChoice(s, on);
   });
   renderSets();
   filterSets();
