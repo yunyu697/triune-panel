@@ -55,6 +55,21 @@ jobs:
           ver=$(./dist/triune-panel-linux-amd64 -version | awk '{print $2}')
           test "$ver" = "ci" || { echo "版本字段解析异常: $ver"; exit 1; }
 
+  version:
+    name: 版本号格式（每段 0–9）
+    runs-on: ubuntu-latest
+    # 只在推 tag 时跑：分支推送没有版本号可校验
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 tag
+        run: |
+          # 规则：每段只用 0–9，满 9 进位，任何一段都不出现两位数
+          #   v1.0.9 → v1.1.0 · v1.9.9 → v2.0.0
+          # 判定只写在 deploy/check-version.sh 里，这里只负责调用，
+          # 免得 CI 和发布流程各抄一份正则、慢慢长歪。
+          ./deploy/check-version.sh "$GITHUB_REF_NAME"
+
   shellcheck:
     name: shellcheck（deploy 脚本）
     runs-on: ubuntu-latest
@@ -63,4 +78,5 @@ jobs:
       - name: shellcheck
         run: |
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
-          shellcheck -S warning -e SC2206 deploy/install.sh deploy/uninstall.sh
+          shellcheck -S warning -e SC2206 \
+            deploy/install.sh deploy/uninstall.sh deploy/check-version.sh
