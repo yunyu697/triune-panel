@@ -124,3 +124,36 @@ func isDomesticSet(id string) bool {
 	}
 	return strings.HasSuffix(id, "-cn")
 }
+
+// 请求里不带 policy 时必须回落到目录推荐值，而不是一律 PROXY。
+// 老版本 UI 的缓存页面、直接调 /api/export/config 的脚本都走这条路——
+// 只要还退回 PROXY，「国内站点默认走代理」就会从另一条路绕回来。
+func TestNormalizeSetsFallsBackToCatalogPolicy(t *testing.T) {
+	cases := []struct{ id, want string }{
+		{"geosite-cn", "DIRECT"},
+		{"geosite-category-ads-all", "REJECT"},
+		{"geosite-netflix", "PROXY"},
+	}
+	for _, c := range cases {
+		sets, _ := normalizeSets(genReq{Core: "mihomo", Sets: []setPolicy{{ID: c.id}}})
+		if len(sets) != 1 {
+			t.Fatalf("%s 生成 %d 条，期望 1 条", c.id, len(sets))
+		}
+		if sets[0].Policy != c.want {
+			t.Errorf("%s 不带 policy 时应回落到 %s，实际 %q", c.id, c.want, sets[0].Policy)
+		}
+	}
+
+	// 用户显式改过就以用户为准，推荐值不能盖掉它
+	sets, _ := normalizeSets(genReq{Core: "mihomo", Sets: []setPolicy{{ID: "geosite-cn", Policy: "PROXY"}}})
+	if len(sets) != 1 || sets[0].Policy != "PROXY" {
+		t.Errorf("显式指定的 PROXY 被改掉了: %+v", sets)
+	}
+
+	// 自定义规则集没有目录条目，没有推荐值可回落，仍是 PROXY
+	sets, _ = normalizeSets(genReq{Core: "mihomo",
+		CustomSets: []customSetReq{{Name: "x", URL: "https://e.com/a.mrs"}}})
+	if len(sets) != 1 || sets[0].Policy != "PROXY" {
+		t.Errorf("自定义规则集应默认 PROXY，实际 %+v", sets)
+	}
+}

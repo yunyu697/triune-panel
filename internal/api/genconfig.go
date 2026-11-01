@@ -710,10 +710,17 @@ func normalizeSets(q genReq) ([]normSet, []string) {
 		seen[s.Tag] = true
 		out = append(out, s)
 	}
-	policy := func(p string) string {
+	// 请求里没带 policy（老版本 UI、直接调 API 的脚本）时回落到目录里的推荐值，
+	// 而不是一律 PROXY——否则「国内站点默认走代理」会从另一条路绕回来。
+	// 目录是唯一事实源，这里必须真的用它，不能只把它导出给前端。
+	policy := func(p, def string) string {
 		switch p {
 		case "DIRECT", "PROXY", "REJECT":
 			return p
+		}
+		switch def {
+		case "DIRECT", "PROXY", "REJECT":
+			return def
 		}
 		return "PROXY"
 	}
@@ -730,10 +737,10 @@ func normalizeSets(q genReq) ([]normSet, []string) {
 		}
 		if q.Core == "mihomo" {
 			add(normSet{Tag: def.ID, URL: mihomoSetURL(def.Dir, strings.TrimPrefix(strings.TrimPrefix(def.ID, "geosite-"), "geoip-")),
-				Behavior: def.Behavior, Policy: policy(s.Policy), Format: "mrs", Interval: 86400})
+				Behavior: def.Behavior, Policy: policy(s.Policy, def.Policy), Format: "mrs", Interval: 86400})
 		} else {
 			add(normSet{Tag: def.ID, URL: singboxSetURL(def.Dir, strings.TrimPrefix(strings.TrimPrefix(def.ID, "geosite-"), "geoip-")),
-				Behavior: def.Behavior, Policy: policy(s.Policy), Format: "binary", Interval: 86400})
+				Behavior: def.Behavior, Policy: policy(s.Policy, def.Policy), Format: "binary", Interval: 86400})
 		}
 	}
 	for _, cs := range q.CustomSets {
@@ -767,7 +774,8 @@ func normalizeSets(q genReq) ([]normSet, []string) {
 		if q.Core == "singbox" && !strings.HasSuffix(strings.ToLower(cs.URL), ".srs") {
 			warns = append(warns, "sing-box 自定义规则集建议使用 .srs 格式: "+cs.Name)
 		}
-		add(normSet{Tag: tag, URL: cs.URL, Behavior: beh, Policy: policy(cs.Policy), Format: fmt, Interval: interval})
+		// 自定义规则集没有目录条目，也就没有推荐值可回落
+		add(normSet{Tag: tag, URL: cs.URL, Behavior: beh, Policy: policy(cs.Policy, ""), Format: fmt, Interval: interval})
 	}
 	// 排序保证稳定输出：REJECT → PROXY → DIRECT
 	rank := map[string]int{"REJECT": 0, "PROXY": 1, "DIRECT": 2}

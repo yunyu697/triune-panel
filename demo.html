@@ -6580,7 +6580,9 @@ let genLast = null, genLastCore = "singbox";
 function buildGenParams() {
   const ids = [...document.querySelectorAll("#gen_inbounds input:checked")].map(i => +i.value);
   const sets = Object.keys(genChecked).filter(k => genChecked[k])
-    .map(id => ({ id, policy: genPolicies[id] || "PROXY" }));
+    // 兜底也要取目录推荐值：万一某条被勾上却没走过 applySetChoice（比如旧参数恢复），
+    // 不能退回 PROXY，否则「国内站点走代理」又从这条路绕回来。
+    .map(id => ({ id, policy: genPolicies[id] || defaultPolicyOf(id) }));
   const custom_rules = dedupeRules($("gen_rules").value);
   const custom_sets = [...document.querySelectorAll("#gen_csets .cset-row")].map(r => ({
     name: r.querySelector(".cs-name").value.trim(),
