@@ -65,11 +65,19 @@ func (a *Server) handleComponents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/updates/versions?component=panel|singbox|xray|mihomo
+// GET /api/updates/versions?component=panel|singbox|xray|mihomo&channel=all|stable|prerelease
 // 面板：读 panel_update_index 索引清单（或 panel_repo 的 GitHub Releases）。
 // 内核：读官方仓库 GitHub Releases（gh_api_base / gh_mirror 可在设置中替换为镜像）。
+//
+// channel 默认 all（保持旧行为）。stable 只给正式版——「一键安装最新」如果不区分
+// 分支，遇到 1.15.0-alpha 这类预发布就会把 alpha 装到生产面板上。
 func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 	comp := r.URL.Query().Get("component")
+	channel, ok := update.NormalizeChannel(r.URL.Query().Get("channel"))
+	if !ok {
+		fail(w, 400, "channel 只能是 all / stable / prerelease")
+		return
+	}
 	if comp == "panel" {
 		if idx, _ := a.Store.GetSetting("panel_update_index"); idx != "" {
 			rels, err := update.ListIndexVersions(idx)
@@ -77,7 +85,7 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 				fail(w, 502, err.Error())
 				return
 			}
-			writeJSON(w, 200, map[string]any{"component": comp, "source": "index", "releases": rels})
+			writeVersions(w, comp, "index", rels, channel)
 			return
 		}
 		if repo, _ := a.Store.GetSetting("panel_repo"); repo != "" {
@@ -86,7 +94,7 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 				fail(w, 502, err.Error())
 				return
 			}
-			writeJSON(w, 200, map[string]any{"component": comp, "source": "github", "releases": rels})
+			writeVersions(w, comp, "github", rels, channel)
 			return
 		}
 		fail(w, 400, "请先在设置中配置 panel_update_index（版本索引清单 URL）或 panel_repo（GitHub 仓库）；也可以直接用 URL 方式更新到任意版本")
@@ -102,7 +110,27 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"component": comp, "source": "github", "releases": rels})
+	writeVersions(w, comp, "github", rels, channel)
+}
+
+// writeVersions 输出按分支过滤后的版本列表，并附带各分支的数量
+// （前端要显示「稳定版 12 / 预发布 3」，不能只给过滤后的结果）。
+func writeVersions(w http.ResponseWriter, comp, source string, rels []update.Release, channel string) {
+	counts := map[string]int{"all": len(rels), "stable": 0, "prerelease": 0}
+	for _, r := range rels {
+		if r.Prerelease {
+			counts["prerelease"]++
+		} else {
+			counts["stable"]++
+		}
+	}
+	writeJSON(w, 200, map[string]any{
+		"component": comp,
+		"source":    source,
+		"channel":   channel,
+		"counts":    counts,
+		"releases":  update.FilterChannel(rels, channel),
+	})
 }
 
 func (a *Server) ghAPIBase() string {

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.10.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
-<html lang="zh-CN" data-theme="light">
+<!-- triune-panel-web/v0.11.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -14,86 +14,93 @@
   --side-w:240px;
   --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
-[data-theme="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#68727f;--line:#e5eaf1;--hover:#f1f4f9;
-  --acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e9f1fe;--acc-text:#2563eb;--on-acc:#fff;
+/* ============ 主题：亮暗（mode）× 色彩方案（scheme） ============
+   拆成两层是为了「换亮暗不换风格、换风格不换亮暗」。
+   模式层只给中性色（背景/卡片/文字/线/阴影/语义色），
+   方案层只给强调色（主色/辅色/柔和底色/图表色），
+   个别方案会额外微调中性色（如暖阳偏米黄、森野偏墨绿）。
+   两层用属性选择器叠加，方案选择器权重更高，无需关心先后顺序。 */
+
+[data-mode="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#68727f;--line:#e5eaf1;--hover:#f1f4f9;
   --ok:#15a34a;--ok-soft:#e6f6ec;--err:#dc2626;--err-soft:#fdecec;--warn:#d97706;--warn-soft:#fdf3e2;
   --shadow-sm:0 1px 2px rgba(16,24,40,.05);
   --shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);
   --shadow-lg:0 28px 64px -26px rgba(16,24,40,.34);
-  --glow:0 10px 22px -10px rgba(59,130,246,.6);
-  --glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);
-  --chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--grid:rgba(16,24,40,.075);
-  --tint:rgba(59,130,246,.07)}
-[data-theme="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;
-  --acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
+  --glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44)}
+[data-mode="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;
   --ok:#2fca7f;--ok-soft:rgba(47,202,127,.14);--err:#f06a6a;--err-soft:rgba(240,106,106,.13);--warn:#eab308;--warn-soft:rgba(234,179,8,.13);
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);
   --shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);
-  --glow:0 10px 24px -10px rgba(91,156,248,.55);
-  --glass:rgba(13,16,22,.72);--mask:rgba(0,0,0,.58);
-  --chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
-  --tint:rgba(91,156,248,.08)}
-[data-theme="midnight"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;
+  --glass:rgba(13,16,22,.72);--mask:rgba(0,0,0,.58)}
+
+/* --- 蔚蓝 azure：默认方案，中性色完全交给模式层 --- */
+[data-mode="light"][data-scheme="azure"]{--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e9f1fe;--acc-text:#2563eb;--on-acc:#fff;
+  --glow:0 10px 22px -10px rgba(59,130,246,.6);--tint:rgba(59,130,246,.07);
+  --chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--grid:rgba(16,24,40,.075)}
+[data-mode="dark"][data-scheme="azure"]{--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
+  --glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);
+  --chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+
+/* --- 靛夜 indigo --- */
+[data-mode="light"][data-scheme="indigo"]{--bg:#f5f6fd;--line:#e4e7f5;--hover:#eef0fb;--text:#191c2e;--muted:#6b7194;
+  --acc:#6366f1;--acc2:#0891b2;--acc-soft:#e8e9fe;--acc-text:#4f46e5;--on-acc:#fff;
+  --glow:0 10px 22px -10px rgba(99,102,241,.55);--tint:rgba(99,102,241,.07);
+  --chart-up:#6366f1;--chart-down:#10b981;--chart-3:#0891b2;--chart-4:#f59e0b;--grid:rgba(20,24,60,.075)}
+[data-mode="dark"][data-scheme="indigo"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;
   --acc:#818cf8;--acc2:#22d3ee;--acc-soft:rgba(129,140,248,.15);--acc-text:#a5b0fb;--on-acc:#080d1a;
-  --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#fb7185;--err-soft:rgba(251,113,133,.13);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.45);
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.75);
-  --shadow-lg:0 32px 72px -28px rgba(0,0,0,.9);
-  --glow:0 10px 26px -10px rgba(129,140,248,.6);
-  --glass:rgba(8,13,26,.72);--mask:rgba(2,5,14,.62);
-  --chart-up:#818cf8;--chart-down:#34d399;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
-  --tint:rgba(129,140,248,.09)}
-[data-theme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;
+  --glow:0 10px 26px -10px rgba(129,140,248,.6);--tint:rgba(129,140,248,.09);
+  --chart-up:#818cf8;--chart-down:#34d399;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+
+/* --- 森野 forest --- */
+[data-mode="light"][data-scheme="forest"]{--bg:#f3f8f5;--line:#dcebe2;--hover:#e9f4ee;--text:#14251b;--muted:#5f7d6b;
+  --acc:#16a34a;--acc2:#65a30d;--acc-soft:#e4f5ea;--acc-text:#15803d;--on-acc:#fff;
+  --glow:0 10px 22px -10px rgba(22,163,74,.5);--tint:rgba(22,163,74,.07);
+  --chart-up:#16a34a;--chart-down:#65a30d;--chart-3:#0d9488;--chart-4:#d97706;--grid:rgba(16,50,30,.08)}
+[data-mode="dark"][data-scheme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;
   --acc:#34d399;--acc2:#a3e635;--acc-soft:rgba(52,211,153,.13);--acc-text:#5fe0b0;--on-acc:#0a120e;
-  --ok:#34d399;--ok-soft:rgba(52,211,153,.13);--err:#f87171;--err-soft:rgba(248,113,113,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);
-  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);
-  --glow:0 10px 24px -10px rgba(52,211,153,.5);
-  --glass:rgba(10,18,14,.72);--mask:rgba(2,8,5,.6);
-  --chart-up:#34d399;--chart-down:#a3e635;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
-  --tint:rgba(52,211,153,.08)}
-[data-theme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;
+  --glow:0 10px 24px -10px rgba(52,211,153,.5);--tint:rgba(52,211,153,.08);
+  --chart-up:#34d399;--chart-down:#a3e635;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+
+/* --- 玫瑰 rose --- */
+[data-mode="light"][data-scheme="rose"]{--bg:#fdf5f7;--line:#f2dfe5;--hover:#fbebef;--text:#2b1620;--muted:#8a6a76;
+  --acc:#e11d48;--acc2:#a855f7;--acc-soft:#fde8ed;--acc-text:#be123c;--on-acc:#fff;
+  --glow:0 10px 22px -10px rgba(225,29,72,.5);--tint:rgba(225,29,72,.06);
+  --chart-up:#e11d48;--chart-down:#10b981;--chart-3:#a855f7;--chart-4:#f59e0b;--grid:rgba(60,20,35,.075)}
+[data-mode="dark"][data-scheme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;
   --acc:#fb7185;--acc2:#c084fc;--acc-soft:rgba(251,113,133,.14);--acc-text:#fc93a2;--on-acc:#120e13;
-  --ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--err:#fb7185;--err-soft:rgba(251,113,133,.14);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.42);
-  --shadow:0 1px 2px rgba(0,0,0,.38),0 12px 30px -16px rgba(0,0,0,.72);
-  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.88);
-  --glow:0 10px 24px -10px rgba(251,113,133,.5);
-  --glass:rgba(18,14,19,.72);--mask:rgba(8,4,7,.6);
-  --chart-up:#fb7185;--chart-down:#4ade80;--chart-3:#c084fc;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07);
-  --tint:rgba(251,113,133,.08)}
-[data-theme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--text:#3b3026;--muted:#8e7f6c;--line:#e9dfcd;--hover:#f3ebdb;
+  --glow:0 10px 24px -10px rgba(251,113,133,.5);--tint:rgba(251,113,133,.08);
+  --chart-up:#fb7185;--chart-down:#4ade80;--chart-3:#c084fc;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+
+/* --- 暖阳 solar：中性色偏米黄 --- */
+[data-mode="light"][data-scheme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--line:#e9dfcd;--hover:#f3ebdb;--text:#3b3026;--muted:#8e7f6c;
   --acc:#e08a2e;--acc2:#c2410c;--acc-soft:#faeeda;--acc-text:#bf6f1c;--on-acc:#fff;
-  --ok:#5a9d3f;--ok-soft:#ecf5e3;--err:#cc4b3f;--err-soft:#fbe9e6;--warn:#c98a1b;--warn-soft:#faf0da;
-  --shadow-sm:0 1px 2px rgba(90,70,40,.06);
-  --shadow:0 1px 2px rgba(90,70,40,.06),0 10px 26px -14px rgba(90,70,40,.22);
-  --shadow-lg:0 28px 64px -26px rgba(90,70,40,.34);
-  --glow:0 10px 22px -10px rgba(224,138,46,.55);
-  --glass:rgba(255,253,248,.76);--mask:rgba(45,32,18,.44);
-  --chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--grid:rgba(90,70,40,.09);
-  --tint:rgba(224,138,46,.08)}
-[data-theme="steel"]{--bg:#eceff4;--side:#ffffff;--card:#ffffff;--text:#1f2732;--muted:#69758a;--line:#dbe2ea;--hover:#e8edf4;
+  --glow:0 10px 22px -10px rgba(224,138,46,.55);--tint:rgba(224,138,46,.08);
+  --chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--grid:rgba(90,70,40,.09)}
+[data-mode="dark"][data-scheme="solar"]{--bg:#17110a;--side:#1e1610;--card:#251b12;--text:#f0e6d8;--muted:#a3907a;--line:#3a2c1e;--hover:#2c2116;
+  --acc:#e8a04a;--acc2:#f97316;--acc-soft:rgba(232,160,74,.15);--acc-text:#f0b76a;--on-acc:#17110a;
+  --glow:0 10px 24px -10px rgba(232,160,74,.5);--tint:rgba(232,160,74,.09);
+  --chart-up:#e8a04a;--chart-down:#4ade80;--chart-3:#f97316;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+
+/* --- 雾蓝 steel：低饱和，接近办公软件 --- */
+[data-mode="light"][data-scheme="steel"]{--bg:#eceff4;--line:#dbe2ea;--hover:#e8edf4;--text:#1f2732;--muted:#69758a;
   --acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#e8edf6;--acc-text:#415c8c;--on-acc:#fff;
-  --ok:#2e8f5e;--ok-soft:#e5f2ea;--err:#c04c4c;--err-soft:#faeaea;--warn:#b78218;--warn-soft:#f8f0dc;
-  --shadow-sm:0 1px 2px rgba(35,50,70,.05);
-  --shadow:0 1px 2px rgba(35,50,70,.05),0 10px 26px -14px rgba(35,50,70,.24);
-  --shadow-lg:0 28px 64px -26px rgba(35,50,70,.34);
-  --glow:0 10px 22px -10px rgba(84,112,168,.55);
-  --glass:rgba(255,255,255,.76);--mask:rgba(20,28,40,.46);
-  --chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--grid:rgba(35,50,70,.08);
-  --tint:rgba(84,112,168,.07)}
-[data-theme="ocean"]{--bg:#eef6f7;--side:#ffffff;--card:#ffffff;--text:#12303a;--muted:#5b7f8a;--line:#d7e6ea;--hover:#e5f0f3;
+  --glow:0 10px 22px -10px rgba(84,112,168,.55);--tint:rgba(84,112,168,.07);
+  --chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--grid:rgba(35,50,70,.08)}
+[data-mode="dark"][data-scheme="steel"]{--bg:#0e1319;--side:#131a22;--card:#18202a;--text:#dfe6ef;--muted:#8593a5;--line:#26313d;--hover:#1e2833;
+  --acc:#7f9bd1;--acc2:#5fa8c9;--acc-soft:rgba(127,155,209,.15);--acc-text:#9db4e0;--on-acc:#0e1319;
+  --glow:0 10px 24px -10px rgba(127,155,209,.5);--tint:rgba(127,155,209,.08);
+  --chart-up:#7f9bd1;--chart-down:#34d399;--chart-3:#5fa8c9;--chart-4:#eab308;--grid:rgba(255,255,255,.07)}
+
+/* --- 海盐 ocean --- */
+[data-mode="light"][data-scheme="ocean"]{--bg:#eef6f7;--line:#d7e6ea;--hover:#e5f0f3;--text:#12303a;--muted:#5b7f8a;
   --acc:#0f9db8;--acc2:#0d9488;--acc-soft:#e0f3f7;--acc-text:#0a7f97;--on-acc:#fff;
-  --ok:#1f9d61;--ok-soft:#e4f5ec;--err:#d15550;--err-soft:#fbeaea;--warn:#c08a1f;--warn-soft:#f9f1dc;
-  --shadow-sm:0 1px 2px rgba(15,60,70,.05);
-  --shadow:0 1px 2px rgba(15,60,70,.04),0 10px 26px -14px rgba(15,60,70,.22);
-  --shadow-lg:0 28px 64px -26px rgba(15,60,70,.32);
-  --glow:0 10px 22px -10px rgba(15,157,184,.55);
-  --glass:rgba(255,255,255,.76);--mask:rgba(8,35,42,.46);
-  --chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--grid:rgba(15,60,70,.08);
-  --tint:rgba(15,157,184,.07)}
+  --glow:0 10px 22px -10px rgba(15,157,184,.55);--tint:rgba(15,157,184,.07);
+  --chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--grid:rgba(15,60,70,.08)}
+[data-mode="dark"][data-scheme="ocean"]{--bg:#061417;--side:#0a1c20;--card:#0d2429;--text:#d9eef2;--muted:#7fa3ab;--line:#17363d;--hover:#103038;
+  --acc:#22b8d4;--acc2:#2dd4bf;--acc-soft:rgba(34,184,212,.15);--acc-text:#4ecfe6;--on-acc:#061417;
+  --glow:0 10px 24px -10px rgba(34,184,212,.5);--tint:rgba(34,184,212,.08);
+  --chart-up:#22b8d4;--chart-down:#34d399;--chart-3:#2dd4bf;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
 
 /* ============ 基础 ============ */
 *{box-sizing:border-box;margin:0;padding:0}
@@ -324,6 +331,7 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
   padding:6px 14px;border-radius:7px;transition:all var(--t-fast);white-space:nowrap}
 .seg button:hover{color:var(--text)}
 .seg button.on{background:var(--card);color:var(--acc-text);font-weight:600;box-shadow:var(--shadow-sm)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
 
 /* ============ 规则标签 ============ */
 /* 标签是「点一下就套用」的东西，所以整块可点、状态要一眼看得出来：
@@ -341,6 +349,17 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .tag-chip .x:hover{opacity:1;color:var(--err)}
 .tag-empty{font-size:12.5px;color:var(--muted)}
 .seg.sm button{padding:3px 9px;font-size:12px}
+
+/* 表格里的小下拉（选安装分支）：外观贴近旁边的 .btn.sm，别做成一个突兀的表单控件 */
+.sel-sm{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;line-height:1.5;width:auto;max-width:104px;
+  padding:4px 20px 4px 9px;border-radius:6px;border:1px solid var(--line);background:var(--card);
+  color:var(--text);cursor:pointer;vertical-align:middle;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 12px) 52%,calc(100% - 8px) 52%;background-size:4px 4px,4px 4px;
+  background-repeat:no-repeat;transition:border-color var(--t-fast),box-shadow var(--t-fast)}
+.sel-sm:hover{border-color:var(--acc)}
+.sel-sm:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+.sel-sm + .btn{margin-left:6px}
 
 /* ============ 表格 ============ */
 .tbl-wrap{overflow-x:auto;margin:0 -4px;border-radius:var(--r)}
@@ -361,15 +380,45 @@ td.num{font-variant-numeric:tabular-nums}
 .theme-btn{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
   padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
 .theme-btn:hover{background:var(--hover);color:var(--text)}
-.tpop{position:absolute;bottom:54px;left:10px;right:10px;background:var(--card);border:1px solid var(--line);
-  border-radius:var(--r);box-shadow:var(--shadow-lg);padding:12px;z-index:50;
+.tpop{position:absolute;bottom:54px;left:10px;width:302px;max-height:calc(100vh - 130px);overflow:auto;
+  background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);box-shadow:var(--shadow-lg);padding:14px;z-index:50;
   opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
 .tpop.show{opacity:1;transform:none;pointer-events:auto}
-.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:15px 8px;padding-bottom:16px}
-.swatch{aspect-ratio:1;border-radius:10px;border:2px solid transparent;cursor:pointer;position:relative;transition:transform var(--t-fast),box-shadow var(--t-fast)}
-.swatch:hover{transform:scale(1.12)}
-.swatch.on{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-.swatch span{position:absolute;left:0;right:0;bottom:-16px;font-size:10px;color:var(--muted);text-align:center;white-space:nowrap}
+.tpop-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tpop-h b{font-size:13px}
+.tpop-sub{font-size:11px;color:var(--muted);margin:12px 0 7px;display:flex;align-items:center;gap:6px}
+.tpop-sub:first-of-type{margin-top:12px}
+.tpop-sub .n{font-size:10.5px;color:var(--muted);font-weight:400}
+/* 亮暗切换：两个按钮，图标 + 文字，当前项用强调色实心 */
+.mode-seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--hover);border:1px solid var(--line);border-radius:9px;padding:3px}
+.mode-seg button{display:flex;align-items:center;justify-content:center;gap:6px;border:none;background:none;
+  color:var(--muted);font:inherit;font-size:12.5px;padding:7px 0;border-radius:6px;cursor:pointer;transition:all var(--t-fast)}
+.mode-seg button:hover{color:var(--text)}
+.mode-seg button.on{background:var(--card);color:var(--acc-text);font-weight:600;box-shadow:var(--shadow-sm)}
+/* 色彩方案卡片：上半是真实配色预览，下半是名称 + 用到的颜色 */
+.schemes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.scheme{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:6px;cursor:pointer;
+  font:inherit;text-align:left;transition:border-color var(--t-fast),box-shadow var(--t-fast),transform var(--t-fast)}
+.scheme:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.scheme.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-soft)}
+.scheme .prev{display:block;height:40px;border-radius:7px;position:relative;overflow:hidden;border:1px solid rgba(128,128,128,.18)}
+.scheme .prev i{position:absolute;display:block}
+/* 迷你界面：左侧栏 + 卡片 + 强调色按钮，用真实变量画，配色一眼能认出来 */
+.scheme .prev .p-side{left:0;top:0;bottom:0;width:15px;border-right-width:1px;border-right-style:solid}
+.scheme .prev .p-card{left:21px;top:7px;right:7px;height:11px;border-radius:3px;border-width:1px;border-style:solid}
+.scheme .prev .p-ln{left:23px;top:22px;width:22px;height:3px;border-radius:2px}
+.scheme .prev .p-ln2{left:23px;top:28px;width:14px;height:3px;border-radius:2px;opacity:.5}
+.scheme .prev .p-btn{right:7px;bottom:6px;width:13px;height:13px;border-radius:4px}
+.scheme .nm{display:flex;align-items:center;justify-content:space-between;margin-top:6px;padding:0 1px}
+.scheme .nm b{font-size:12px;font-weight:600}
+.scheme .nm .chk{font-size:10px;color:var(--acc-text);opacity:0;font-weight:700}
+.scheme.on .nm .chk{opacity:1}
+/* 用到的颜色：5 个小圆点，悬停看色值 */
+.dots{display:flex;gap:3px;margin-top:5px;padding:0 1px}
+.dots i{width:11px;height:11px;border-radius:50%;display:block;border:1px solid rgba(128,128,128,.32)}
+.scheme .hex{display:block;margin-top:4px;padding:0 1px;font-family:var(--mono);font-size:9.5px;
+  color:var(--muted);letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:960px){.tpop{position:fixed;bottom:auto;top:54px;left:12px;right:12px;width:auto}}
 
 /* ============ 弹层 ============ */
@@ -509,8 +558,17 @@ canvas{display:block;width:100%}
           <span>主题外观</span>
         </button>
         <div class="tpop" id="themePop">
-          <div style="margin-bottom:8px"><b style="font-size:13px">选择主题</b></div>
-          <div class="swatches" id="swatches"></div>
+          <div class="tpop-h"><b>主题外观</b><span class="muted" style="font-size:11px" id="themeNow">浅色 · 蔚蓝</span></div>
+          <div class="mode-seg" id="modeSeg">
+            <button data-mode="light" onclick="setMode('light')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+              亮色</button>
+            <button data-mode="dark" onclick="setMode('dark')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/></svg>
+              暗色</button>
+          </div>
+          <div class="tpop-sub">色彩方案<span class="n" id="schemeN"></span></div>
+          <div class="schemes" id="schemes"></div>
         </div>
       </div>
       <button class="theme-btn" onclick="logout()">
@@ -1016,6 +1074,10 @@ canvas{display:block;width:100%}
           <tbody id="updtbody"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
         </table></div>
         <p class="muted" style="margin-top:10px">
+          <b>装到哪里</b>：未配置路径的内核，一键安装会装进面板专用目录 <code>data/bin/&lt;内核&gt;/</code>，
+          与系统里其他服务在用的二进制完全隔离，不改 <code>/usr/local/bin</code>，也不影响任何其他服务。
+        </p>
+        <p class="muted" style="margin-top:6px">
           版本列表来自 GitHub Releases；如访问受限，可在下方填入镜像前缀（如 <code>https://ghfast.top</code>）。
           面板的任意版本列表需在版本索引清单中配置 <code>panel_update_index</code>，或直接粘贴 URL 更新。
         </p>
@@ -1300,6 +1362,8 @@ canvas{display:block;width:100%}
     <h3 id="vs_title">更新 <span id="vs_component"></span></h3>
     <p class="muted" style="font-size:13px;margin-bottom:10px">选择任意版本（含降级）。更新全程安全保护，失败自动回滚。</p>
     <div class="frm">
+      <div class="full"><label>分支（稳定版不含 alpha / beta / rc）</label>
+        <div class="seg sm" id="vs_chan"></div></div>
       <div class="full"><label>可用版本（GitHub Releases，新 → 旧）</label>
         <select id="vs_select" class="input" onchange="pickVersion()"></select></div>
       <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
@@ -3796,25 +3860,95 @@ function ask(title, text) {
 }
 function viewContent(title, body) { $("vw_title").textContent = title; $("vw_body").textContent = body; openModal("mView"); }
 
-/* ================= 主题 ================= */
-const THEMES = [
-  ["light","浅色","#3b82f6"],["dark","曜石","#5b9cf8"],["midnight","午夜","#818cf8"],["forest","森野","#34d399"],
-  ["rose","玫瑰","#fb7185"],["solar","暖阳","#e08a2e"],["steel","雾蓝","#5470a8"],["ocean","海盐","#0f9db8"]
+/* ================= 主题：亮暗 × 色彩方案 =================
+   以前 8 个主题是一维列表，色块上只画了一个主色：浅色和曜石看着都是蓝，
+   点下去一个是白底一个是黑底。现在拆成两层，色块画的是**真实配色组合**。 */
+const SCHEMES = [
+  ["azure", "蔚蓝"], ["indigo", "靛夜"], ["forest", "森野"], ["rose", "玫瑰"],
+  ["solar", "暖阳"], ["steel", "雾蓝"], ["ocean", "海盐"]
 ];
-function setTheme(t) {
-  document.documentElement.dataset.theme = t;
-  localStorage.setItem("triune_theme", t);
-  document.querySelectorAll(".swatch").forEach(s => s.classList.toggle("on", s.dataset.t === t));
+const MODE_NAME = { light: "浅色", dark: "暗色" };
+// 旧版把亮暗和配色揉进一个 theme id。升级后要把 localStorage 里的旧值
+// 翻译成「模式 + 方案」，否则老用户打开面板会掉回默认配色。
+const LEGACY_THEME = {
+  light: ["light", "azure"], dark: ["dark", "azure"], midnight: ["dark", "indigo"],
+  forest: ["dark", "forest"], rose: ["dark", "rose"],
+  solar: ["light", "solar"], steel: ["light", "steel"], ocean: ["light", "ocean"]
+};
+let themeMode = "light", themeScheme = "azure";
+
+// 预览色直接从 CSS 变量读：预览和真实主题共用同一份定义，
+// 不会出现「色块是这种蓝、应用后是那种蓝」。读不到（老浏览器）时给个兜底。
+function schemeVars(mode, scheme) {
+  const probe = document.createElement("div");
+  probe.setAttribute("data-mode", mode);
+  probe.setAttribute("data-scheme", scheme);
+  probe.style.cssText = "position:absolute;left:-9999px;top:0;width:0;height:0;pointer-events:none";
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const g = k => (cs.getPropertyValue(k) || "").trim();
+  const out = {
+    bg: g("--bg") || "#ffffff", side: g("--side") || "#ffffff", card: g("--card") || "#ffffff",
+    text: g("--text") || "#111111", line: g("--line") || "#dddddd",
+    acc: g("--acc") || "#3b82f6", acc2: g("--acc2") || "#8b5cf6"
+  };
+  probe.remove();
+  return out;
+}
+function renderSchemes() {
+  const cur = SCHEMES.find(s => s[0] === themeScheme);
+  $("themeNow").textContent = MODE_NAME[themeMode] + " · " + (cur ? cur[1] : "蔚蓝");
+  $("schemeN").textContent = SCHEMES.length + " 套";
+  document.querySelectorAll("#modeSeg button").forEach(b => b.classList.toggle("on", b.dataset.mode === themeMode));
+  $("schemes").innerHTML = SCHEMES.map(([id, name]) => {
+    const c = schemeVars(themeMode, id);
+    const dot = (col, label) => `<i style="background:${col}" title="${label} ${col}"></i>`;
+    return `<button class="scheme${id === themeScheme ? " on" : ""}" data-s="${id}" title="${MODE_NAME[themeMode]} · ${name}">
+      <span class="prev" style="background:${c.bg}">
+        <i class="p-side" style="background:${c.side};border-right-color:${c.line}"></i>
+        <i class="p-card" style="background:${c.card};border-color:${c.line}"></i>
+        <i class="p-ln" style="background:${c.text}"></i>
+        <i class="p-ln2" style="background:${c.text}"></i>
+        <i class="p-btn" style="background:linear-gradient(135deg,${c.acc},${c.acc2})"></i>
+      </span>
+      <span class="nm"><b>${name}</b><span class="chk">✓</span></span>
+      <span class="dots">${dot(c.bg, "背景")}${dot(c.side, "侧栏")}${dot(c.card, "卡片")}${dot(c.text, "文字")}${dot(c.acc, "主色")}${dot(c.acc2, "辅色")}</span>
+      <span class="hex">${c.acc} · ${c.acc2}</span>
+    </button>`;
+  }).join("");
+}
+function applyTheme() {
+  const r = document.documentElement;
+  r.dataset.mode = themeMode;
+  r.dataset.scheme = themeScheme;
+  localStorage.setItem("triune_mode", themeMode);
+  localStorage.setItem("triune_scheme", themeScheme);
+  localStorage.removeItem("triune_theme");
   setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
 }
-$("swatches").innerHTML = THEMES.map(([t,name,c]) =>
-  `<button class="swatch" data-t="${t}" style="background:${c}" title="${name}"><span>${name}</span></button>`).join("");
-$("swatches").addEventListener("click", e => { const s = e.target.closest(".swatch"); if (s) setTheme(s.dataset.t); });
-function toggleThemePop(){ $("themePop").classList.toggle("show"); }
+function setMode(m) { if (!MODE_NAME[m] || m === themeMode) return; themeMode = m; applyTheme(); renderSchemes(); }
+function setScheme(s) { if (s === themeScheme) return; themeScheme = s; applyTheme(); renderSchemes(); }
+$("schemes").addEventListener("click", e => {
+  const b = e.target.closest(".scheme");
+  if (b) setScheme(b.dataset.s);
+});
+function toggleThemePop() { $("themePop").classList.toggle("show"); }
 document.addEventListener("click", e => {
   if (!e.target.closest("#themePop") && !e.target.closest("#themeBtn")) $("themePop").classList.remove("show");
 });
-setTheme(localStorage.getItem("triune_theme") || "light");
+(function initTheme() {
+  let mode = localStorage.getItem("triune_mode");
+  let scheme = localStorage.getItem("triune_scheme");
+  if (!mode && !scheme) {
+    const legacy = LEGACY_THEME[localStorage.getItem("triune_theme") || ""];
+    if (legacy) { mode = legacy[0]; scheme = legacy[1]; }
+  }
+  if (!MODE_NAME[mode]) mode = "light";
+  if (!SCHEMES.some(s => s[0] === scheme)) scheme = "azure";
+  themeMode = mode; themeScheme = scheme;
+  applyTheme();
+  renderSchemes();
+})();
 
 /* ================= API（含演示 mock） ================= */
 async function req(path, opts = {}) {
@@ -4130,10 +4264,17 @@ async function mockRoute(path, opts) {
       {component:"xray",bin:"/usr/local/bin/xray",bin_set:true,version:"Xray 24.12.18 (Xray, Penetrates Everything.)",running:false,config_exists:true,backups:[]},
       {component:"mihomo",bin:"",bin_set:false,running:false,backups:[]}
     ]};
-  if (api === "updates" && rest.startsWith("/versions")) return {component:q.component,source:"github",releases:[
-    {tag:"v1.10.0",notes:"## 新功能\n- 支持 **Hysteria2** 混淆参数 `obfs`\n- 修复高并发下的内存占用\n\n### 修复\n- WS 路径含查询串时握手失败"},
-    {tag:"v1.9.7",notes:"稳定性修复版本。\n\n- 修复 TLS 证书热加载\n- 提升日志可读性"},
-    {tag:"v1.9.5"},{tag:"v1.8.9"}]};
+  if (api === "updates" && rest.startsWith("/versions")) {
+    // 演示数据里特意放一条预发布，好让人看见「稳定版 / 预发布」是怎么分的
+    const releases = [
+      {tag:"v1.11.0-alpha.2",prerelease:true,notes:"## 预发布\n- 实验性 **Hysteria3** 支持\n- 接口可能有变动，不建议生产使用"},
+      {tag:"v1.10.0",notes:"## 新功能\n- 支持 **Hysteria2** 混淆参数 `obfs`\n- 修复高并发下的内存占用\n\n### 修复\n- WS 路径含查询串时握手失败"},
+      {tag:"v1.9.7",notes:"稳定性修复版本。\n\n- 修复 TLS 证书热加载\n- 提升日志可读性"},
+      {tag:"v1.9.5"},{tag:"v1.8.9"}];
+    return {component:q.component,source:"github",channel:"all",
+      counts:{all:releases.length,stable:releases.filter(r=>!r.prerelease).length,prerelease:releases.filter(r=>r.prerelease).length},
+      releases};
+  }
   if (api.startsWith("cores/") && api.endsWith("/update")) { await new Promise(r=>setTimeout(r,900)); const c=api.split("/")[1];
     const installed = !MDB.settings["bin_"+c];
     if (installed) MDB.settings["bin_"+c] = "/opt/triune-panel/data/bin/"+c+"/"+(c==="singbox"?"sing-box":c);
@@ -8101,7 +8242,9 @@ async function loadComponents() {
         : '<span class="badge b-idle">未运行</span>';
       const primary = c.bin_set
         ? `<button class="btn sm" onclick="fetchVersions('${c.component}')">版本列表</button>`
-        : `<button class="btn sm primary" onclick="fetchVersions('${c.component}', true)">一键安装</button><span class="muted" style="font-size:11.5px"> 装到面板专用目录，与系统现有二进制隔离</span>`;
+        : `<select class="sel-sm" id="ch_${c.component}" data-comp="${c.component}" onchange="pickChannel(this)" title="安装分支：稳定版不含 alpha / beta / rc">
+             ${channelOptions(c.component)}</select>
+           <button class="btn sm primary" onclick="fetchVersions('${c.component}', true)">一键安装</button>`;
       rows.push(`<tr>
         <td><b>${c.component}</b><div class="muted mono" style="font-size:11.5px">${c.bin || "未配置路径"}</div></td>
         <td class="mono">${c.version || '<span class="muted">未知</span>'}</td>
@@ -8114,24 +8257,65 @@ async function loadComponents() {
 }
 
 /* 版本列表弹窗（复用通用内容弹窗思路，独立实现带选择） */
-let verList = [], verInstallMode = false;
+let verList = [], verAll = [], verCounts = {}, verChannel = "stable", verInstallMode = false;
+// 每个内核记住用户上次选的分支：装过一次之后再看别的内核，不该又跳回默认。
+const CHANNEL_PICK = {};
+const CHANNEL_DEFS = [["stable", "稳定版"], ["prerelease", "预发布"], ["all", "全部"]];
+function channelOptions(comp) {
+  const cur = CHANNEL_PICK[comp] || "stable";
+  return CHANNEL_DEFS.map(([v, n]) =>
+    `<option value="${v}"${v === cur ? " selected" : ""}>${n}</option>`).join("");
+}
+function pickChannel(sel) {
+  CHANNEL_PICK[sel.dataset.comp] = sel.value;
+}
+
 async function fetchVersions(comp, install = false) {
   verInstallMode = install;
+  // 一次拿全量，分支切换在本地过滤：换分支不该再等一次网络往返
+  verChannel = install ? (CHANNEL_PICK[comp] || "stable") : "all";
   toast("正在获取版本列表…", "info");
   try {
-    const j = await req("/api/updates/versions?component=" + comp);
-    verList = j.releases || [];
-    if (!verList.length) { toast("版本列表为空", "warn"); return; }
-    const opts = verList.map((r,i)=>`<option value="${i}">${r.tag}${r.sha256?" ✔":" "}</option>`).join("");
+    const j = await req("/api/updates/versions?component=" + comp + "&channel=all");
+    verAll = j.releases || [];
+    verCounts = j.counts || {};
+    if (!verAll.length) { toast("版本列表为空", "warn"); return; }
     $("vs_component").textContent = comp;
     $("vs_title").firstChild.textContent = install ? "安装 " : "更新 ";
     $("vs_confirm").textContent = install ? "安装选中版本" : "更新到选中版本";
-    $("vs_select").innerHTML = opts;
     $("vs_url").value = ""; $("vs_sha").value = "";
     $("vs_confirm").disabled = false;
-    pickVersion(); // 默认选中最新版本并展示其 Release Notes
+    renderChannelSeg();
     openModal("mVersions");
   } catch(e){ toast(e.message, "err"); }
+}
+// 分支条：括号里是该分支的版本数，空分支直接禁用（点了只会看到空列表）
+function renderChannelSeg() {
+  $("vs_chan").innerHTML = CHANNEL_DEFS.map(([v, n]) => {
+    const c = verCounts[v] || 0;
+    const on = v === verChannel ? " on" : "";
+    return `<button data-ch="${v}" class="${on.trim()}"${c ? "" : " disabled"}
+      onclick="setChannel('${v}')">${n} <span style="opacity:.6;font-weight:400">${c}</span></button>`;
+  }).join("");
+  renderVersionOptions();
+}
+function setChannel(ch) {
+  if (ch === verChannel) return;
+  verChannel = ch;
+  renderChannelSeg();
+}
+function renderVersionOptions() {
+  verList = verAll.filter(r => verChannel === "all" || (verChannel === "prerelease") === !!r.prerelease);
+  if (!verList.length) {
+    $("vs_select").innerHTML = `<option>该分支暂无版本</option>`;
+    $("vs_confirm").disabled = true;
+    $("vs_notes_wrap").style.display = "none";
+    return;
+  }
+  $("vs_select").innerHTML = verList.map((r, i) =>
+    `<option value="${i}">${r.tag}${r.prerelease ? " · 预发布" : ""}${r.sha256 ? " ✔" : ""}</option>`).join("");
+  $("vs_confirm").disabled = false;
+  pickVersion(); // 默认选中该分支最新版本并展示其 Release Notes
 }
 function pickVersion() {
   const r = verList[+$("vs_select").value];

@@ -22,6 +22,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,18 +32,114 @@ func execCmd(bin string, args ...string) *exec.Cmd { return exec.Command(bin, ar
 
 // Release GitHub Release 摘要（版本列表用）。
 type Release struct {
-	Tag    string   `json:"tag"`
-	URL    string   `json:"url,omitempty"`
-	Sha256 string   `json:"sha256,omitempty"`
-	Notes  string   `json:"notes,omitempty"` // Release 说明正文（markdown 原文）
-	Assets []string `json:"assets,omitempty"`
+	Tag         string   `json:"tag"`
+	URL         string   `json:"url,omitempty"`
+	Sha256      string   `json:"sha256,omitempty"`
+	Notes       string   `json:"notes,omitempty"` // Release 说明正文（markdown 原文）
+	Assets      []string `json:"assets,omitempty"`
+	Prerelease  bool     `json:"prerelease"`             // 预发布（alpha/beta/rc）
+	PublishedAt string   `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
+}
+
+// 版本分支：GitHub Releases 是稳定版与预发布混在一起的列表，
+// 「装最新」如果不区分分支，会直接把 alpha 装到生产面板上。
+const (
+	ChannelAll        = "all"
+	ChannelStable     = "stable"
+	ChannelPrerelease = "prerelease"
+)
+
+// NormalizeChannel 把外部传入的分支名收敛到已知值，空值视为 all。
+func NormalizeChannel(s string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", ChannelAll:
+		return ChannelAll, true
+	case ChannelStable:
+		return ChannelStable, true
+	case ChannelPrerelease:
+		return ChannelPrerelease, true
+	}
+	return "", false
+}
+
+// FilterChannel 按分支过滤版本列表（保持原有顺序）。
+func FilterChannel(rels []Release, channel string) []Release {
+	ch, ok := NormalizeChannel(channel)
+	if !ok || ch == ChannelAll {
+		return rels
+	}
+	out := make([]Release, 0, len(rels))
+	for _, r := range rels {
+		if (ch == ChannelPrerelease) == r.Prerelease {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// parseSemver 从 tag 里取出三段数字与预发布后缀。
+// 只认 "1.2.3" / "v1.2.3" / "v1.2.3-alpha.1" 这类写法；
+// 认不出（如日期型 tag）返回 ok=false，排序时退化为按发布时间。
+func parseSemver(tag string) (nums [3]int, pre string, ok bool) {
+	s := strings.TrimSpace(tag)
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "v"), "V")
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		pre = s[i+1:]
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return nums, pre, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nums, pre, false
+		}
+		nums[i] = n
+	}
+	return nums, pre, true
+}
+
+// newerThan 报告 a 是否应排在 b 前面（版本号降序）。
+// 同一版本号下正式版优先于预发布（1.15.0 > 1.15.0-alpha.13）。
+func newerThan(a, b Release) bool {
+	an, ap, aok := parseSemver(a.Tag)
+	bn, bp, bok := parseSemver(b.Tag)
+	if aok && bok {
+		for k := 0; k < 3; k++ {
+			if an[k] != bn[k] {
+				return an[k] > bn[k]
+			}
+		}
+		if (ap == "") != (bp == "") {
+			return ap == ""
+		}
+		if ap != bp {
+			return ap > bp
+		}
+	}
+	if aok != bok {
+		return aok
+	}
+	return a.PublishedAt > b.PublishedAt
+}
+
+// sortReleases 按版本号降序重排（认不出的 tag 退化为按发布时间）。
+// GitHub 按创建时间返回，补丁回填（v1.14.5 晚于 v1.15.0 发布）会让
+// 「第一条」不是最高版本。
+func sortReleases(rels []Release) {
+	sort.SliceStable(rels, func(i, j int) bool { return newerThan(rels[i], rels[j]) })
 }
 
 // ghReleases GitHub API 的 releases 响应子集。
 type ghReleases []struct {
-	TagName string `json:"tag_name"`
-	Body    string `json:"body"`
-	Assets  []struct {
+	TagName     string `json:"tag_name"`
+	Body        string `json:"body"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
+	PublishedAt string `json:"published_at"`
+	Assets      []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -80,12 +178,24 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(gh))
 	for _, r := range gh {
-		rel := Release{Tag: r.TagName, Notes: r.Body}
+		if r.Draft {
+			continue // 草稿对外不可下载，列出来只会让人点出一个 404
+		}
+		_, pre, ok := parseSemver(r.TagName)
+		rel := Release{
+			Tag:         r.TagName,
+			Notes:       r.Body,
+			Prerelease:  r.Prerelease || (ok && pre != ""),
+			PublishedAt: r.PublishedAt,
+		}
 		for _, a := range r.Assets {
 			rel.Assets = append(rel.Assets, a.Name)
 		}
 		out = append(out, rel)
 	}
+	// GitHub 按创建时间排序，补丁版本回填（如 v1.14.5 晚于 v1.15.0 发布）
+	// 会让「第一条」不是最高版本；这里按版本号重排，认不出的退化为按时间。
+	sortReleases(out)
 	return out, nil
 }
 
@@ -112,8 +222,11 @@ func ListIndexVersions(indexURL string) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(idx))
 	for _, it := range idx {
-		out = append(out, Release{Tag: it.Version, URL: it.URL, Sha256: it.Sha256, Notes: it.Notes})
+		_, pre, ok := parseSemver(it.Version)
+		out = append(out, Release{Tag: it.Version, URL: it.URL, Sha256: it.Sha256, Notes: it.Notes,
+			Prerelease: ok && pre != ""})
 	}
+	sortReleases(out)
 	return out, nil
 }
 
