@@ -95,7 +95,10 @@ jobs:
                   for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*", line):
                       nxt = line[m.end():m.end() + 1]
                       if nxt and ord(nxt) > 127:
-                          bad.append(f"{p}:{i}: {m.group(0)}{nxt}  ← 改成 ${{{m.group(0)[1:]}}}{nxt}")
+                          # 注意别在这里写美元符加大括号：那是 Actions 的表达式语法，
+                          # 会让整个 workflow 文件解析失败（这次就踩了）。
+                          fixed = "${" + m.group(0)[1:] + "}"
+                          bad.append(f"{p}:{i}: {m.group(0)}{nxt}  ← 应写成 {fixed}{nxt}")
           if bad:
               print("\n".join(bad))
               sys.exit(1)
