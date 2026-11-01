@@ -32,11 +32,13 @@ jobs:
       - name: go test
         run: go test ./... -count=1
 
-      - name: 三平台交叉编译（发布用的就是这三份）
+      - name: 四平台交叉编译（发布用的就是这四份）
         run: |
           set -euo pipefail
           mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/arm64; do
+          # 必须与 deploy/release.sh 的 TARGETS 一致：发布带几个平台，
+          # 这里就得编几个，否则某个平台编不过要到发版时才发现。
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}"; arch="${target#*/}"
             echo "→ ${os}/${arch}"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
@@ -79,4 +81,4 @@ jobs:
         run: |
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
           shellcheck -S warning -e SC2206 \
-            deploy/install.sh deploy/uninstall.sh deploy/check-version.sh
+            deploy/install.sh deploy/uninstall.sh deploy/check-version.sh deploy/release.sh

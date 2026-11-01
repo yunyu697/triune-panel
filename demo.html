@@ -210,6 +210,23 @@ body[data-role="admin"] .need-owner{display:none!important}
 .card h3{font-size:15px;font-weight:650;margin-bottom:15px;display:flex;align-items:center;gap:9px;letter-spacing:.2px}
 .card h3 .spacer{flex:1}
 .card h3 .hint{font-size:11.5px;font-weight:400;color:var(--muted)}
+/* 卡片底部操作条：把「保存」这类按钮和上方的说明文字隔开 */
+.card-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  margin:16px -22px -20px;padding:12px 22px;border-top:1px solid var(--line);
+  border-radius:0 0 var(--r-lg) var(--r-lg)}
+/* 设置页常驻操作条：整页十几张卡片，保存按钮滚出视野就找不着了。
+   钉在视口底部，按钮跟着当前分区变（基础设置 / 变更通知 / 组件更新），
+   左侧小字写明它现在保存的是哪一块，避免按错。 */
+/* bottom 留 12px：贴 0 时底边会被滚动容器裁掉一截，看起来像被切了 */
+.set-bar{position:sticky;bottom:12px;z-index:8;display:flex;gap:12px;align-items:center;
+  margin:10px 0 0;padding:10px 14px;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:0 -10px 24px -14px rgba(0,0,0,.45)}
+.set-bar .sb-hint{font-size:12.5px;color:var(--muted);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.set-bar .sb-hint b{color:var(--fg);font-weight:600}
+.set-bar .btn{flex:none}
+@media (max-width:640px){.set-bar .sb-hint{display:none}}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 @media (max-width:1080px){.grid-3{grid-template-columns:1fr}}
@@ -951,7 +968,7 @@ canvas{display:block;width:100%}
       </div>
 
       <div class="need-admin">
-      <div class="card">
+      <div class="card" id="set_card_basic">
         <h3>基础设置</h3>
         <div class="frm">
           <div><label>sing-box 二进制路径</label><input id="s_binsingbox" class="input"></div>
@@ -986,9 +1003,9 @@ canvas{display:block;width:100%}
           <label><input type="checkbox" id="s_fwauto"> 入站端口自动放行防火墙（新增 / 删除 / 改端口时同步 ufw · firewalld · iptables；本机无防火墙或由云安全组控制时自动跳过）</label>
         </div>
         <p class="muted" style="margin:0">仅管理本机防火墙，云厂商安全组需在控制台另行放行。iptables 规则重启后不保留，ufw / firewalld 会持久化。</p>
-        <div style="margin-top:14px"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
+        <div class="card-actions"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
-      <div class="card">
+      <div class="card" id="set_card_notify">
         <h3>变更通知<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px" id="nt_state"></span></h3>
         <p class="muted" style="margin:0 0 12px">
           改配置时推一条摘要出去：谁、什么时候、改了什么，设置项带<b>字段级 diff</b>（从什么改成什么）。
@@ -1003,7 +1020,7 @@ canvas{display:block;width:100%}
           <div class="full"><label>订阅哪些事件<span class="muted" style="font-weight:400">（全不选 = 默认集合，不含登录）</span></label>
             <div class="checks" id="nt_events"></div></div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+        <div class="card-actions">
           <button class="btn primary" onclick="saveNotify()">保存通知设置</button>
           <button class="btn" onclick="testNotify()">发送测试</button>
           <span class="muted" id="nt_msg"></span>
@@ -1078,7 +1095,7 @@ canvas{display:block;width:100%}
         <span class="spacer"></span>
         <button class="btn" onclick="loadPanelBackups()">查看历史备份</button>
       </div>
-      <div class="card">
+      <div class="card" id="set_card_update">
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
         <div class="tbl-wrap"><table>
@@ -1098,8 +1115,10 @@ canvas{display:block;width:100%}
           <div><label>默认下载镜像（可选，留空 = 官方地址）</label><input id="s_gh_mirror" class="input" placeholder="https://ghfast.top"></div>
           <div><label>面板版本索引 URL（可选）</label><input id="s_panel_index" class="input" placeholder="https://.../versions.json"></div>
         </div>
-        <button class="btn sm" onclick="saveUpdateSettings()">保存更新设置</button>
-        <span class="muted" id="updsetmsg"></span>
+        <div class="card-actions">
+          <button class="btn primary" onclick="saveUpdateSettings()">保存更新设置</button>
+          <span class="muted" id="updsetmsg"></span>
+        </div>
       </div>
 
       <!-- 管理员账号：只有超级管理员可见（服务端同样只允许 owner 调用） -->
@@ -1129,6 +1148,13 @@ canvas{display:block;width:100%}
         <button class="btn primary" onclick="createAdmin()">新建管理员</button>
       </div>
       </div><!-- /need-admin -->
+
+      <!-- 常驻操作条：设置页很长，保存按钮会滚出视野。
+           钉在视口底部，按钮跟着当前分区走（见 updateSetBar）。 -->
+      <div class="set-bar" id="set_bar">
+        <span class="sb-hint" id="set_bar_hint">当前分区：<b>基础设置</b></span>
+        <button class="btn primary" id="set_bar_btn" onclick="saveSettings()">保存设置</button>
+      </div>
     </section>
 
     <!-- 审计日志 -->
@@ -3858,6 +3884,7 @@ function goto(v) {
   if (v === "overview") setTimeout(loadOverview, 30);
   if (v === "audit") loadAudit();
   if (v === "configs") loadSavedConfigs();
+  if (v === "settings") setTimeout(updateSetBar, 30);
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -8748,6 +8775,43 @@ async function saveSettings() {
   }
   catch (e) { toast(e.message, "err"); }
 }
+
+/* ---- 设置页常驻操作条 ----
+   设置页十几张卡片、每张各有保存按钮，滚出视野后就找不着了。
+   底部这条钉在视口上，按钮跟着「当前滚到哪一块」变，左侧写明它保存的是哪一块。
+   注意别用 position:sticky 挂在卡片上——卡片本身大多比视口矮，sticky 不会触发。 */
+const SET_BAR_SECTIONS = [
+  { id:"set_card_basic",  name:"基础设置", label:"保存设置",     run:() => saveSettings() },
+  { id:"set_card_notify", name:"变更通知", label:"保存通知设置", run:() => saveNotify() },
+  { id:"set_card_update", name:"组件更新", label:"保存更新设置", run:() => saveUpdateSettings() },
+];
+let setBarCur = null;
+
+function updateSetBar() {
+  const bar = $("set_bar");
+  if (!bar) return;
+  const main = document.querySelector(".main");
+  // 判定线取视口上沿往下 140px：卡片标题滚过这条线就算「正在看这一块」
+  const line = main.getBoundingClientRect().top + 140;
+  let cur = null;
+  for (const s of SET_BAR_SECTIONS) {
+    const el = $(s.id);
+    if (el && el.getBoundingClientRect().top <= line) cur = s;
+  }
+  // 还没滚到任何「有保存按钮」的分区（比如停在「我的账号」）就收起来，
+  // 免得显示一个跟眼前内容无关的保存按钮。
+  bar.style.visibility = cur ? "visible" : "hidden";
+  if (!cur || cur === setBarCur) return;
+  setBarCur = cur;
+  $("set_bar_hint").innerHTML = "当前分区：<b>" + cur.name + "</b>";
+  const btn = $("set_bar_btn");
+  btn.textContent = cur.label;
+  btn.onclick = cur.run;
+}
+
+document.querySelector(".main").addEventListener("scroll", () => {
+  if (CURRENT === "settings") updateSetBar();
+}, { passive: true });
 
 /* ---- 我的账号：改自己的密码（需原密码，首次设密码时留空） ---- */
 async function changeMyPassword() {

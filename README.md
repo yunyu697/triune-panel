@@ -568,6 +568,22 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 
 两条路径各有模板，拼写由测试钉住（`TestUrlTestSpelling`）。
 
+### 规则集勾选有推荐策略
+
+规则集目录（`/api/export/catalog`）里每条都带一个 `policy`，勾选时按它起手：
+**国内站点与私有网络 DIRECT，广告 / 追踪 / 遥测 / IP 归属探测 REJECT，其余 PROXY**。
+107 条里 30 条 DIRECT、8 条 REJECT、69 条 PROXY。
+
+这样勾「中国大陆域名」「拼多多」不会再把国内流量塞进代理，勾「广告域名」也真的是
+拦截而不是转发。推荐值只放在后端目录一处，是唯一事实源，前端不自己编。
+
+它只是**起手值**：勾上之后下拉框可以改，改过就以你为准。生成时请求里没带 `policy`
+（升级后残留的旧页面缓存、直接调 `/api/export/config` 的脚本）也按目录推荐值走，
+不会退回一律 PROXY。
+
+> **升级提示**：保存过的配置里记的是当时的策略，**重新生成不会自动套用新的推荐值**。
+> 想让老配置用上新策略，回配置生成页把规则集重新勾一遍再保存。
+
 ### sing-box 要选版本
 
 sing-box 对未知字段是**严格校验**的：多一个字段就是 `FATAL` 起不来，少一个字段
@@ -1251,3 +1267,6 @@ CI 在推 tag 时调用的就是它，避免两边各抄一份正则慢慢长歪
 ./deploy/check-version.sh --next v1.0.9   # → v1.1.0
 ./deploy/check-version.sh --next v9.9.9   # → v10.0.0
 ```
+
+发版走 [`deploy/release.sh`](deploy/release.sh)：校验版本号 → 四平台构建 → 生成
+`sha256sums.txt` → 打 tag → 推送 → 建 Release，一步到底；`--dry-run` 只构建不动远端。
