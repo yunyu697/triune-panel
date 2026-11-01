@@ -2,6 +2,8 @@
 
 面板装完之后，日常真正会重复做的就那么几件事：看它还活着没、重启一下、升级、查某个用户的订阅、翻一眼审计。这些不该逼人开浏览器登录。`tp` 就是给这些事用的。
 
+它也能改东西——启停入站、增删用户、应用配置——但改的动作由面板执行，`tp` 只负责把意图说清楚。为什么必须这样，见 [写操作为什么必须走面板](#写操作为什么必须走面板)。
+
 ```
 $ tp
 Triune Panel v1.0.3
@@ -54,6 +56,16 @@ Triune Panel v1.0.3
 
 所以在任意目录下 `sudo tp status` 都能找到 systemd 装的那个实例，不用 `cd`。
 
+### 控制套接字
+
+写操作要找到面板的控制套接字：
+
+```
+--sock PATH  >  环境变量 TRIUNE_CONTROL_SOCK  >  /run/triune-panel/control.sock  >  <数据目录>/control.sock
+```
+
+正常情况下不用管它。手动前台跑面板、或者装在奇怪位置时，用 `--sock` 指定即可。
+
 ### 机器可读输出
 
 标了 `--json` 的命令支持 `--json`，输出一份 JSON 给脚本取字段：
@@ -105,7 +117,11 @@ tp in show --data /opt/triune-panel/data 1
 | `tp logs [-f] [-n N]` | 面板日志 | 否 | 否 |
 | `tp update` | 升级面板 | 是 | 否 |
 | `tp in ls` / `tp in show <id>` | 入站 | 否 | 否 |
+| `tp in on` / `off` / `rm <id>` | **改入站** | 是 | **是** |
 | `tp user ls` / `show` / `link` | 用户与订阅 | 否 | 否 |
+| `tp user add` / `set` / `rm` / `token` | **改用户** | 是 | **是** |
+| `tp apply [内核]` | **应用配置** | 是 | **是** |
+| `tp rollback <内核>` | **回滚配置** | 是 | **是** |
 | `tp audit` | 审计日志 | 否 | 否 |
 | `tp doctor` | 环境自检 | 否 | 否 |
 | `tp backup` | 备份数据目录 | 视目录权限 | 否 |
@@ -114,7 +130,10 @@ tp in show --data /opt/triune-panel/data 1
 | `tp version` | 打印版本 | 否 | 否 |
 | `tp help [--full]` | 帮助 | 否 | 否 |
 
-**"需要面板在跑：否"是这一整套设计的核心。** 查询命令全部直连 SQLite，不经过 daemon。面板起不来的时候，正是你最需要查数据的时候——如果那时候 CLI 还要连它，这套工具就白做了。
+两列「需要面板在跑」分出了两类命令，这是整套设计的核心：
+
+- **读（否）**：直连 SQLite，不经过 daemon。面板起不来的时候，正是你最需要查数据的时候——如果那时候 CLI 还要连它，这套工具就白做了。
+- **写（是）**：必须经控制套接字交给 daemon 执行。内核进程状态只存在 daemon 的内存里（没有 pid 文件），CLI 自己拉起内核会和 daemon 抢端口，还会让 daemon 的内存状态和磁盘对不上——表现为「面板显示运行中，实际早死了」。所以写操作只有一个执行者。
 
 `tp help` 打上面这张表；`tp help --full` 额外列出备份加密、异地备份的全部参数（那部分长到不适合当默认帮助，但"口令丢失 = 归档永久打不开"这类话不能省）。
 
@@ -256,6 +275,178 @@ tp audit --json
 
 `--since` 支持 `30m` / `24h` / `7d`。注意 Go 的 `time.ParseDuration` 不认 `d`，这里的 `d` 是 CLI 自己补的。
 
+---
+
+### 写操作：`tp in on|off|rm`、`tp user ...`、`tp apply`、`tp rollback`
+
+这一类命令**需要面板在跑**。它们把意图经 unix 套接字交给 daemon，由 daemon 统一执行——原因见下一节「写操作为什么必须走面板」。
+
+### `tp in on <id>` / `tp in off <id>`
+
+```bash
+sudo tp in off 2
+```
+```
+  ✔ 入站 备用 hy2 已停用
+  ✔ singbox  已应用 · 修订 #42 · 已校验 · 已重启
+```
+
+**默认顺手应用配置**（`--no-apply` 可跳过）。只翻一个数据库开关而不应用，用户会以为节点已经停了，实际端口还在服务——这是危险的那个方向。反过来「多应用一次」最坏结果是内核重启一下。
+
+### `tp in rm <id>`
+
+```bash
+sudo tp in rm 3          # 会先问一遍
+sudo tp in rm 3 --yes    # 脚本里必须显式加
+```
+
+确认提示会提前说明后果：正在服务的入站删掉会断流、绑着的用户会被解绑（用户本身不删）。
+
+**非交互环境（管道、cron）一律拒绝**，不会因为 stdin 恰好有内容就当真。脚本里少写一个 `--yes` 就静默删数据，比多问一句危险得多。
+
+### `tp user add <name>`
+
+```bash
+sudo tp user add alice --quota 50 --expires 2026-12-31 --inbounds 1,备用hy2
+```
+```
+  ✔ 已创建用户 alice
+  凭据      8f2b1c3d-9e4a-4f5b-8c6d-7e8f9a0b1c2d
+  订阅令牌  24d34785947183fc7d29e06afae9c8a6
+  订阅地址  http://panel.example.com/sub/24d34785947183fc7d29e06afae9c8a6
+  ✔ singbox  已应用 · 修订 #43 · 已校验 · 已重启
+```
+
+| 开关 | 说明 |
+|---|---|
+| `--quota GB` | 流量配额，`0`（默认）= 不限 |
+| `--expires 2026-12-31` | 到期日，**落到当天 23:59:59**——「到期日 12-31」应该覆盖整个 12-31，而不是当天零点就失效 |
+| `--inbounds 1,备用hy2` | 绑定入站，id 和名称都认（脚本用 id 稳定，人手上敲名称更自然） |
+| `--disabled` | 建好先停用 |
+| `--json` | 机器可读输出，便于脚本取凭据 |
+
+凭据和订阅令牌由服务端生成，CLI 不自己造——否则「面板上建的」和「命令行建的」会有两套生成逻辑。
+
+### `tp user set <name>`
+
+```bash
+sudo tp user set alice --quota 100          # 改配额（不重启内核）
+sudo tp user set alice --expires none       # 取消到期
+sudo tp user set alice --disable            # 停用（会重启内核）
+sudo tp user set alice --inbounds 1,2       # 重绑（会重启内核）
+```
+
+**只有「启用状态」和「绑定关系」会影响内核配置**，改配额和到期日不会重启内核——那两项是流量采集器在管，重启内核只会白白断掉所有在线连接。
+
+### `tp user token <name>`
+
+```bash
+sudo tp user token alice
+```
+
+重置订阅令牌，旧链接立即失效。令牌只影响订阅 URL，不进内核配置，所以**不需要 apply**。
+
+### `tp user rm <name>`
+
+```bash
+sudo tp user rm alice --yes
+```
+
+同样二次确认、同样非交互拒绝。删掉后订阅链接立即失效。
+
+### `tp apply [内核]`
+
+```bash
+sudo tp apply            # 所有「有启用且非草稿入站」的内核
+sudo tp apply singbox    # 只应用一个
+```
+
+不带参数时**只应用该跑的内核**（与启动时的内核恢复同一口径）。把三个内核都 apply 一遍会给没有入站的内核也起一个空进程，白占内存。
+
+输出里的「已校验 / 未校验」来自内核自带的 `check` 命令：没装内核二进制时会跳过校验并明说，不会假装校验过了。
+
+### `tp rollback <内核>`
+
+```bash
+sudo tp rollback singbox
+```
+
+回到上一份配置备份。注意**回滚的是配置文件，数据库里的入站/用户没有变**——所以回滚之后数据库和运行配置会不一致，改完还得再 `tp apply` 一次才真正对齐。这条提示命令会打出来。
+
+---
+
+### 写操作为什么必须走面板
+
+内核进程状态只存在 daemon 的 `proc.Manager` 内存里，没有 pid 文件。如果 CLI 自己改库、自己拉起内核：
+
+- 会和 daemon 抢端口（两个进程都想 bind 443）
+- daemon 的内存状态会和磁盘对不上，表现为「面板里显示运行中，实际上早死了」
+- 防火墙对账、审计、变更通知、修订记录这几件事都会漏掉——它们都在 handler 里
+
+所以写操作只有一个执行者。CLI 负责「说得清楚」，daemon 负责「做得正确」。
+
+### 控制套接字的三层门
+
+| 层 | 做法 | 挡住什么 |
+|---|---|---|
+| 目录 | `/run/triune-panel`，`0700` | 别的用户进不来 |
+| 文件 | `control.sock`，`0600` | 进得来也连不上 |
+| 对端凭据 | `SO_PEERCRED`（Linux）/ `LOCAL_PEERCRED`（macOS） | 连上了也不是 root |
+
+第三层是关键：**内核在 `connect()` 那一刻就把对端 uid 记在 socket 上**，之后由内核负责回答，对端既不能伪造也不能事后更换。允许 `uid 0` 或 daemon 自己的 uid——「能 sudo 的人本来就能改库」，多卡一层只是把同样的权限换个更绕的路走。
+
+取不到凭据的平台（Windows 等）**一律拒绝**，不是「取不到就放行」：放行意味着任何能连上套接字的进程都能改面板配置，而那正是这套机制要防的事。
+
+### 白名单，不是整套 API
+
+套接字上只挂了 9 个写接口：
+
+```
+PUT    /api/inbounds/{id}
+DELETE /api/inbounds/{id}
+POST   /api/clients
+PUT    /api/clients/{id}
+DELETE /api/clients/{id}
+PUT    /api/clients/{id}/inbounds
+POST   /api/clients/{id}/reset-token
+POST   /api/apply
+POST   /api/rollback
+```
+
+**不直接把 `Handler()` 挂上来。** 那等于把账号管理、设置读写、面板自更新、整面板回滚搬到本地套接字上——一旦 peer 校验哪天出了岔子，后果从「改错一个入站」变成「整个面板被接管」。白名单短到可以一眼看完，这就是它的价值。
+
+读接口也不开放：CLI 直连 SQLite 就够了，不需要多一条路径。
+
+### 审计里认得出是谁
+
+命令行改的东西，审计的操作人是 `cli@root`（非 root 账号是 `cli:uid1000`），来源 IP 记 `127.0.0.1`。
+
+```
+  时间                 操作者      动作            对象       结果
+  2026-11-01 22:44:18  cli:uid501  apply           mihomo     ok
+  2026-11-01 22:44:18  cli:uid501  inbound.update  测试节点B  ok
+  2026-11-01 22:44:14  admin       inbound.create  测试节点B  ok
+```
+
+不借用真实 owner 账号：审计里必须分得清「面板上点的」和「服务器上敲的」。冒充 owner 会让这两种来源长得一模一样，出事时查不出是谁做的。
+
+### 套接字在哪
+
+```
+--sock PATH  >  TRIUNE_CONTROL_SOCK  >  /run/triune-panel/control.sock  >  <数据目录>/control.sock
+```
+
+优先 `/run`：它是 tmpfs，停止/重启后自动清空，不会留下上次崩掉的陈尸套接字。非 root 环境（本地开发、用户目录安装）自动退到数据目录。
+
+daemon 和 CLI 用的是同一份顺序（`api.ControlSocketCandidates`），两边各写一份路径规则迟早会走岔。
+
+顺带一个好处：传输是 HTTP over unix socket，所以能直接手工调试——
+
+```bash
+curl -s --unix-socket /run/triune-panel/control.sock -X POST http://unix/api/apply -d '{"core":"singbox"}'
+```
+
+
 ### `tp doctor`
 
 环境自检：数据目录、DB 完整性、密码状态、内核二进制、防火墙、端口监听、代理环境变量、磁盘余量。有 `fail` 项返回 `1`。
@@ -339,17 +530,40 @@ tp in ls --json | jq -r '.[] | select(.state=="草稿") | .name'
 tp audit --since 24h --json | jq -r '.[] | select(.action=="login.fail") | .ip'
 ```
 
+### 批量加用户（一次应用，不是 N 次）
+
+```bash
+for u in alice bob carol; do
+  sudo tp user add "$u" --quota 50 --inbounds 1 --no-apply
+done
+sudo tp apply singbox      # 只重启一次内核
+```
+
+`--no-apply` 的意义就在这里：每条命令都应用的话，加 10 个用户会重启 10 次内核，在线用户被断 10 次。
+
+### 换掉一个用户的订阅链接
+
+```bash
+sudo tp user token alice          # 旧链接立刻失效
+tp user link alice                # 把新链接发给对方
+```
+
 ---
 
-## 六、边界：为什么还没有 `tp in on` / `tp user add`
+## 六、边界
 
-第一版只做**只读查询**和**服务控制**，写操作（启用/停用入站、增删用户、改令牌、应用配置）留到下一版。原因不是没时间，是通道问题：
+### 还没有的
 
-内核进程状态只存在 `proc.Manager` 的内存里，没有 pid 文件。CLI 直接改库然后自己拉起内核，会和 daemon 抢端口，并且让 daemon 的内存状态和磁盘对不上——表现为"面板里显示运行中，实际上早死了"。
+- `tp in add` / `tp in edit`：建入站要填十几个协议字段，命令行不适合，走面板。
+- `tp core install|update`：内核更新有「下载 → 校验 → 备份 → 替换 → 回滚」一整套流程，面板里已经做好了；命令行的 `tp update` 只管面板自己的二进制。
+- `tp cert issue`：ACME 要绑 :80 做 HTTP-01，失败原因五花八门（DNS、端口、限流），面板里有实时日志更适合排查。
+- 管理员账号管理：`/api/admins` 刻意不在白名单里——那是「能 sudo 就绕过一切」的最后一层，不该多开一个入口。
 
-正确做法是让 CLI 通过 **unix socket** 把意图交给 daemon，由 daemon 统一执行。socket 上用 `SO_PEERCRED` 校验对端是 root，等价于"能 `sudo` 就能改"。这条路已经定好，属于下一版。
+需要这些时走面板 UI，它本来就在做这件事。
 
-在那之前，写操作请走面板 UI —— 它本来就在做这件事，而且做得对。
+### 一个已知的别扭之处
+
+`tp rollback` 回滚的是**配置文件**，不是数据库。回滚完数据库里的入站/用户和运行配置会不一致，得再 `tp apply` 一次才对得上。命令输出里会提醒这一句，但本质上「配置」和「意图」在这里是两个东西——面板的「回滚」按钮也一样。
 
 ---
 
@@ -363,4 +577,9 @@ tp audit --since 24h --json | jq -r '.[] | select(.action=="login.fail") | .ip'
 | `需要 root 权限：sudo tp restart` | 启停服务必须 root，这是 systemd 的要求 |
 | `面板已启动，但 10s 内没有就绪` | 端口被占 / 数据目录权限 / 配置损坏。看 `tp logs` |
 | `这不像面板二进制` | `tp update --file` 给的文件不是面板，或架构不对（`file <路径>` 看一眼） |
+| `找不到控制套接字` | 写操作需要面板在跑。`sudo tp start`；手动前台跑的用 `--sock` 指定 |
+| `connect: connection refused` | 套接字文件在但没人监听——面板刚崩。看 `tp logs -n 50` |
+| `面板拒绝了这次操作：…（对端 uid=1000）` | 控制套接字只接受 root 或面板运行账号。加 `sudo` |
+| `apply` 报 422「运行中配置未变」 | 渲染或内核校验没过。运行中的配置**没有**被改动，修完再试 |
+| `tp in off` 之后端口还在服务 | 加了 `--no-apply`。跑一次 `tp apply <内核>` |
 | 输出中文列没对齐 | 终端字体不是等宽 CJK 字体。表格按显示宽度算，正常等宽字体不会歪 |

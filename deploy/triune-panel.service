@@ -27,6 +27,14 @@ RestartSec=3
 User=root
 LimitNOFILE=65535
 
+# 控制套接字目录：tp 的写操作（启停入站、增删用户、apply/rollback）经
+# /run/triune-panel/control.sock 交给面板执行。放 /run 是因为它是 tmpfs，
+# 停止/重启后自动清空，不会留下上次崩掉的陈尸套接字。
+# 0700 + 套接字自身 0600，再加上 SO_PEERCRED 校验对端必须是 root 或本账号，
+# 三层叠起来才算「只有本机能改」。
+RuntimeDirectory=triune-panel
+RuntimeDirectoryMode=0700
+
 # ---- 加固 ----
 # 面板本身必须以 root 跑：要绑 :80/:443（ACME HTTP-01）、改防火墙、
 # fork 内核进程。所以这里做的是「限制它能碰到什么」，不是降权。

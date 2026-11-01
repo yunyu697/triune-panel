@@ -162,6 +162,20 @@ func serve(args []string) {
 	go coll.Run()
 	// ACME 证书自动签发/续期
 	go certMgr.Run()
+
+	// 控制套接字：给 tp 的写操作提供执行通道（对端 uid 校验见 api/control.go）。
+	// 起不来不算致命——CLI 的写操作会报「套接字不存在」，面板本身照常工作。
+	if l, path, err := api.OpenControlSocket(*dataDir); err != nil {
+		log.Printf("[control] 控制套接字不可用，tp 的写操作将无法使用: %v", err)
+	} else {
+		log.Printf("[control] 控制套接字 %s", path)
+		go func() {
+			if err := srv.ServeControl(l); err != nil {
+				log.Printf("[control] 服务退出: %v", err)
+			}
+		}()
+	}
+
 	// 启动对账：先按现有「已启用且非草稿」入站在防火墙补放行端口，
 	// 再把该跑的内核拉起来。
 	//

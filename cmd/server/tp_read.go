@@ -24,7 +24,7 @@ import (
 
 func cmdIn(args []string) {
 	if len(args) == 0 {
-		die(2, "用法: tp in ls | tp in show <id>")
+		die(2, "用法: tp in ls | tp in show <id> | tp in on|off <id> | tp in rm <id>")
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -32,8 +32,14 @@ func cmdIn(args []string) {
 		cmdInList(rest)
 	case "show":
 		cmdInShow(rest)
+	case "on", "enable":
+		cmdInOn(rest)
+	case "off", "disable":
+		cmdInOff(rest)
+	case "rm", "del", "delete":
+		cmdInRm(rest)
 	default:
-		die(2, "未知动作 %q（可用: ls / show）", verb)
+		die(2, "未知动作 %q（可用: ls / show / on / off / rm）", verb)
 	}
 }
 
@@ -201,7 +207,7 @@ func prettyJSON(s string) string {
 
 func cmdUser(args []string) {
 	if len(args) == 0 {
-		die(2, "用法: tp user ls | tp user show <name> | tp user link <name>")
+		die(2, "用法: tp user ls | show <name> | link <name> | add <name> | set <name> | rm <name> | token <name>")
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -211,8 +217,16 @@ func cmdUser(args []string) {
 		cmdUserShow(rest)
 	case "link", "url":
 		cmdUserLink(rest)
+	case "add", "new":
+		cmdUserAdd(rest)
+	case "set", "edit":
+		cmdUserSet(rest)
+	case "rm", "del", "delete":
+		cmdUserRm(rest)
+	case "token", "reset-token":
+		cmdUserToken(rest)
 	default:
-		die(2, "未知动作 %q（可用: ls / show / link）", verb)
+		die(2, "未知动作 %q（可用: ls / show / link / add / set / rm / token）", verb)
 	}
 }
 
@@ -367,7 +381,23 @@ func shortToken(t string) string {
 	return t[:8] + "…"
 }
 
+// findUser 按名称（或 id）取用户，取不到就退出。
+//
+// 查不到时直接退出是给只读命令用的——`tp user show 打错名字` 应该报错，
+// 而不是打印一片空白。需要「不存在就返回 nil」的场合（比如 add 前的重名
+// 检查）用 lookupUser。
 func findUser(st *store.Store, name string) *model.Client {
+	c := lookupUser(st, name)
+	if c == nil {
+		die(1, "用户 %q 不存在（用 tp user ls 查看全部）", name)
+	}
+	return c
+}
+
+// lookupUser 按名称找用户，找不到时退化成按 id 找，都没有就返回 nil。
+//
+// 名称优先：人手上敲的是名字。退化成 id 是为了省掉「先 ls 拿 id」那一步。
+func lookupUser(st *store.Store, name string) *model.Client {
 	clients, err := st.ListClients()
 	if err != nil {
 		die(1, "读取用户失败: %v", err)
@@ -377,7 +407,6 @@ func findUser(st *store.Store, name string) *model.Client {
 			return c
 		}
 	}
-	// 没找到就退化成按 id 找，省得用户还要先 ls 一遍拿 id
 	var id int64
 	if _, err := fmt.Sscan(name, &id); err == nil && id > 0 {
 		for _, c := range clients {
@@ -386,7 +415,6 @@ func findUser(st *store.Store, name string) *model.Client {
 			}
 		}
 	}
-	die(1, "用户 %q 不存在（用 tp user ls 查看全部）", name)
 	return nil
 }
 

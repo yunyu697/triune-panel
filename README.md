@@ -277,6 +277,11 @@ tp in ls                 # 入站列表
 tp user link alice       # 直接给出三种客户端的订阅地址
 tp audit --since 7d      # 审计日志
 tp update --check        # 只看有没有新版
+
+# 写操作：交给面板执行（自动应用配置）
+sudo tp user add alice --quota 50 --expires 2026-12-31 --inbounds 1
+sudo tp in off 2
+sudo tp apply
 ```
 
 **完整命令参考见 [docs/cli.md](docs/cli.md)。** 里面逐条写了参数、输出样例、退出码，
@@ -296,9 +301,18 @@ tp update --check        # 只看有没有新版
 - **面板启动时会自动恢复内核**。内核是面板的子进程，systemd 默认 `KillMode=control-group`
   会把它们一起杀掉，所以重启面板 / 重启服务器之后，面板启动时会按"有启用且非草稿的入站"
   这个口径把该跑的内核拉起来（用上次渲染好的配置，不重新渲染）。
-- **刻意还没有** `tp in on/off`、`tp user add` 这类写操作：内核进程状态只在 daemon 内存里，
-  CLI 直接改库会和 daemon 抢端口。下一版走 unix socket + `SO_PEERCRED`（root）把意图交给
-  daemon。在那之前写操作请走面板 UI。
+- **写操作交给 daemon 执行，CLI 不碰运行状态**。`in on/off/rm`、`user add/set/rm/token`、
+  `apply`、`rollback` 这些会动内核的命令，经 unix 套接字 `/run/triune-panel/control.sock`
+  把请求交给面板，由面板改库、渲染配置、重启内核、写审计——和你在面板上点按钮走的是
+  同一段代码。原因很简单：内核是面板的子进程，端口和进程句柄都在 daemon 内存里，
+  CLI 直接改库会和 daemon 抢端口。
+- **控制套接字有三层门**：目录 `0700` + 文件 `0600`（只有 root 与面板用户进得去）；
+  连上之后用 `SO_PEERCRED` 读内核记录的对端 uid，只接受 `root` 和面板自己的 uid
+  ——这个 uid 是 `connect()` 时内核记的，对端伪造不了、也换不掉；最后是一张**白名单**，
+  只挂 9 个写接口，不挂整套 API（否则 peer 校验出一次岔子，后果就从「改错一个入站」
+  变成「整个面板被接管」）。取不到对端凭据的平台一律拒绝，不是「取不到就放行」。
+- **审计里认得出是谁**：CLI 发来的写操作记成 `cli@root` / `cli:uid1000`，不借用真实
+  账号名——否则事后翻日志分不清「面板上点的」和「服务器上敲的」。
 
 旧的完整命令名一个都没删，`triune-panel status` / `doctor` / `backup` / `restore` /
 `reset-password` 全部照旧可用（`install.sh` 内部就在用 `reset-password`）。

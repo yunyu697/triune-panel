@@ -591,6 +591,11 @@ Restart=on-failure
 RestartSec=3
 User=root
 LimitNOFILE=65535
+# 控制套接字目录：tp 的写操作经 /run/triune-panel/control.sock 交给面板执行。
+# 放 tmpfs 是因为停止/重启后自动清空，不会留下上次崩掉的陈尸套接字；
+# 0700 目录 + 0600 套接字 + SO_PEERCRED 三层，才叫「只有本机能改」。
+RuntimeDirectory=triune-panel
+RuntimeDirectoryMode=0700
 # 加固：面板必须以 root 跑（绑 :80/:443、改防火墙、fork 内核），
 # 所以这里限制的是「它能碰到什么」，而不是降权。
 NoNewPrivileges=yes

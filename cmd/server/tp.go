@@ -40,9 +40,12 @@ var tpCommands = []tpCmd{
 	{name: "logs", desc: "面板日志（journalctl）", run: cmdLogs},
 	{name: "update", desc: "升级面板二进制", run: cmdUpdate},
 
-	{name: "in", desc: "入站：ls / show", run: cmdIn},
-	{name: "user", desc: "用户：ls / show / link", run: cmdUser},
+	{name: "in", desc: "入站：ls / show / on / off / rm", run: cmdIn},
+	{name: "user", desc: "用户：ls / show / link / add / set / rm / token", run: cmdUser},
 	{name: "audit", desc: "审计日志", run: cmdAudit},
+
+	{name: "apply", desc: "重新渲染并生效内核配置", run: cmdApply},
+	{name: "rollback", desc: "把内核配置回滚到上一份备份", run: cmdRollback},
 
 	{name: "doctor", desc: "环境自检", run: cmdDoctor},
 	{name: "backup", desc: "备份数据目录", run: cmdBackup},
@@ -158,6 +161,16 @@ func tpUsage() {
   tp user link <name>    订阅链接（三种格式）
   tp audit [--since 7d]  审计日志
 
+改动（经控制套接字交给面板执行，需要 root 或面板运行账号）:
+  tp in on|off <id>      启用 / 停用入站，默认顺手应用配置
+  tp in rm <id>          删除入站
+  tp user add <name>     新建用户：--quota 50 --expires 2026-12-31 --inbounds 1,2
+  tp user set <name>     改配额 / 到期 / 启停 / 绑定：--quota / --expires / --enable|--disable / --inbounds
+  tp user rm <name>      删除用户
+  tp user token <name>   重置订阅令牌（旧链接立即失效）
+  tp apply [内核]        重新渲染并生效（不带参数 = 所有有启用入站的内核）
+  tp rollback <内核>     回滚到上一份配置备份
+
 维护:
   tp doctor              环境自检（有失败项时退出码 1）
   tp backup [--out DIR]  备份数据目录
@@ -167,6 +180,8 @@ func tpUsage() {
 通用参数:
   --data DIR   数据目录；默认 ./data → /opt/triune-panel/data 自动探测
                （也可用环境变量 TRIUNE_DATA）
+  --sock PATH  控制套接字；默认 /run/triune-panel/control.sock
+               （也可用环境变量 TRIUNE_CONTROL_SOCK）
   --json       机器可读输出（标了 --json 的命令支持）
 
 命令名支持唯一前缀缩写：tp au 等同 tp audit；有歧义时会报错

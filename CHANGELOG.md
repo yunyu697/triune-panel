@@ -98,6 +98,34 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
     号称秒回，不能因为面板半死就卡住）。没有 systemd 的环境显示「未由 systemd
     托管」而不是吓人的「未运行」。内核此刻是否在跑仍然看不到——那个状态只在
     daemon 内存里，宁可不显示也不显示一个可能过期的值。
+13. **`tp` 的写操作落地**：`in on/off/rm`、`user add/set/rm/token`、`apply`、`rollback`
+    现在都能用了。上一版刻意留白是因为内核是面板的子进程，端口和进程句柄都在
+    daemon 内存里，CLI 直接改库会和 daemon 抢端口——这次补上通道：
+    - **unix 套接字 `/run/triune-panel/control.sock`，跑的是 HTTP**。不自己发明
+      协议，是为了复用现有 handler——`apply` 的预检与自动回滚、防火墙端口对账、
+      审计、变更通知全都不用重写一遍，也不会出现「面板上点」和「命令行敲」两条
+      路径慢慢走岔。顺带的好处是 `curl --unix-socket` 能手工调试。
+    - **三层门，缺一层都不行**：目录 `0700` + 文件 `0600`；`SO_PEERCRED`
+      （macOS/FreeBSD 走 `LOCAL_PEERCRED` + `GetsockoptXucred`）读内核在 `connect()`
+      时记录的对端 uid，只放行 `root` 与面板自己的 uid——这个值对端伪造不了、事后
+      也换不掉，所以没有 `getpeereid` 那种先连后查的 TOCTOU 窗口；最后一层是
+      **白名单**，只挂 9 个写接口，`a.Handler()` 一行都没挂。整套 API 挂上去的
+      话，peer 校验出一次岔子，后果就从「改错一个入站」变成「整个面板被接管」
+      （账号管理、设置、自更新全在里面）。取不到对端凭据的平台**一律拒绝**，
+      不是「取不到就放行」。
+    - **套接字在 tmpfs 上**（systemd `RuntimeDirectory=triune-panel`），重启即清空，
+      不会留下一个陈尸套接字让人对着 `connection refused` 猜半天；起不来也不致命
+      ——面板照常工作，只是写操作会报「套接字不存在」。
+    - **审计记合成身份 `cli@root` / `cli:uid1000`**，不借用真实账号名。否则事后
+      翻日志分不清「面板上点的」和「服务器上敲的」，而这两件事的追责对象不一样。
+    - **能不动内核就不动**：`user set` 改配额 / 到期日不触发应用（这两项归 ops
+      采集器管，不写进内核配置），只有改 `enabled` 或绑定关系才重新渲染。重启内核
+      会断掉所有在线连接。
+    实测（端到端跑真面板 + 真 SQLite）：`in off` / `user add` / `user set` /
+    `in rm`（非 TTY 无 `--yes` 时正确要求确认并取消）/ `apply` / `rollback` 全部
+    按预期生效，审计里是 `cli:uid501`；白名单外的 `/api/settings`、`/api/admins`、
+    `GET /api/inbounds` 一律 404；面板停掉后写操作报「连不上面板」而只读命令照跑。
+    9 个用例覆盖套接字权限、白名单、白名单路由确实进到 handler、审计身份、用户增删改。
 
 ## v1.0.1
 
