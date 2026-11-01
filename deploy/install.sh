@@ -534,9 +534,9 @@ rm -f "$TMP_BIN"
 TP_LINK="/usr/local/bin/tp"
 if [[ -d /usr/local/bin ]]; then
   if $SUDO ln -sfn "$INSTALL_DIR/triune-panel" "$TP_LINK" 2>/dev/null; then
-    echo "→ 已安装命令 $TP_LINK（tp help 看用法）"
+    echo "→ 已安装命令 ${TP_LINK}（tp help 看用法）"
   else
-    echo "→ 未能创建 $TP_LINK，可用完整路径: $INSTALL_DIR/triune-panel"
+    echo "→ 未能创建 ${TP_LINK}，可用完整路径: $INSTALL_DIR/triune-panel"
   fi
 fi
 
