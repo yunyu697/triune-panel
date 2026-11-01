@@ -1424,6 +1424,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v1.0.7 | JSON 只解析入站并逐项回填「新增入站」表单，缺用户自动生成；同批补齐 socks/http/dokodemo-door/wireguard、h2/httpupgrade/xhttp/kcp/quic、内联 PEM、DNS 与路由导入 |
 | v1.0.5 | 导入改成 JSON（3x-ui / xray 入站定义）；移除「链接反推入站」；入站表单每项可改，Reality 密钥对可编辑 |
 | v1.0.4 | 「最新版本」按 semver 排序（预发布段曾按字符串比，默认选中了旧 alpha）；滚动 tag 用 `updated_at` 兜底 |
 | v1.0.3 | 修掉启用/切换内核的各类报错：三内核 9 处渲染错误、3 处静默失败、Reality 密钥自动生成 |
