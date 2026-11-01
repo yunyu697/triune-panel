@@ -146,6 +146,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/notify/test", a.write(a.handleNotifyTest))
 	mux.HandleFunc("POST /api/cores/{name}/update", a.write(a.handleCoreUpdate))
 	mux.HandleFunc("POST /api/cores/{name}/rollback", a.write(a.handleCoreRollback))
+	// 下载镜像：候选列表 + 测速（装/更新内核时选，默认官方地址）
+	mux.HandleFunc("GET /api/mirrors", a.write(a.handleMirrors))
+	mux.HandleFunc("POST /api/mirrors/test", a.write(a.handleMirrorTest))
 	mux.HandleFunc("GET /api/panel/backups", a.write(a.handlePanelBackups))
 	mux.HandleFunc("POST /api/certs/issue", a.write(a.handleCertsIssue))
 

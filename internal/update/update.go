@@ -32,13 +32,16 @@ func execCmd(bin string, args ...string) *exec.Cmd { return exec.Command(bin, ar
 
 // Release GitHub Release 摘要（版本列表用）。
 type Release struct {
-	Tag         string   `json:"tag"`
-	URL         string   `json:"url,omitempty"`
-	Sha256      string   `json:"sha256,omitempty"`
-	Notes       string   `json:"notes,omitempty"` // Release 说明正文（markdown 原文）
-	Assets      []string `json:"assets,omitempty"`
-	Prerelease  bool     `json:"prerelease"`             // 预发布（alpha/beta/rc）
-	PublishedAt string   `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
+	Tag    string   `json:"tag"`
+	URL    string   `json:"url,omitempty"`
+	Sha256 string   `json:"sha256,omitempty"`
+	Notes  string   `json:"notes,omitempty"` // Release 说明正文（markdown 原文）
+	Assets []string `json:"assets,omitempty"`
+	// AssetURLs 资产名 → 下载直链（不序列化：几十个资产塞进 JSON 太吵，
+	// 调用方按需取一个即可，见 api 里的 fillPanelAssetURL）。
+	AssetURLs   map[string]string `json:"-"`
+	Prerelease  bool              `json:"prerelease"`             // 预发布（alpha/beta/rc）
+	PublishedAt string            `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
 }
 
 // 版本分支：GitHub Releases 是稳定版与预发布混在一起的列表，
@@ -190,6 +193,12 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 		}
 		for _, a := range r.Assets {
 			rel.Assets = append(rel.Assets, a.Name)
+			if a.BrowserDownloadURL != "" {
+				if rel.AssetURLs == nil {
+					rel.AssetURLs = map[string]string{}
+				}
+				rel.AssetURLs[a.Name] = a.BrowserDownloadURL
+			}
 		}
 		out = append(out, rel)
 	}

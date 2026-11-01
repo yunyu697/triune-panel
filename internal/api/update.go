@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,11 @@ var componentRepos = map[string]string{
 	"xray":    "XTLS/Xray-core",
 	"mihomo":  "MetaCubeX/mihomo",
 }
+
+// defaultPanelRepo 面板自身的发布仓库。
+// panel_repo 未配置时用它——否则「面板 → 版本列表」开箱就是 400，必须先知道
+// 要填什么才能用。fork 或自建分发在设置里改成自己的仓库即可。
+const defaultPanelRepo = "yunyu697/triune-panel"
 
 // ---- 查询 ----
 
@@ -88,16 +94,21 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 			writeVersions(w, comp, "index", rels, channel)
 			return
 		}
-		if repo, _ := a.Store.GetSetting("panel_repo"); repo != "" {
-			rels, err := update.ListVersions(a.ghAPIBase(), repo)
-			if err != nil {
-				fail(w, 502, err.Error())
-				return
-			}
-			writeVersions(w, comp, "github", rels, channel)
+		repo, _ := a.Store.GetSetting("panel_repo")
+		source := "github"
+		if repo == "" {
+			repo = defaultPanelRepo
+			source = "default" // 告诉前端这是内置默认仓库，不是用户配的
+		}
+		rels, err := update.ListVersions(a.ghAPIBase(), repo)
+		if err != nil {
+			fail(w, 502, err.Error())
 			return
 		}
-		fail(w, 400, "请先在设置中配置 panel_update_index（版本索引清单 URL）或 panel_repo（GitHub 仓库）；也可以直接用 URL 方式更新到任意版本")
+		// 面板自更新要的是「本机这份平台的二进制」直链，而 GitHub 的 release
+		// 里一堆资产。这里按当前 GOOS/GOARCH 挑一个填进 url，前端就不用自己拼。
+		fillPanelAssetURL(rels)
+		writeVersions(w, comp, source, rels, channel)
 		return
 	}
 	repo, ok := componentRepos[comp]
@@ -111,6 +122,18 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeVersions(w, comp, "github", rels, channel)
+}
+
+// fillPanelAssetURL 给每条 release 挑出「本机这个平台」的二进制直链填进 url。
+// 面板自更新只认 URL（不像内核那样能按版本号拼），而一个 release 里躺着四个
+// 平台的资产，让前端去猜不现实。
+func fillPanelAssetURL(rels []update.Release) {
+	name := fmt.Sprintf("triune-panel-%s-%s", runtime.GOOS, runtime.GOARCH)
+	for i := range rels {
+		if u := rels[i].AssetURLs[name]; u != "" {
+			rels[i].URL = u
+		}
+	}
 }
 
 // writeVersions 输出按分支过滤后的版本列表，并附带各分支的数量
@@ -144,6 +167,20 @@ type coreUpdateReq struct {
 	Version string `json:"version"` // 与 url 二选一：按版本号自动构造官方下载地址
 	URL     string `json:"url"`     // 直接指定下载地址（tar.gz/zip/gz/裸二进制）
 	Sha256  string `json:"sha256"`  // 可选强校验
+	// Mirror 本次下载用的镜像前缀。用指针是为了区分「没传」与「传了空串」：
+	// 没传 = 沿用设置里的 gh_mirror；传空串 = 本次强制走官方地址。
+	Mirror *string `json:"mirror"`
+}
+
+// resolveMirror 决定本次下载用哪个镜像：请求里给了就用请求的，没给才回落设置。
+func (a *Server) resolveMirror(reqMirror *string) (string, error) {
+	raw := ""
+	if reqMirror != nil {
+		raw = *reqMirror
+	} else {
+		raw, _ = a.Store.GetSetting("gh_mirror")
+	}
+	return update.NormalizeMirror(raw)
 }
 
 // POST /api/cores/{name}/update
@@ -171,7 +208,11 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "需要 version 或 url 字段")
 		return
 	}
-	mirror, _ := a.Store.GetSetting("gh_mirror")
+	mirror, err := a.resolveMirror(req.Mirror)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
 	dlURL = update.ApplyMirror(dlURL, mirror)
 
 	downloads := filepath.Join(a.DataDir, "downloads")

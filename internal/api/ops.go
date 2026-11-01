@@ -218,13 +218,21 @@ func (a *Server) handlePublicInfo(w http.ResponseWriter, r *http.Request) {
 // 这正是"升级不失效"设计在面板自身上的应用。
 func (a *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		URL   string `json:"url"`
+		URL    string `json:"url"`
 		Sha256 string `json:"sha256"`
+		// Mirror 本次下载用的镜像前缀（指针：区分「没传」与「传空串=强制官方」）
+		Mirror *string `json:"mirror"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
 		fail(w, 400, "需要 url 字段")
 		return
 	}
+	mirror, merr := a.resolveMirror(req.Mirror)
+	if merr != nil {
+		fail(w, 400, merr.Error())
+		return
+	}
+	req.URL = update.ApplyMirror(req.URL, mirror)
 	exe, err := os.Executable()
 	if err != nil {
 		fail(w, 500, err.Error())

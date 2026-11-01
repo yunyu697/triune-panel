@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.11.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.12.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -360,6 +360,15 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .sel-sm:hover{border-color:var(--acc)}
 .sel-sm:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
 .sel-sm + .btn{margin-left:6px}
+
+/* 下载镜像行：下拉 + 「自动选择最快」 */
+.mirror-row{display:flex;gap:8px;align-items:center}
+.mirror-row select{flex:1;min-width:0}
+.mirror-row .btn{flex:none;white-space:nowrap}
+.mirror-msg{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.55}
+.mirror-msg.ok{color:var(--ok)}
+.mirror-msg.err{color:var(--err)}
+.mirror-msg b{font-weight:600}
 
 /* ============ 表格 ============ */
 .tbl-wrap{overflow-x:auto;margin:0 -4px;border-radius:var(--r)}
@@ -1078,11 +1087,12 @@ canvas{display:block;width:100%}
           与系统里其他服务在用的二进制完全隔离，不改 <code>/usr/local/bin</code>，也不影响任何其他服务。
         </p>
         <p class="muted" style="margin-top:6px">
-          版本列表来自 GitHub Releases；如访问受限，可在下方填入镜像前缀（如 <code>https://ghfast.top</code>）。
-          面板的任意版本列表需在版本索引清单中配置 <code>panel_update_index</code>，或直接粘贴 URL 更新。
+          版本列表来自 GitHub Releases。面板默认读官方仓库（可在下面改成你自己的 fork）。
+          装/更新时弹窗里能选下载镜像并<b>一键测速</b>，默认走官方地址；下面填的是<b>默认镜像</b>，
+          弹窗里没选时才用它。面板的任意版本列表也可改用版本索引清单 <code>panel_update_index</code>。
         </p>
         <div class="frm" style="margin-top:10px">
-          <div><label>GitHub 镜像前缀（可选）</label><input id="s_gh_mirror" class="input" placeholder="https://ghfast.top"></div>
+          <div><label>默认下载镜像（可选，留空 = 官方地址）</label><input id="s_gh_mirror" class="input" placeholder="https://ghfast.top"></div>
           <div><label>面板版本索引 URL（可选）</label><input id="s_panel_index" class="input" placeholder="https://.../versions.json"></div>
         </div>
         <button class="btn sm" onclick="saveUpdateSettings()">保存更新设置</button>
@@ -1367,6 +1377,14 @@ canvas{display:block;width:100%}
       <div class="full"><label>可用版本（GitHub Releases，新 → 旧）</label>
         <select id="vs_select" class="input" onchange="pickVersion()"></select></div>
       <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
+      <div class="full">
+        <label>下载镜像<span class="muted" style="font-weight:400"> · 默认官方地址，连不上再换</span></label>
+        <div class="mirror-row">
+          <select id="vs_mirror" class="input"></select>
+          <button class="btn" id="vs_probe" onclick="testMirrors()">自动选择最快</button>
+        </div>
+        <div class="mirror-msg" id="vs_mirror_msg">镜像都是第三方服务，只加速下载；装上去的二进制仍要过可执行验证与配置校验。</div>
+      </div>
       <div class="full"><label>sha256（可选）</label><input id="vs_sha" class="input mono"></div>
       <div class="full" id="vs_notes_wrap" style="display:none">
         <label>Release Notes（<span id="vs_notes_tag"></span>）</label>
@@ -4264,6 +4282,26 @@ async function mockRoute(path, opts) {
       {component:"xray",bin:"/usr/local/bin/xray",bin_set:true,version:"Xray 24.12.18 (Xray, Penetrates Everything.)",running:false,config_exists:true,backups:[]},
       {component:"mihomo",bin:"",bin_set:false,running:false,backups:[]}
     ]};
+  if (api === "mirrors") {
+    const ms = [
+      {id:"official",name:"官方地址",base:"",note:"github.com 直连，默认选项"},
+      {id:"ghfast",name:"ghfast.top",base:"https://ghfast.top",note:"老牌，速度稳定"},
+      {id:"ghproxy-net",name:"ghproxy.net",base:"https://ghproxy.net"},
+      {id:"gh-proxy",name:"gh-proxy.com",base:"https://gh-proxy.com"},
+      {id:"llkk",name:"gh.llkk.cc",base:"https://gh.llkk.cc"},
+      {id:"moeyy",name:"github.moeyy.xyz",base:"https://github.moeyy.xyz"}
+    ];
+    if (rest.startsWith("/test")) {
+      await new Promise(r=>setTimeout(r,700)); // 演示里也模拟一下测速耗时
+      const lat = {"":1280,"https://ghfast.top":186,"https://ghproxy.net":412,
+                   "https://gh-proxy.com":0,"https://gh.llkk.cc":523,"https://github.moeyy.xyz":0};
+      const results = ms.map(m => lat[m.base]
+        ? {...m, ok:true, ms:lat[m.base]}
+        : {...m, ok:false, ms:0, error:"timeout"}).sort((a,b)=>(b.ok-a.ok)||(a.ms-b.ms));
+      return {results, best:results[0].base, ok_count:results.filter(r=>r.ok).length};
+    }
+    return {mirrors:ms, default:"", timeout_ms:6000};
+  }
   if (api === "updates" && rest.startsWith("/versions")) {
     // 演示数据里特意放一条预发布，好让人看见「稳定版 / 预发布」是怎么分的
     const releases = [
@@ -8256,6 +8294,85 @@ async function loadComponents() {
   } catch(e){ $("updtbody").innerHTML = `<tr><td colspan="4" class="muted">加载失败</td></tr>`; }
 }
 
+/* ================= 下载镜像 ================= */
+// 候选来自后端（update.Mirrors），前端不写死任何镜像地址：
+// 加速站换域名是常态，改一处比改两处可靠。
+let MIRROR_LIST = null;
+const OFFICIAL = { id: "official", name: "官方地址", base: "" };
+
+async function loadMirrors() {
+  if (MIRROR_LIST) return MIRROR_LIST;
+  try {
+    const j = await req("/api/mirrors");
+    MIRROR_LIST = j.mirrors && j.mirrors.length ? j.mirrors : [OFFICIAL];
+  } catch (e) {
+    MIRROR_LIST = [OFFICIAL]; // 拿不到列表也不能挡住安装，至少留官方地址
+  }
+  return MIRROR_LIST;
+}
+
+// 画镜像下拉。results 为空 = 还没测速，按原始顺序（官方地址在最前）。
+// 测速之后只保留可用的：把九个「不可用」摆在列表里除了让人犹豫没别的作用，
+// 具体挂了几个写在下面的提示里。
+function renderMirrorOptions(results, pick) {
+  let list;
+  if (results) {
+    list = results.filter(m => m.ok);
+    if (!list.length) list = [OFFICIAL];
+  } else {
+    list = MIRROR_LIST || [OFFICIAL];
+  }
+  $("vs_mirror").innerHTML = list.map(m => {
+    const tag = results ? ` · ${m.ms}ms` : "";
+    return `<option value="${m.base}">${m.name}${tag}</option>`;
+  }).join("");
+  const want = pick !== undefined ? pick : "";
+  $("vs_mirror").value = want;
+  // 选中的镜像不在列表里（列表变了）就退回第一个，而不是留一个空白选项
+  if ($("vs_mirror").value === "" && want !== "") $("vs_mirror").selectedIndex = 0;
+}
+
+function mirrorMsg(text, cls) {
+  const el = $("vs_mirror_msg");
+  el.className = "mirror-msg" + (cls ? " " + cls : "");
+  el.innerHTML = text;
+}
+
+async function testMirrors() {
+  const comp = $("vs_component").textContent;
+  const ver = verList[+$("vs_select").value]?.tag || "";
+  const url = $("vs_url").value.trim();
+  if (!url && !ver) { toast("先选一个版本再测速", "warn"); return; }
+  const btn = $("vs_probe");
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "测速中…";
+  mirrorMsg("正在并发探测全部镜像（最多 6 秒）。测的是<b>你要下的那个文件</b>，只取首字节——加速站只转发 release 路径，拿别的地址测会误判成挂了。");
+  try {
+    const j = await req("/api/mirrors/test", { method: "POST", body: url ? { url } : { component: comp, version: ver } });
+    const results = j.results || [];
+    const best = results.find(r => r.ok);
+    if (!best) {
+      renderMirrorOptions(results, "");
+      mirrorMsg("所有镜像和官方地址都不可达 —— 先检查本机网络或代理设置，再试一次。", "err");
+      return;
+    }
+    renderMirrorOptions(results, best.base);
+    const dead = results.length - j.ok_count;
+    const tail = dead ? `，${dead} 个不可用已从列表里隐藏` : "";
+    if (!best.base) {
+      mirrorMsg(`<b>官方地址最快</b>（${best.ms}ms），不用镜像${tail}。`, "ok");
+    } else {
+      mirrorMsg(`已选择 <b>${best.name}</b>（${best.ms}ms），其余按延迟排在后面${tail}。`, "ok");
+    }
+  } catch (e) {
+    mirrorMsg("测速失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
 /* 版本列表弹窗（复用通用内容弹窗思路，独立实现带选择） */
 let verList = [], verAll = [], verCounts = {}, verChannel = "stable", verInstallMode = false;
 // 每个内核记住用户上次选的分支：装过一次之后再看别的内核，不该又跳回默认。
@@ -8285,6 +8402,10 @@ async function fetchVersions(comp, install = false) {
     $("vs_confirm").textContent = install ? "安装选中版本" : "更新到选中版本";
     $("vs_url").value = ""; $("vs_sha").value = "";
     $("vs_confirm").disabled = false;
+    // 每次打开都回到官方地址：上一次选的镜像不该悄悄延续到另一次安装
+    await loadMirrors();
+    renderMirrorOptions(null, "");
+    mirrorMsg("默认走官方地址。连不上或太慢时，点「自动选择最快」让面板并发测一遍。");
     renderChannelSeg();
     openModal("mVersions");
   } catch(e){ toast(e.message, "err"); }
@@ -8371,23 +8492,26 @@ async function confirmVersionUpdate() {
   const comp = $("vs_component").textContent;
   const ver = verList[+$("vs_select").value]?.tag || "";
   const url = $("vs_url").value;
+  const mirror = $("vs_mirror").value;
   if (!ver && !url) { toast("请选择版本或填写 URL", "warn"); return; }
   const isPanel = comp === "panel";
   const action = verInstallMode ? "安装" : "更新";
+  // 走了镜像就在确认框里说清楚：下载来源变了，出事时能一眼看出走的哪条路
+  const via = mirror ? `\n下载走镜像 ${mirror}（二进制仍要过可执行验证与配置校验）。` : "";
   if (!(await ask(action + " " + comp,
-    verInstallMode
+    (verInstallMode
       ? `确认下载 ${comp} ${ver || "指定版本"} 并安装到面板专用目录（data/bin/${comp}/）？\n不触碰系统里其他服务使用的二进制。`
-      : `确认把 ${comp} ${ver ? "更新/降级到 " + ver : "更新到指定 URL 版本"}？\n全程安全保护：验证 → 校验 → 备份 → 替换 → 健康检查，失败自动回滚。`))) return;
+      : `确认把 ${comp} ${ver ? "更新/降级到 " + ver : "更新到指定 URL 版本"}？\n全程安全保护：验证 → 校验 → 备份 → 替换 → 健康检查，失败自动回滚。`) + via))) return;
   $("vs_confirm").disabled = true;
   toast(verInstallMode ? "下载与安装中，请稍候…" : "下载与更新中，请稍候（视网络可能需要 1-3 分钟）…", "info");
   try {
     if (isPanel) {
-      await req("/api/self-update", { method:"POST", body:{ url, sha256:$("vs_sha").value } });
+      await req("/api/self-update", { method:"POST", body:{ url, sha256:$("vs_sha").value, mirror } });
       closeModal("mVersions");
       toast("更新完成，面板重启中，5 秒后刷新页面");
       setTimeout(() => location.reload(), 5000);
     } else {
-      const j = await req("/api/cores/" + comp + "/update", { method:"POST", body:{ version: url ? "" : ver, url, sha256:$("vs_sha").value } });
+      const j = await req("/api/cores/" + comp + "/update", { method:"POST", body:{ version: url ? "" : ver, url, sha256:$("vs_sha").value, mirror } });
       closeModal("mVersions");
       toast(j.installed
         ? `${comp} ${j.version} 已安装到面板专用目录（${j.target}），在「设置」中即可看到路径`
