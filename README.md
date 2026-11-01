@@ -54,7 +54,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 | **保存** | 命名保存（存参数不只存文件）· 随时下载 · 重新生成先比差异 |
 | **安全** | bcrypt · 2FA · 防爆破 · 三角色 RBAC · 会话管理 · 90 天审计 |
 | **观测** | 流量统计与图表 · 实时速率 · Prometheus · 变更通知 · `/healthz` |
-| **运维** | 一键装卸 · `status`/`doctor`/`backup`/`restore` · 备份加密与异地 |
+| **运维** | 一键装卸 · 短命令 `tp`（状态/启停/升级/入站/用户/审计，[文档](docs/cli.md)） · `doctor` 自检 · 备份加密与异地 |
 | **更新** | 面板与三内核任意版本升降 · 14 个镜像可选可测速 · 失败自动回滚 |
 | **界面** | 亮暗 × 8 套配色 · 窄屏可用 · 加到主屏（PWA，需 HTTPS） |
 
@@ -88,7 +88,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 **上手**
 
 - [部署到 VPS](#部署到-vps) — 一键部署、镜像自动择优、防「装到旧版本」、权限排错、卸载、手动部署、健康检查
-- [命令行工具](#命令行工具) — `status` / `doctor` / `backup` / `restore`，含 [备份加密](#备份加密) 与 [异地备份](#异地备份可选)
+- [命令行工具](#命令行工具) — 短命令 `tp`：状态 / 启停 / 升级 / 入站 / 用户 / 审计，完整参考见 [docs/cli.md](docs/cli.md)，含 [备份加密](#备份加密) 与 [异地备份](#异地备份可选)
 - [忘记密码](#忘记密码) — 离线重置，不用登面板
 
 **网络与访问**
@@ -268,23 +268,45 @@ ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do curl -fsS --noproxy "*" http://
 
 ## 命令行工具
 
-`triune-panel` 除启动服务外还带几个一次性运维命令（都不依赖面板进程在跑）：
+装完之后有个短命令 `tp`（`/usr/local/bin/tp`，指向面板二进制本身）：
 
 ```bash
-triune-panel status [--json]     # 版本/数据目录/入站/用户/内核/证书/上次应用/最近登录
-triune-panel doctor              # 环境自检：数据目录、DB 完整性、密码状态、内核、防火墙、端口监听、代理变量、磁盘
-triune-panel backup [--out DIR] [--keep N] [--encrypt | --gen-passphrase] [--upload REMOTE]   # 打包数据目录（默认 <data>/backups，保留 7 份，自动排除 backups 自身）
-triune-panel restore <归档.tar.gz[.age]> [--yes]   # 用备份覆盖数据目录（恢复前自动备份当前数据）
-triune-panel reset-password      # 见下文「忘记密码」
-triune-panel version
+tp                       # 概览（= tp status），绝不启动任何东西
+sudo tp restart          # 重启并等 /healthz 就绪才返回
+tp in ls                 # 入站列表
+tp user link alice       # 直接给出三种客户端的订阅地址
+tp audit --since 7d      # 审计日志
+tp update --check        # 只看有没有新版
 ```
 
+**完整命令参考见 [docs/cli.md](docs/cli.md)。** 里面逐条写了参数、输出样例、退出码，
+以及"面板打不开时先看什么"这类场景。
+
+几个要点：
+
+- **只读命令全部直连 SQLite，不经过 daemon**。面板起不来的时候正是最需要查数据的时候，
+  这类命令必须还能用。所以 `tp status` / `tp in ls` / `tp user ls` / `tp audit` / `tp doctor`
+  在服务全挂的情况下照跑。
+- **`tp` 不带参数只会打印状态**。同一个二进制以 `triune-panel` 名字调用时不带参数才是启动服务
+  （systemd 的 `ExecStart` 依赖它），两者靠 `argv[0]` 区分。
+- **命令名支持唯一前缀**（`tp au` = `tp audit`），但**有歧义时报错不猜**：`tp st` 同时是
+  `status` 和 `start`，猜错的代价是"本想看状态，结果把服务启动了"。
+- **`tp update` 失败会自动回滚**，回滚也失败会打印备份文件路径。校验不止 sha256——
+  还会跑一遍 `-version` 确认拿到的真是面板二进制且版本对得上。
+- **面板启动时会自动恢复内核**。内核是面板的子进程，systemd 默认 `KillMode=control-group`
+  会把它们一起杀掉，所以重启面板 / 重启服务器之后，面板启动时会按"有启用且非草稿的入站"
+  这个口径把该跑的内核拉起来（用上次渲染好的配置，不重新渲染）。
+- **刻意还没有** `tp in on/off`、`tp user add` 这类写操作：内核进程状态只在 daemon 内存里，
+  CLI 直接改库会和 daemon 抢端口。下一版走 unix socket + `SO_PEERCRED`（root）把意图交给
+  daemon。在那之前写操作请走面板 UI。
+
+旧的完整命令名一个都没删，`triune-panel status` / `doctor` / `backup` / `restore` /
+`reset-password` 全部照旧可用（`install.sh` 内部就在用 `reset-password`）。
+
 - **数据目录自动探测**：`--data` > 环境变量 `TRIUNE_DATA` > `./data` > `/opt/triune-panel/data`，
-  所以 `sudo triune-panel status` 在任意目录下都能找到 systemd 安装的实例。
+  所以 `sudo tp status` 在任意目录下都能找到 systemd 安装的实例。
 - **`--json`** 便于脚本/监控取值；退出码 `0` 成功、`1` 执行失败、`2` 用法错误
   （`doctor` 有 `fail` 项时返回 1，可直接接告警）。
-- **刻意不做** `apply` / 切换内核这类命令：内核进程由 daemon 托管，CLI 裸跑会抢端口、
-  让 daemon 的内存状态与磁盘不一致，必须走面板的 API（`/api/apply`、`/api/switch-core`）。
 - **CI**（`.github/workflows/ci.yml`）：每次推送跑 `go vet` + `go test` + 三平台交叉编译
   + 二进制 `-version` 格式校验（install.sh 靠 `awk '{print $2}'` 取版本做终检，
   格式一变安装脚本就会误判"装到旧版本"）+ shellcheck 扫 `deploy/` 脚本。
@@ -431,6 +453,9 @@ sudo triune-panel restore ./triune-data-20261101-030000.tar.gz.age --passphrase-
 
 ```bash
 # 方式一：已安装的面板（systemd）
+sudo tp passwd                       # 等价于下面那条，tp 是安装脚本建的软链
+
+# 方式一之完整路径（没装 tp 软链时）
 sudo /opt/triune-panel/triune-panel reset-password
 
 # 方式二：不用记路径，走安装脚本直通
@@ -438,7 +463,7 @@ curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/i
   | sudo bash -s -- --reset-password
 
 # 方式三：自定义密码（避免命令行留下历史，走标准输入）
-echo 'MyNewPassw0rd' | sudo /opt/triune-panel/triune-panel reset-password --password-stdin
+echo 'MyNewPassw0rd' | sudo tp passwd --password-stdin
 ```
 
 默认行为：

@@ -527,6 +527,19 @@ if ! $SUDO install -m 755 "$TMP_BIN" "$INSTALL_DIR/triune-panel"; then
 fi
 rm -f "$TMP_BIN"
 
+# ---- 装一个 tp 短命令 ----
+# 同一个二进制，靠 argv[0] 区分：「tp 不带参数」= 看状态，
+# 「triune-panel 不带参数」= 启动服务（systemd 的 ExecStart 依赖后者，不能动）。
+# 软链失败不算安装失败——面板照样能跑，只是要打全名。
+TP_LINK="/usr/local/bin/tp"
+if [[ -d /usr/local/bin ]]; then
+  if $SUDO ln -sfn "$INSTALL_DIR/triune-panel" "$TP_LINK" 2>/dev/null; then
+    echo "→ 已安装命令 $TP_LINK（tp help 看用法）"
+  else
+    echo "→ 未能创建 $TP_LINK，可用完整路径: $INSTALL_DIR/triune-panel"
+  fi
+fi
+
 # ---- 全新安装：生成随机管理密码，落地 bootstrap.creds 由面板首次启动消费 ----
 # 面板安全规则：仅当管理密码仍是出厂默认时应用；用户改过密码则该文件被忽略并删除，
 # 因此升级安装（data/triune.db 已存在）不会生成，也不影响已有凭据。
@@ -700,6 +713,12 @@ fi
 if [[ -f "$INSTALL_DIR/triune-panel" ]]; then
   $SUDO rm -f "$INSTALL_DIR/triune-panel"
   echo "→ 已删除二进制 $INSTALL_DIR/triune-panel"
+fi
+# tp 软链：只删指向本安装的那一个。用户自己可能也有个叫 tp 的命令，
+# 无脑 rm 会把别人的东西删掉。
+if [[ -L /usr/local/bin/tp ]] && [[ "$(readlink /usr/local/bin/tp)" == "$INSTALL_DIR/triune-panel" ]]; then
+  $SUDO rm -f /usr/local/bin/tp
+  echo "→ 已删除命令软链 /usr/local/bin/tp"
 fi
 
 # ---- 3. 数据目录处理 ----
@@ -992,6 +1011,7 @@ if [[ "$SERVICE_STARTED" -eq 0 ]]; then
   fi
   print_login_info
   echo "  数据目录:  $INSTALL_DIR/data"
+  echo "  命令行:    tp status（tp help 看全部命令）"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网）"
   exit 0
 fi
@@ -1029,6 +1049,7 @@ if systemctl is-active --quiet "$SERVICE"; then
   echo "  备份加密:  写入 $INSTALL_DIR/backup.pass 并 chmod 600 后自动启用（age 口令加密）"
   echo "  异地备份:  装 rclone + 在 $INSTALL_DIR/backup.env 写 TRIUNE_BACKUP_REMOTE=<remote:path>"
   echo "  数据目录:  $INSTALL_DIR/data"
+  echo "  命令行:    tp status（tp help 看全部命令）"
   echo "  查看日志:  journalctl -u triune-panel -f"
   echo "  卸载:      sudo bash $INSTALL_DIR/uninstall.sh （本地执行，无需联网；或 curl -fsSL $RAW_BASE/deploy/install.sh | sudo bash -s -- --uninstall）"
   echo ""

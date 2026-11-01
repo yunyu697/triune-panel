@@ -41,31 +41,21 @@ var Version = "dev"
 // 用法约定：
 //   - 无子命令、或以 - 开头（`-addr :10010`、`-version`）→ 跑服务，
 //     完全兼容旧用法（systemd unit 与 install.sh 的版本校验都依赖它）；
-//   - 有子命令 → 执行对应的一次性运维命令（见 cli.go）。
+//   - 有子命令 → 交给 tp 命令表分发（见 tp.go）。旧命令名全部保留，
+//     `serve` 除外——它是唯一的「前台跑起来」入口，不走命令表。
 func main() {
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
-		switch os.Args[1] {
-		case "serve":
+		if os.Args[1] == "serve" {
 			serve(os.Args[2:])
-		case "reset-password":
-			cmdResetPassword(os.Args[2:])
-		case "status":
-			cmdStatus(os.Args[2:])
-		case "doctor":
-			cmdDoctor(os.Args[2:])
-		case "backup":
-			cmdBackup(os.Args[2:])
-		case "restore":
-			cmdRestore(os.Args[2:])
-		case "version":
-			printVersion()
-		case "help":
-			usage()
-		default:
-			fmt.Fprintf(os.Stderr, "未知命令 %q\n\n", os.Args[1])
-			usage()
-			os.Exit(2)
+			return
 		}
+		tpMain(os.Args[1:])
+		return
+	}
+	// 以 tp 这个名字调用（安装脚本软链到 /usr/local/bin/tp）时，
+	// 不带参数是「看状态」；以 triune-panel 调用时仍然是启动服务。
+	if invokedAsTP() {
+		tpMain(os.Args[1:])
 		return
 	}
 	serve(os.Args[1:])
@@ -76,9 +66,9 @@ func printVersion() {
 }
 
 func usage() {
-	fmt.Print(`triune-panel — 三内核（mihomo / sing-box / xray）统一管理面板
+	fmt.Print(`triune-panel（tp）— 三内核（mihomo / sing-box / xray）统一管理面板
 
-用法:
+用法（两个名字是同一个二进制；下面写 triune-panel 的地方都可以换成 tp）:
   triune-panel                       启动服务（等价 serve）
   triune-panel serve [-addr :10010] [-data ./data]
   triune-panel reset-password [--user <名>] [--password-stdin] [--keep-2fa]
@@ -172,9 +162,18 @@ func serve(args []string) {
 	go coll.Run()
 	// ACME 证书自动签发/续期
 	go certMgr.Run()
-	// 启动对账：把现有「已启用且非草稿」入站的端口在防火墙补放行
-	// （幂等；本机无防火墙后端时为空操作，不阻塞启动）
-	go srv.SyncFirewallPorts()
+	// 启动对账：先按现有「已启用且非草稿」入站在防火墙补放行端口，
+	// 再把该跑的内核拉起来。
+	//
+	// 两件事都放在同一个 goroutine 里按顺序做：先开端口再起进程，
+	// 起来之后立刻就能对外服务，不用等下一次重试。
+	// 内核恢复是必须的——systemctl restart 会连内核一起杀掉（systemd 默认
+	// KillMode=control-group），而内核状态只存在内存里，不主动拉起的话
+	// 节点会一直断到有人手动「应用配置」。
+	go func() {
+		srv.SyncFirewallPorts()
+		srv.RestoreCores()
+	}()
 
 	log.Printf("triune-panel %s listening on %s, data dir %s", Version, *addr, *dataDir)
 	if authn.IsFactoryDefault(st) {

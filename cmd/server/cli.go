@@ -127,7 +127,7 @@ func cmdResetPassword(args []string) {
 	fromStdin := fs.Bool("password-stdin", false, "从标准输入读取新密码")
 	keep2FA := fs.Bool("keep-2fa", false, "保留登录二次验证（默认关闭）")
 	quiet := fs.Bool("quiet", false, "不打印新密码（配合 --password-stdin）")
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 
 	if fs.NArg() > 0 {
 		die(2, "不要把密码作为命令行参数（会留在 shell 历史）。请改用:\n  echo '新密码' | triune-panel reset-password --password-stdin")
@@ -242,6 +242,7 @@ type applyInfo struct {
 type statusReport struct {
 	Version         string     `json:"version"`
 	DataDir         string     `json:"data_dir"`
+	Service         string     `json:"service"` // 运行中 / 未运行 / 未由 systemd 托管
 	DBSize          int64      `json:"db_size_bytes"`
 	Inbounds        countStat  `json:"inbounds"`
 	Clients         clientStat `json:"clients"`
@@ -264,13 +265,29 @@ func cmdStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	dataDir := fs.String("data", "", "数据目录（默认自动探测）")
 	asJSON := fs.Bool("json", false, "以 JSON 输出（便于脚本）")
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 
 	dir := resolveDataDir(*dataDir)
 	st := openExistingStore(dir)
 	defer st.Close()
 
 	rep := statusReport{Version: Version, DataDir: dir, Firewall: firewall.DetectBackend()}
+
+	// 「服务在不在跑」是第一眼要看的东西，但这里只查 systemd 的账本，
+	// 不探 /healthz——status 号称秒回，不能因为面板半死就卡住。
+	// 没有 systemd 就说清楚，别猜成「未运行」吓人。
+	switch {
+	case !systemdAvailable(defaultUnit):
+		rep.Service = "未由 systemd 托管"
+	case serviceActive(defaultUnit):
+		rep.Service = "运行中"
+		if addr := panelAddr(defaultUnit); addr != "" {
+			rep.Service += " · " + addr
+		}
+	default:
+		rep.Service = "未运行"
+	}
+
 	// SQLite 用 WAL：未 checkpoint 时数据主要在 triune.db-wal 里，一并计入
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if fi, err := os.Stat(filepath.Join(dir, "triune.db"+suffix)); err == nil {
@@ -342,6 +359,7 @@ func cmdStatus(args []string) {
 
 	fmt.Printf("Triune Panel %s\n\n", rep.Version)
 	fmt.Printf("  %s%s   %s\n", padLabel("数据目录", 10), rep.DataDir, humanSize(rep.DBSize))
+	fmt.Printf("  %s%s\n", padLabel("服务", 10), rep.Service)
 	fmt.Printf("  %s%d 个（启用 %d / 草稿 %d）\n", padLabel("入站", 10), rep.Inbounds.Total, rep.Inbounds.Enabled, rep.Inbounds.Draft)
 	fmt.Printf("  %s%d 个（启用 %d）\n", padLabel("用户", 10), rep.Clients.Total, rep.Clients.Enabled)
 	for _, c := range rep.Cores {
@@ -439,7 +457,7 @@ func cmdDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	dataDir := fs.String("data", "", "数据目录（默认自动探测）")
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 
 	dir := resolveDataDir(*dataDir)
 	var items []checkItem
@@ -692,7 +710,7 @@ func cmdBackup(args []string) {
 	upload := fs.String("upload", "", "上传到异地（rclone 远端，如 r2:triune-backups）")
 	uploadKeep := fs.Int("upload-keep", 0, "远端保留份数（0 = 不在远端清理）")
 	rcloneBin := fs.String("rclone", "", "rclone 可执行文件路径（默认走 PATH）")
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 
 	dir := resolveDataDir(*dataDir)
 
@@ -773,12 +791,12 @@ func cmdRestore(args []string) {
 	force := fs.Bool("force", false, "面板可能仍在运行时也继续（危险）")
 	passFile := fs.String("passphrase-file", "", "从文件读取归档口令（加密归档需要）")
 	passStdin := fs.Bool("passphrase-stdin", false, "从标准输入读取归档口令")
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 
 	// Go 的 flag 解析到第一个非 flag 参数就停（`restore <归档> --yes` 里的
 	// --yes 会被当成位置参数）。这里解析两轮：先吃掉前置 flag，再把归档
 	// 之后的参数当 flag 解析，两种书写顺序都能用。
-	_ = fs.Parse(args)
+	_ = tpParse(fs, args)
 	var archive string
 	if pos := fs.Args(); len(pos) > 0 {
 		archive = pos[0]

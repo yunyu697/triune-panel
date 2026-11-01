@@ -579,3 +579,23 @@ func ListBackups(dir string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// SameVersion 判断两个 tag 是否指向同一版本（忽略 v 前缀与首尾空白）。
+// CLI 里比较「当前版本」与「目标版本」用，避免 v1.0.2 / 1.0.2 被判成两个版本。
+func SameVersion(a, b string) bool {
+	norm := func(s string) string {
+		return strings.TrimPrefix(strings.TrimSpace(s), "v")
+	}
+	return norm(a) == norm(b)
+}
+
+// Newer 报告版本 a 是否比 b 新（语义化比较；预发布低于同号正式版）。
+// 认不出的 tag 退化为「不比对方新」——宁可当成不新，也不要在升级判断上猜。
+func Newer(a, b string) bool {
+	_, _, aok := parseSemver(a)
+	_, _, bok := parseSemver(b)
+	if !aok || !bok {
+		return false
+	}
+	return newerThan(Release{Tag: a}, Release{Tag: b})
+}
