@@ -29,6 +29,36 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
    图标；侧栏降到 55px，内容区回到 658px。
 6. **分组条补可访问性**：`role="tablist"` / `role="tab"` / `aria-selected`，
    说明文字加 `aria-live="polite"`，切换时读屏能播报当前组的内容范围。
+7. **支持加到主屏（PWA）**：新增 `manifest.webmanifest`、service worker 与一套
+   品牌图标（192 / 512 / maskable 512 / apple-touch-icon，都由界面里那个盾牌
+   mark 渲染而来）。手机上「添加到主屏幕」后是全屏 standalone，没有地址栏。
+   清单、SW、图标全部由二进制内嵌（`internal/webui/pwa/`），**不落盘到 data/web**
+   ——它们是二进制的配套文件，跟着版本走，不会在升级后留下残件。
+   三条与安全相关的取舍写在代码注释里，这里点一下：
+   - **SW 不做任何离线缓存**。面板每屏都是登录后的实时数据，缓存下来就是错的；
+     缓存 `index.html` 更糟——升级后会出现「旧界面调新接口」。它只负责让浏览器
+     认可「可安装」，以及断网时给一页说明（实测停掉服务端后导航落到该页）。
+   - **注册前先判安全上下文**。面板常挂在 `http://<公网 IP>` 上，那种情况下
+     `register()` 必抛 SecurityError，所以非 HTTPS/非 localhost 直接跳过，
+     控制台不留红字。
+   - **CSP 显式补 `manifest-src` / `worker-src`**。二者本来会回落到
+     `default-src` / `script-src`（都是 `'self'`，能正常工作），写出来是为了
+     将来收紧 `default-src` 时不会连带把 PWA 弄哑——那种故障只表现为
+     「手机上装不了」，很难归因。
+   顺带补了 favicon（此前 `/favicon.ico` 会被「/」兜底返回 HTML），以及
+   `theme-color` 跟随主题切换（深色主题下主屏顶栏不再是一条浅色）。
+   实测：Chrome `Page.getAppManifest` 零错误、`Page.getInstallabilityErrors`
+   为空，SW 状态 activated、scope `/`，五张图标都能解码出正确尺寸。
+8. **发版脚本现在会拦住「改了 UI 忘了改 build 标记」**：`index.html` 头部的
+   `<!-- triune-panel-web/<ver> -->` 决定升级后要不要覆盖 `data/web/index.html`
+   ——标记与二进制里的不一致才会覆盖。改了 UI 却不改标记，老用户升级后打开
+   还是旧界面（v1.0.0 修过的就是这个问题），而它**只在「升级」这一条路径上
+   出现**，日常开发和 CI 都碰不到。`release.sh` 里加了硬性校验，标记与发布
+   版本不一致直接退出。
+   顺带发现一个既存问题：标记从 v1.0.1 发布后一直停在 v1.0.1，也就是说
+   v1.0.1 之后这批界面改动（设置页分组、常驻吸顶大标签、窄屏导航修复）
+   **此前不会到达任何升级用户**，只有全新安装才看得到。本次把标记提到
+   v1.0.2，一并带上。
 
 ## v1.0.1
 

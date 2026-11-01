@@ -80,6 +80,8 @@ func TestCSPLocksDownExfiltration(t *testing.T) {
 		"object-src 'none'",      // 无插件攻击面
 		"frame-ancestors 'none'", // 防点击劫持
 		"img-src 'self' data:",   // 界面里用到 data: 图标
+		"manifest-src 'self'",    // PWA 清单（写死，防止将来收紧 default-src 时连带失效）
+		"worker-src 'self'",      // service worker（同上）
 	}
 	for _, m := range must {
 		if !strings.Contains(csp, m) {

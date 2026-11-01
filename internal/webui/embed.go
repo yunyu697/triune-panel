@@ -10,7 +10,11 @@
 package webui
 
 import (
+	"crypto/sha256"
+	"embed"
 	_ "embed"
+	"encoding/hex"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +22,43 @@ import (
 
 //go:embed index.html
 var indexHTML []byte
+
+// pwaAssets 内嵌的 PWA 静态资源：manifest、service worker、图标。
+//
+// 这些**不**落盘到 data/web，和 index.html 的处理方式刻意不同。
+// index.html 落盘是为了允许用户替换成自己的构建产物（见上方说明）；
+// manifest / sw.js / 图标则是二进制的配套文件，必须和当前版本的 UI
+// 严格对应——从内嵌副本直接服务，就不存在「升级后 sw.js 还是上一版」
+// 这种错位，也不会在用户自定义过 UI 的目录里留下一堆孤儿文件。
+//
+//go:embed pwa
+var pwaAssets embed.FS
+
+// pwaFS 指向内嵌的 pwa 子目录，路径形如 "sw.js"、"icons/icon-192.png"。
+var pwaFS = mustSub(pwaAssets, "pwa")
+
+func mustSub(f fs.FS, dir string) fs.FS {
+	sub, err := fs.Sub(f, dir)
+	if err != nil {
+		// dir 是编译期常量，走不到这里；真走到了说明 embed 指令被改坏了，
+		// 启动就 panic 比悄悄少一个文件好查。
+		panic("webui: 内嵌 pwa 目录缺失: " + err.Error())
+	}
+	return sub
+}
+
+// PWAFile 读取内嵌的 PWA 静态资源，并返回内容的 ETag。
+//
+// ETag 用内容摘要而不是版本号：图标文件名固定不变，只有内容变了才该让
+// 浏览器重新下载。用版本号会让每次发版都白下一次 512 图标。
+func PWAFile(name string) (data []byte, etag string, err error) {
+	b, err := fs.ReadFile(pwaFS, name)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(b)
+	return b, `"` + hex.EncodeToString(sum[:8]) + `"`, nil
+}
 
 // webBuildMarker 提取页面头部的 build 标记，如 "v0.8.1"。
 // 标记形如 <!-- triune-panel-web/<ver> -->，随版本发布更新；

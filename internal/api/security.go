@@ -26,12 +26,19 @@ import (
 //
 // 这比"什么都不加"实质性强得多：CSP 里最有价值的部分（外发限制、
 // 外链限制、框架限制）都拿到了，代价只是内联执行这一项。
+//
+// manifest-src / worker-src 本来会回落到 default-src 与 script-src（都是
+// 'self'，PWA 能正常工作）。这里仍然显式写出来：将来若有人收紧
+// default-src 或给 script-src 换成 nonce 方案，service worker 和 manifest
+// 会跟着一起悄悄失效，而那种故障的表现只是"手机上加不到主屏"，极难归因。
 const cspPolicy = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data:; " +
 	"font-src 'self'; " +
 	"connect-src 'self'; " +
+	"manifest-src 'self'; " +
+	"worker-src 'self'; " +
 	"object-src 'none'; " +
 	"base-uri 'none'; " +
 	"form-action 'self'; " +

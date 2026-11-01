@@ -62,6 +62,18 @@ done
 step "校验版本号"
 "$SELF_DIR/check-version.sh" "$VER" || exit 1
 
+step "校验 Web UI 的 build 标记"
+# index.html 头部的 <!-- triune-panel-web/<ver> --> 是「升级后要不要覆盖
+# data/web/index.html」的唯一依据：标记与二进制里的不一致才会覆盖。
+# 改了 UI 却忘了改标记，老用户升级后打开还是旧界面——v1.0.0 修的就是这个坑，
+# 而它只会在"升级"这一条路径上出现，日常开发和 CI 都碰不到。这里硬性卡住。
+WEB_MARK="$(sed -n 's/.*triune-panel-web\/\([^ >]*\).*/\1/p' internal/webui/index.html | head -1)"
+if [[ "$WEB_MARK" != "$VER" ]]; then
+  die "internal/webui/index.html 的 build 标记是「${WEB_MARK}」，与发布版本 ${VER} 不一致。
+    改成 ${VER} 后重新提交（记得同步 demo.html），否则升级上来的用户会继续看到旧界面。"
+fi
+say "  标记一致：triune-panel-web/${WEB_MARK}"
+
 step "检查工作区与 tag"
 [[ "$(git rev-parse --show-toplevel)" == "$ROOT" ]] || die "请在仓库根目录运行"
 if [[ -n "$(git status --porcelain)" ]]; then

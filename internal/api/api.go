@@ -63,6 +63,12 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
 	mux.HandleFunc("GET /sub/{token}", a.handleSub)            // 订阅，凭 sub_token
 
+	// ---- PWA 静态资源（免认证，必须挂在站点根上）----
+	// 作用域规则见 pwa.go 顶部说明：sw.js / manifest 一旦放进子目录就失效。
+	mux.HandleFunc("GET /manifest.webmanifest", a.handlePWA("manifest.webmanifest"))
+	mux.HandleFunc("GET /sw.js", a.handlePWA("sw.js"))
+	mux.HandleFunc("GET /icons/{file}", a.handlePWA(""))
+
 	// ---- 任意登录账号（含只读 viewer）：只看不改，且响应不吐凭据 ----
 	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /api/me", a.auth(a.handleMe))

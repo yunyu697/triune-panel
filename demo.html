@@ -1,10 +1,21 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.0.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Triune Panel</title>
+<!-- 加到主屏（PWA）。清单、service worker、图标都由二进制内嵌提供，
+     见 internal/webui/pwa/ —— 它们不落在 data/web 里，升级时不会有残件。 -->
+<meta name="theme-color" content="#f4f6fa">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Triune">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
 /* ============ 设计令牌 ============ */
 :root{
@@ -4054,6 +4065,14 @@ function applyTheme() {
   localStorage.setItem("triune_mode", themeMode);
   localStorage.setItem("triune_scheme", themeScheme);
   localStorage.removeItem("triune_theme");
+  // 主屏图标启动后的状态栏 / 任务切换器顶色跟着主题走。
+  // manifest 里的 theme_color 是静态的（只能是浅色），深色主题下会露出
+  // 一条浅色顶栏；这里按当前 --bg 覆盖一次，装到主屏后才不会突兀。
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) {
+    const bg = getComputedStyle(r).getPropertyValue("--bg").trim();
+    if (bg) tc.setAttribute("content", bg);
+  }
   setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
 }
 function setMode(m) { if (!MODE_NAME[m] || m === themeMode) return; themeMode = m; applyTheme(); renderSchemes(); }
@@ -9328,6 +9347,23 @@ async function clearAudit() {
     loadAudit();
   } catch(e) { toast(e.message, "err"); }
 }
+
+/* ================= PWA：注册 service worker =================
+   service worker 只在安全上下文里可用（HTTPS，或 localhost/127.0.0.1）。
+   面板经常直接挂在 http://<公网 IP> 上，那种情况下 register() 必然抛
+   SecurityError——先判断再注册，别在控制台留一堆红字。
+
+   SW 本身不做离线缓存（面板每屏都是要登录的实时数据），它只负责让浏览器
+   认可「可安装」，以及断网时给一页说明。详见 internal/webui/pwa/sw.js。 */
+(function registerSW() {
+  if (!("serviceWorker" in navigator)) return;
+  const secure = location.protocol === "https:" ||
+    /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (!secure) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  });
+})();
 
 /* ================= 启动 ================= */
 if (DEMO) {

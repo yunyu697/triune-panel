@@ -56,6 +56,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 | **观测** | 流量统计与图表 · 实时速率 · Prometheus · 变更通知 · `/healthz` |
 | **运维** | 一键装卸 · `status`/`doctor`/`backup`/`restore` · 备份加密与异地 |
 | **更新** | 面板与三内核任意版本升降 · 14 个镜像可选可测速 · 失败自动回滚 |
+| **界面** | 亮暗 × 8 套配色 · 窄屏可用 · 加到主屏（PWA，需 HTTPS） |
 
 ## 核心设计：升级 / 变更永不导致配置失效
 
@@ -72,7 +73,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 
 ## 适用边界（先看这几条）
 
-不想让人装完才发现，所以放在前面。完整 19 条见 [已知限制与未验证项](#已知限制与未验证项)。
+不想让人装完才发现，所以放在前面。完整 20 条见 [已知限制与未验证项](#已知限制与未验证项)。
 
 - **ACME 真实签发未做端到端验证**：代码路径完整（lego + Let's Encrypt HTTP-01），但开发环境没有公网域名与 80 端口。首次启用 HTTPS 前请按第 1 条自查。
 - **每用户限速做不到**：三个内核都没有这个能力。用量控制请用 `quota_gb`（真会被执行）；要限速只能在内核之外做（`tc` / 上游交换机 / 云厂商带宽上限）。
@@ -99,7 +100,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 
 - [反向导入现有链接](#反向导入现有链接迁移不失效) · [订阅输出](#订阅输出)
 - [配置生成](#配置生成客户端) · [配置管理](#配置管理保存下载重新生成) · [规则标签](#规则标签快捷套用)
-- [界面主题](#界面主题亮暗--色彩方案) · [组件更新与下载镜像](#组件更新与下载镜像)
+- [界面主题](#界面主题亮暗--色彩方案) · [加到主屏](#加到主屏pwa) · [组件更新与下载镜像](#组件更新与下载镜像)
 
 **协作与可观测**
 
@@ -511,9 +512,14 @@ CSP 的实际内容：
 
 ```
 default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
-img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none';
-base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self';
+worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self';
+frame-ancestors 'none'
 ```
+
+`manifest-src` / `worker-src` 本来会分别回落到 `default-src` 与 `script-src`
+（都是 `'self'`，PWA 能正常工作），显式写出来是为了将来收紧 `default-src` 时
+不会连带把「加到主屏」弄哑——那种故障的表现只是手机上装不了，很难归因。
 
 **关于 `'unsafe-inline'`——这里没有假装能挡 XSS。** UI 是单文件，用了 126 处内联
 `onclick="..."` 事件属性，只能靠 `'unsafe-inline'` 放行；也不能改用 nonce：
@@ -758,6 +764,33 @@ RFC 5987 的 `filename*=UTF-8''%E5%AE%B6...`。老浏览器用前者，现代浏
 旧版把两层揉成一个 `triune_theme`（`light` / `midnight` / `forest` …）。
 升级后先读新键，读不到再按 `LEGACY_THEME` 把旧 id 翻译成「模式 + 方案」，
 然后清掉旧键。选过午夜的打开还是午夜。
+
+## 加到主屏（PWA）
+
+手机浏览器里打开面板，「添加到主屏幕」后是个没有地址栏的全屏 App。清单、
+service worker 与图标都由二进制内嵌（`internal/webui/pwa/`），`/manifest.webmanifest`、
+`/sw.js`、`/icons/*` 三条路由免认证直出——不落盘到 `data/web`，所以升级时不会
+在数据目录里留残件。
+
+**前提是 HTTPS**：service worker 只在安全上下文里可用。面板挂在
+`http://<公网 IP>` 上时能正常用，但不会出现安装入口——代码里对这种情况是静默
+跳过的（注册前先判协议），控制台不会报错，所以「找不到入口」时先看地址栏。
+
+**它不提供离线使用**，这是刻意的。service worker 里没有 `caches`，除页面导航
+外一律不接管请求：
+
+- 面板每一屏都是登录后才拿得到的实时数据（流量、在线设备、节点状态），
+  缓存下来第二天就是错的；
+- 缓存 `index.html` 更糟——升级面板后会出现「旧界面调新接口」，字段对不上、
+  接口 404，而用户完全不知道自己拿到的是旧页面。
+
+它只做两件事：让浏览器认可「可安装」，以及断网时给一页「连不上面板」的说明。
+图标这类真·静态资源交给浏览器 HTTP 缓存（服务端下发 `ETag` + `no-cache`，
+没变就 304），比 SW 里再套一层缓存更好查。
+
+`theme-color` 会跟着主题走：`manifest` 里的值只能是静态的浅色，深色主题下
+会露出浅色顶栏，所以 `applyTheme()` 每次切换都把 `<meta name="theme-color">`
+改成当前的 `--bg`。
 
 ## 组件更新与下载镜像
 
@@ -1198,6 +1231,17 @@ scrape_configs:
       10MB 试，那就不叫「一键测速」了。大文件下载慢时手动换一个试试。
     - **测速结果有随机性**：同一批镜像两次测可能第一名不同（尤其差几十毫秒时），
       这是网络本身的性质，不是 bug。
+20. **PWA（加到主屏）只在 HTTPS 下可用**：
+    - service worker 要求安全上下文，`http://<公网 IP>` 上面板能正常用，但
+      **不会**出现「安装到主屏」的入口。想要装到主屏，先用 ACME 证书把面板
+      切到 HTTPS（或在本机用 `localhost` / `127.0.0.1` 访问）。
+    - 代码里对这种情况是**静默跳过**（注册前判断协议），不会报错也不会提示。
+      如果找不到安装入口，先看地址栏是不是 `https://`。
+    - **不提供离线使用**：service worker 刻意不做缓存（面板每屏都是登录后的
+      实时数据，缓存下来只会显示过期数字），断网时只会得到一页「连不上面板」。
+      想离线查数据请用导出/备份，不要指望主屏图标。
+    - **iOS 的安装入口在分享菜单里**：Safari 没有 `beforeinstallprompt`，
+      要手动「分享 → 添加到主屏幕」；面板没有做安装引导按钮。
     - **镜像可能返回被替换过的文件**：这是第三方服务的固有风险。面板的防线是
       「可执行验证 + 用新二进制校验当前配置 + 健康检查」，能挡住坏的/错的文件，
       但挡不住「能跑但被植入后门」的二进制。要求强保证就填 `sha256`
@@ -1217,6 +1261,7 @@ internal/link       分享链接反向解析 + 订阅导出（vless/vmess/trojan
 internal/proc       内核进程 supervisor（启停/重启/日志）
 internal/api        HTTP API + 订阅服务
 internal/webui      go:embed 内置单页 UI（data/web/index.html 可覆盖）
+  └─ pwa            清单 / service worker / 图标，只从内嵌副本出（不落盘）
 ```
 
 ## 目录约定
