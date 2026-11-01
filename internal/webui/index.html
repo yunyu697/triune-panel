@@ -113,6 +113,10 @@ a:hover{text-decoration:underline}
 .hide{display:none!important}
 .muted{color:var(--muted);font-size:12px}
 .mono{font-family:var(--mono);font-size:12px}
+/* 正文里的行内跳转：长得像链接，行为是按钮（不占一个按钮的体量） */
+.lnk{border:none;background:none;color:var(--acc-text);font:inherit;cursor:pointer;padding:0;
+  text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+.lnk:hover{color:var(--acc)}
 .grad-text{background:linear-gradient(135deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
@@ -191,8 +195,20 @@ body[data-role="admin"] .need-owner{display:none!important}
   .side{width:100%;flex-direction:row;align-items:center;padding:8px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}
   .logo{padding:0 8px 0 4px}.logo .logo-v{display:none}
   .nav-sec{display:none}
-  .nav-item{width:auto;margin:0}.nav-item.on::before{display:none}
-  .side-foot{margin:0 0 0 auto;border:none;padding:0;display:flex;gap:4px}
+  /* #nav 平时没有样式（块级，导航项竖着排）。窄屏把 .side 改成 row 之后，
+     这一行的高度会被整个导航撑开——实测 417px，占掉 58% 屏高。
+     这里把导航也改成横向一行、可左右滑，高度回到 56px 上下。 */
+  #nav{display:flex;flex-direction:row;align-items:center;gap:2px;flex:1;min-width:0;
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  #nav::-webkit-scrollbar{display:none}
+  .nav-item{width:auto;margin:0;flex:0 0 auto;white-space:nowrap}
+  .nav-item.on::before{display:none}
+  .side-foot{margin:0 0 0 auto;border:none;padding:0;display:flex;gap:4px;flex:0 0 auto}
+  /* 窄屏把「当前账号」「主题外观」「退出登录」的文字都收起来只留图标：
+     这两块占的宽度直接决定导航条能露出几个入口（500px 时只剩 92px）。 */
+  .side-foot .whoami{display:none}
+  .side-foot .theme-btn{width:auto;padding:7px 9px}
+  .side-foot .theme-btn span{display:none}
   .logo b{display:none}
   .content{padding:18px 16px 40px}
   .topbar{padding:12px 16px}
@@ -388,11 +404,24 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .seg-lg button svg{width:17px;height:17px;opacity:.75}
 .seg-lg button:hover svg{opacity:1}
 .seg-lg button.on svg{opacity:1}
+/* 该组有未保存的改动：标签后面点一个小圆点（flex 子项，不用绝对定位） */
+.seg-lg button.dirty::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--warn);flex:none}
 /* 选中态用主色浅底 + 主色描边，不用 .seg 的「白卡片」——
    深色主题里 --card 比 --hover 还深，白卡片那套会反过来变成「凹进去」。
    与 .tag-chip.on 的选中语言保持一致。 */
 .seg-lg button.on{background:var(--acc-soft);color:var(--acc-text);
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 42%,transparent)}
+
+/* 窄屏（手机竖屏）：大标签会把分组条撑到 117px，加上顶栏和底部保存条，
+   内容区几乎不剩地方。这里把说明文字让位、按钮收窄，条高压到 70px 上下。
+   说明文字本来只是辅助，按钮上的字已经说清是哪一组。 */
+@media (max-width:640px){
+  .set-tabs{gap:10px;padding:8px 0 10px}
+  .set-tabs-hint{display:none}
+  .seg-lg{padding:4px;gap:4px;border-radius:13px}
+  .seg-lg button{font-size:14px;padding:9px 15px;gap:7px;border-radius:9px}
+  .seg-lg button svg{width:15px;height:15px}
+}
 
 /* 表格里的小下拉（选安装分支）：外观贴近旁边的 .btn.sm，别做成一个突兀的表单控件 */
 .sel-sm{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;line-height:1.5;width:auto;max-width:104px;
@@ -710,7 +739,7 @@ canvas{display:block;width:100%}
           <button class="quick" onclick="goto('apply')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
           <button class="quick" onclick="goto('settings')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
         </div>
-        <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或在「设置 → 组件更新与版本管理」里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
+        <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" onclick="goto('settings','maintain')">设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
       </div>
     </section>
 
@@ -942,21 +971,21 @@ canvas{display:block;width:100%}
            这条钉在顶栏下面不跟着滚——滚到哪张卡都还能切组。
            选中的分组记在 localStorage。 -->
       <div class="set-tabs">
-        <div class="seg seg-lg" id="set_sect_seg">
-          <button type="button" data-sect="common" class="on">
+        <div class="seg seg-lg" id="set_sect_seg" role="tablist" aria-label="设置分组">
+          <button type="button" role="tab" aria-selected="true" data-sect="common" class="on">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
             <span>常用</span>
           </button>
-          <button type="button" data-sect="security">
+          <button type="button" role="tab" aria-selected="false" data-sect="security">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m8.5 11.5 2.5 2.5 4.5-4.5"/></svg>
             <span>安全</span>
           </button>
-          <button type="button" data-sect="maintain">
+          <button type="button" role="tab" aria-selected="false" data-sect="maintain">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
             <span>运维</span>
           </button>
         </div>
-        <span class="muted set-tabs-hint" id="set_sect_hint"></span>
+        <span class="muted set-tabs-hint" id="set_sect_hint" aria-live="polite"></span>
       </div>
       <!-- 我的账号：所有角色都能看（只读账号进设置页只会看到这一张卡） -->
       <div class="card" data-sect="security">
@@ -3919,7 +3948,9 @@ $("nav").addEventListener("click", e => {
   const b = e.target.closest(".nav-item");
   if (b) goto(b.dataset.v);
 });
-function goto(v) {
+/* sect 可选：设置页分了三组，从别处「去改某一项」跳过来时要直接落到那一组，
+   否则用户按提示进去只看到「常用」，找不到「组件更新」。 */
+function goto(v, sect) {
   // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
   if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
   CURRENT = v;
@@ -3933,7 +3964,8 @@ function goto(v) {
   if (v === "configs") loadSavedConfigs();
   if (v === "settings") setTimeout(() => {
     syncTopbarH();     // 进页面时补量一次：登录前量到的是 0
-    setSectSaved();
+    if (sect && SET_SECTS[sect]) setSect(sect, true);   // 深链接：用户点的，记住它
+    else setSectSaved();
   }, 30);
 }
 
@@ -8357,6 +8389,10 @@ async function selfUpdate() {
   } catch (e) { toast(e.message, "err"); }
 }
 async function loadSettings() {
+  // 有没保存的改动就别回填：goto 离开设置页再回来会走 loadAll，
+  // 这一趟会把用户正在编辑的内容整个冲掉，而且悄无声息。
+  // 保存成功后脏标记就清了，下次进来照常刷新。
+  if (SET_DIRTY.size) return;
   try {
     const j = await req("/api/settings");
     $("s_binsingbox").value = j.bin_singbox || ""; $("s_binxray").value = j.bin_xray || "";
@@ -8372,6 +8408,8 @@ async function loadSettings() {
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
     $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
     applyNotifyValues(j);
+    // 回填的是服务器真值，之前的「未保存」已经不存在了
+    SET_SAVE_CARDS.forEach(id => markDirty(id, false));
   } catch(e){}
 }
 
@@ -8411,9 +8449,15 @@ async function saveNotify() {
       notify_webhook: $("s_notify_webhook").value.trim(),
       notify_events: events,
     }});
+    markDirty("set_card_notify", false);
     $("nt_msg").textContent = "已保存";
     toast("通知设置已保存");
-    loadSettings();
+    // 这里原来调 loadSettings() 整体重载，会把「基础设置」里还没保存的改动
+    // 一起冲掉。nt_state 只依赖刚存过的两个输入框，就地重算即可。
+    const ch = [];
+    if ($("s_notify_email").value.trim()) ch.push("邮件");
+    if ($("s_notify_webhook").value.trim()) ch.push("Webhook");
+    $("nt_state").textContent = ch.length ? "已启用：" + ch.join(" + ") : "未启用";
   } catch (e) { toast("保存失败：" + e.message, "err"); }
 }
 
@@ -8802,6 +8846,7 @@ async function coreRollbackDlg(comp) {
 async function saveUpdateSettings() {
   try {
     await req("/api/settings", { method:"PUT", body:{ gh_mirror:$("s_gh_mirror").value, panel_update_index:$("s_panel_index").value } });
+    markDirty("set_card_update", false);
     $("updsetmsg").textContent = "已保存"; setTimeout(()=>$("updsetmsg").textContent="", 2500);
   } catch(e){ toast(e.message, "err"); }
 }
@@ -8821,6 +8866,7 @@ async function saveSettings() {
     acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
   try {
     await req("/api/settings", { method:"PUT", body });
+    markDirty("set_card_basic", false);
     toast("设置已保存（统计开关需应用后生效）");
   }
   catch (e) { toast(e.message, "err"); }
@@ -8861,6 +8907,7 @@ const SET_SECTS = {
   security: "账号密码、二次验证、登录设备与管理员",
   maintain: "HTTPS 证书、面板自更新、内核版本管理",
 };
+const SECT_LABEL = { common: "常用", security: "安全", maintain: "运维" };
 const SET_SECT_ORDER = ["common", "security", "maintain"];
 let setSectCur = "common";   // 当前分组，角色变化后要按新权限重算一遍
 
@@ -8891,7 +8938,9 @@ function setSect(name, persist = true) {
 
   document.querySelectorAll("#set_sect_seg button").forEach(b => {
     const ok = usable.has(b.dataset.sect);
-    b.classList.toggle("on", b.dataset.sect === pick);
+    const on = b.dataset.sect === pick;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
     b.disabled = !ok;
     b.title = ok ? "" : "当前角色没有可修改的项";
   });
@@ -8918,7 +8967,44 @@ function setSectSaved() {
 const setSectSeg = $("set_sect_seg");
 if (setSectSeg) setSectSeg.addEventListener("click", e => {
   const b = e.target.closest("button[data-sect]");
-  if (b) setSect(b.dataset.sect, true);
+  if (!b) return;
+  const from = setSectCur;
+  setSect(b.dataset.sect, true);
+  // 切走时提示一句：卡片一藏，底部的保存条也跟着没了，
+  // 容易让人以为「已经存过了」。改动其实还在，切回来就能接着改。
+  if (from !== b.dataset.sect && SET_DIRTY.size) {
+    const left = [...SET_DIRTY].some(id => { const el = $(id); return el && el.dataset.sect === from; });
+    if (left) toast(`「${SECT_LABEL[from]}」还有未保存的改动`, "warn");
+  }
+});
+
+/* ---- 未保存改动标记 ----
+   三张卡各有自己的保存按钮，切组会把卡片藏起来。给改过的组在标签上点个圆点，
+   切回来一眼能看到「这组还有东西没存」。
+   只认这三张卡：2FA 与管理员账号是即时生效的按钮，没有「未保存」这个状态。 */
+const SET_SAVE_CARDS = ["set_card_basic", "set_card_notify", "set_card_update"];
+const SET_DIRTY = new Set();
+function markDirty(id, on) {
+  if (on) SET_DIRTY.add(id); else SET_DIRTY.delete(id);
+  const sects = new Set();
+  for (const cid of SET_DIRTY) {
+    const el = $(cid);
+    if (el) sects.add(el.dataset.sect);
+  }
+  document.querySelectorAll("#set_sect_seg button").forEach(b => {
+    b.classList.toggle("dirty", sects.has(b.dataset.sect));
+  });
+  setBarCur = null;   // 底部条要跟着变（未保存时补一句）
+  updateSetBar();
+}
+// input 管文本框，change 管下拉与勾选框；两者都触发也没关系，markDirty 是幂等的
+["input", "change"].forEach(ev => {
+  const host = document.querySelector("#v-settings");
+  if (!host) return;
+  host.addEventListener(ev, e => {
+    const card = e.target.closest(".card");
+    if (card && SET_SAVE_CARDS.includes(card.id)) markDirty(card.id, true);
+  });
 });
 
 function updateSetBar() {
@@ -8940,7 +9026,8 @@ function updateSetBar() {
   bar.style.visibility = cur ? "visible" : "hidden";
   if (!cur || cur === setBarCur) return;
   setBarCur = cur;
-  $("set_bar_hint").innerHTML = "当前分区：<b>" + cur.name + "</b>";
+  $("set_bar_hint").innerHTML = "当前分区：<b>" + cur.name + "</b>" +
+    (SET_DIRTY.has(cur.id) ? ' <span style="color:var(--warn);font-weight:600">· 未保存</span>' : "");
   const btn = $("set_bar_btn");
   btn.textContent = cur.label;
   btn.onclick = cur.run;
