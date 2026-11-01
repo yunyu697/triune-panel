@@ -70,11 +70,13 @@ if [[ "${1:-}" == "--next" ]]; then
     exit 0
   fi
 
-  bump=patch
+  # 引号不是多余的：patch / minor / major 里 patch 是同名系统命令，
+  # 不加引号 shellcheck 会按 SC2209 报「别把命令名当字符串赋值」。
+  bump="patch"
   case "${3:-}" in
-    ""|--patch) bump=patch ;;
-    --minor)    bump=minor ;;
-    --major)    bump=major ;;
+    ""|--patch) bump="patch" ;;
+    --minor)    bump="minor" ;;
+    --major)    bump="major" ;;
     *) die "✘ 未知选项: $3（可用 --patch / --minor / --major）" ;;
   esac
 

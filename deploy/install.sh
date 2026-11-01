@@ -474,7 +474,7 @@ port_listener() {
   elif command -v lsof >/dev/null 2>&1; then
     $SUDO lsof -nP -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -3
   elif command -v netstat >/dev/null 2>&1; then
-    $SUDO netstat -lptn 2>/dev/null | grep -E "[:.]$PANEL_PORT[[:space:]]" | head -3
+    $SUDO netstat -lptn 2>/dev/null | grep -E "[:.]${PANEL_PORT}[[:space:]]" | head -3
   fi
 }
 LISTENER="$(port_listener || true)"
