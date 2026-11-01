@@ -104,6 +104,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/inbounds", a.write(a.createInbound))
 	// JSON 配置导入（3x-ui / xray 的入站定义）：dry_run=true 时只预览不写库
 	mux.HandleFunc("POST /api/inbounds/import-json", a.write(a.handleImportJSON))
+	// JSON → 入站表单：只解析单条入站，返回逐字段的回填数据（不写库）。
+	// 与上面那个批量导入的分工见 parsejson.go 顶部注释。
+	mux.HandleFunc("POST /api/inbounds/parse-json", a.write(a.handleParseJSON))
 	mux.HandleFunc("PUT /api/inbounds/{id}", a.write(a.updateInbound))
 	mux.HandleFunc("DELETE /api/inbounds/{id}", a.write(a.deleteInbound))
 	// 导出接口会把节点凭据（UUID / 密码 / 私钥）整段吐出来，只读角色不能碰
@@ -461,11 +464,18 @@ func (a *Server) listInbounds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
-	var in model.Inbound
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	// clients 是可选的「顺手建的用户」：从 JSON 填表时，用户和入站是一起
+	// 确认过的，分两个请求去建会出现「入站建好了、用户没建上」的半截状态，
+	// 而这个半截状态在面板上看起来和成功一模一样（只是没人能连上）。
+	var req struct {
+		model.Inbound
+		Clients []inboundClientSpec `json:"clients"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
+	in := req.Inbound
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
@@ -478,6 +488,9 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	// 入站建好之后再建用户并绑定；单个用户失败不影响入站本身（已建），
+	// 但会写日志，避免「静默少了几个用户」。
+	made := a.createInboundClients(&in, req.Clients)
 	// 自动放行防火墙端口：仅非草稿、且开启自动管理时。草稿是导入预览，
 	// 未参与渲染，待「取消草稿」转正时（updateInbound）再放行。
 	if fwAuto(a) && !in.Draft {
@@ -490,8 +503,74 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Draft {
 		detail += "（草稿）"
 	}
+	if made > 0 {
+		detail += fmt.Sprintf("，同时建 %d 个用户", made)
+	}
 	a.changed(r, AuditInboundCreate, in.Name, detail)
 	writeJSON(w, 200, in)
+}
+
+// inboundClientSpec 建入站时顺带建的用户（从 JSON 填表时带上）。
+//
+// 字段刻意与 model.Client 同名同义，只多一个「可以留空」的语义：
+// Credential 为空时按协议补一个（vless/vmess 用 UUID，trojan/ss 用密码），
+// 这样调用方不用自己判断该生成什么。
+type inboundClientSpec struct {
+	Name       string     `json:"name"`
+	Credential string     `json:"credential"`
+	QuotaGB    float64    `json:"quota_gb"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	Enabled    *bool      `json:"enabled"`
+}
+
+// createInboundClients 建用户并绑定到入站，返回成功条数。
+func (a *Server) createInboundClients(in *model.Inbound, specs []inboundClientSpec) int {
+	if len(specs) == 0 {
+		return 0
+	}
+	seen := map[string]bool{}
+	made := 0
+	for i, s := range specs {
+		cred := strings.TrimSpace(s.Credential)
+		if cred == "" {
+			// 兜底：调用方没给凭据就按协议生成（与 parse-json 同一套规则）
+			cred, _ = generateCredential(in.Protocol, nil)
+			if cred == "" {
+				cred = uuid4()
+			}
+		}
+		// 同一份 JSON 里出现重复凭据时只建一次：两个用户共用一个 UUID
+		// 在内核里等于同一个人，多建没意义还容易让人以为配置有问题。
+		if seen[cred] {
+			continue
+		}
+		seen[cred] = true
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			name = fmt.Sprintf("%s-user%d", in.Name, i+1)
+		}
+		cl := &model.Client{
+			Name:       name,
+			Credential: cred,
+			SubToken:   token(),
+			QuotaGB:    s.QuotaGB,
+			ExpiresAt:  s.ExpiresAt,
+			Enabled:    true,
+		}
+		if s.Enabled != nil {
+			cl.Enabled = *s.Enabled
+		}
+		if err := a.Store.CreateClient(cl); err != nil {
+			log.Printf("[inbound] 入站 %s(%d) 的用户 %s 创建失败: %v", in.Name, in.ID, name, err)
+			continue
+		}
+		if err := a.Store.SetClientInbounds(cl.ID, []int64{in.ID}); err != nil {
+			log.Printf("[inbound] 用户 %s 绑定入站 %d 失败: %v", name, in.ID, err)
+			continue
+		}
+		made++
+	}
+	return made
 }
 
 // updateInbound 做的是「部分更新」：只覆盖请求里真正出现的键。

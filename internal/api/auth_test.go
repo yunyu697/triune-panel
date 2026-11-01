@@ -33,6 +33,8 @@ var protectedRoutes = []struct{ method, path string }{
 	{"GET", "/api/status"},
 	{"GET", "/api/inbounds"},
 	{"POST", "/api/inbounds"},
+	{"POST", "/api/inbounds/import-json"},
+	{"POST", "/api/inbounds/parse-json"},
 	{"PUT", "/api/inbounds/1"},
 	{"DELETE", "/api/inbounds/1"},
 	{"GET", "/api/inbounds/1/export"},

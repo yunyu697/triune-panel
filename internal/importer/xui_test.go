@@ -363,3 +363,15 @@ func TestParseGlobalDNSAndRouting(t *testing.T) {
 		t.Errorf("丢弃的代理规则/出站应有提示：%v", r.Global.Warnings)
 	}
 }
+
+// TestParseSingboxInboundHint：把 sing-box 的入站贴进来时，错误信息要能直接
+// 指路，而不是一句「结构不认识」让人自己猜——两个内核的入站长得完全不一样。
+func TestParseSingboxInboundHint(t *testing.T) {
+	_, err := Parse(`{"type":"vless","tag":"in","listen":"::","listen_port":443}`)
+	if err == nil {
+		t.Fatal("sing-box 入站不该被当成 xray 入站解析")
+	}
+	if !strings.Contains(err.Error(), "sing-box") {
+		t.Errorf("错误信息应点明这是 sing-box 的入站：%v", err)
+	}
+}

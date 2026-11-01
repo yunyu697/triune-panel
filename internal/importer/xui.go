@@ -230,6 +230,16 @@ func splitList(root any) ([]map[string]any, string, error) {
 		if _, ok := v["protocol"]; ok {
 			return []map[string]any{v}, "single", nil
 		}
+		// sing-box 的入站长得像 {"type":"vless","listen_port":443,...}。
+		// 别让用户对着「结构不认识」自己猜——直接说清楚这里只吃 xray 系定义。
+		if _, isType := v["type"]; isType {
+			if _, p1 := v["listen_port"]; p1 {
+				return nil, "", fmt.Errorf("这看起来是 sing-box 的入站（type / listen_port），本面板只解析 xray / 3x-ui 的入站定义（protocol / port + settings + streamSettings）")
+			}
+			if _, p2 := v["listen"]; p2 {
+				return nil, "", fmt.Errorf("这看起来是 sing-box 的入站（type / listen），本面板只解析 xray / 3x-ui 的入站定义（protocol / port + settings + streamSettings）")
+			}
+		}
 		return nil, "", fmt.Errorf("JSON 结构不认识：既不是入站数组，也没有 inbounds 字段")
 	}
 	return nil, "", fmt.Errorf("JSON 顶层必须是对象或数组")
