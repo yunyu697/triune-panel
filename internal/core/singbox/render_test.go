@@ -135,3 +135,56 @@ func TestRenderRequiresCertMessage(t *testing.T) {
 		t.Fatal("anytls 缺证书时应当报错")
 	}
 }
+
+// 3x-ui 的 vision 入站带 flow、reality 带多个 shortId：
+// flow 要落到用户上（否则客户端退回普通 TLS），short_id 是数组。
+func TestRenderImportedFlowAndShortIDs(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{
+		Name: "imp", Core: "singbox", Protocol: "vless",
+		Port: 24453, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com","handshake_port":8443,
+			"short_ids":["ab12",""],"flow":"xtls-rprx-vision"}`,
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "alice", Credential: "uuid-1", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	users := obj["users"].([]any)
+	u := users[0].(map[string]any)
+	if u["flow"] != "xtls-rprx-vision" {
+		t.Errorf("flow 没落到用户上: %#v", u)
+	}
+	tls := obj["tls"].(map[string]any)
+	r := tls["reality"].(map[string]any)
+	sids, ok := r["short_id"].([]string)
+	if !ok || len(sids) != 2 {
+		t.Errorf("short_id 应是数组: %#v", r["short_id"])
+	}
+	hs := r["handshake"].(map[string]any)
+	if hs["server"] != "www.apple.com" || hs["server_port"] != 8443 {
+		t.Errorf("handshake 端口错: %#v", hs)
+	}
+}
+
+// 只有空短 ID 时不能写 short_id（sing-box 会拒收 [""]）。
+func TestRenderRealityEmptyShortIDOmitted(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{
+		Name: "imp", Core: "singbox", Protocol: "vless",
+		Port: 24455, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com"}`,
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	r := obj["tls"].(map[string]any)["reality"].(map[string]any)
+	if _, ok := r["short_id"]; ok {
+		t.Errorf("空短 ID 不该写进 short_id: %#v", r["short_id"])
+	}
+}

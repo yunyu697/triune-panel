@@ -102,6 +102,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth2fa/email/test", a.write(a.handleAuth2FAEmailTest))
 	mux.HandleFunc("POST /api/auth2fa/disable", a.write(a.handleAuth2FADisable))
 	mux.HandleFunc("POST /api/inbounds", a.write(a.createInbound))
+	// JSON 配置导入（3x-ui / xray 的入站定义）：dry_run=true 时只预览不写库
+	mux.HandleFunc("POST /api/inbounds/import-json", a.write(a.handleImportJSON))
 	mux.HandleFunc("PUT /api/inbounds/{id}", a.write(a.updateInbound))
 	mux.HandleFunc("DELETE /api/inbounds/{id}", a.write(a.deleteInbound))
 	// 导出接口会把节点凭据（UUID / 密码 / 私钥）整段吐出来，只读角色不能碰
@@ -877,18 +879,19 @@ func (a *Server) deleteExternal(w http.ResponseWriter, r *http.Request) {
 // handleImport 反向导入分享链接。
 // mode=external: 仅聚合进订阅（最安全，不生成任何本地配置）
 // mode=inbound:  生成本地入站草稿（draft=true，需手动启用并 apply）
+// handleImport 导入分享链接：**只做外部节点**（进订阅聚合）。
+//
+// 这里刻意不再提供「链接 → 本地入站」：分享链接是客户端视角的快照，
+// 没有 Reality 私钥、没有证书、没有多用户，反推出来的服务端必然缺东西，
+// 表现为「导入成功、一启用就报错」。要建服务端请用 /api/inbounds/import-json
+// （3x-ui / xray 的服务端原始定义）。
 func (a *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Text string `json:"text"`
-		Mode string `json:"mode"` // external | inbound
-		Core string `json:"core"` // mode=inbound 时的目标内核
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, err.Error())
 		return
-	}
-	if req.Mode == "" {
-		req.Mode = "external"
 	}
 	nodes, errs := link.ParseMany(req.Text)
 	if len(nodes) == 0 {
@@ -898,69 +901,20 @@ func (a *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	var created, failed []string
 	for _, n := range nodes {
-		if req.Mode == "inbound" {
-			if req.Core == "" {
-				req.Core = model.CoreSingBox
-			}
-			in := nodeToInbound(n, req.Core)
-			if err := a.Store.CreateInbound(in); err != nil {
-				failed = append(failed, n.Name+": "+err.Error())
-				continue
-			}
-			// 同步创建携带原始凭据的用户并关联，保证导入即可订阅
-			c := &model.Client{
-				Name:       orDefault(n.Name, "imported-"+in.Tag),
-				Credential: n.Cred,
-				SubToken:   token(),
-				Enabled:    true,
-			}
-			if err := a.Store.CreateClient(c); err == nil {
-				_ = a.Store.SetClientInbounds(c.ID, []int64{in.ID})
-			}
-			created = append(created, fmt.Sprintf("%s → 入站草稿 id=%d（未生效，需 apply）", n.Name, in.ID))
-		} else {
-			en := &model.ExternalNode{Name: orDefault(n.Name, n.Host), RawLink: n.Raw}
-			if err := a.Store.CreateExternalNode(en); err != nil {
-				failed = append(failed, n.Name+": "+err.Error())
-				continue
-			}
-			created = append(created, fmt.Sprintf("%s → 外部节点（仅订阅聚合）", en.Name))
+		en := &model.ExternalNode{Name: orDefault(n.Name, n.Host), RawLink: n.Raw}
+		if err := a.Store.CreateExternalNode(en); err != nil {
+			failed = append(failed, n.Name+": "+err.Error())
+			continue
 		}
+		created = append(created, fmt.Sprintf("%s → 外部节点（仅订阅聚合）", en.Name))
 	}
 	writeJSON(w, 200, map[string]any{"created": created, "failed": failed, "parse_errors": errStrings(errs)})
 	if len(created) > 0 {
-		a.auditOK(r, AuditImport, req.Mode,
-			fmt.Sprintf("导入 %d 条（模式 %s，失败 %d）", len(created), req.Mode, len(failed)))
+		a.auditOK(r, AuditImport, "external",
+			fmt.Sprintf("导入 %d 条外部节点（失败 %d）", len(created), len(failed)))
 	}
 }
 
-// nodeToInbound 把解析出的节点映射为本地入站草稿。
-func nodeToInbound(n *link.Node, coreName string) *model.Inbound {
-	settings := map[string]any{}
-	for k, v := range n.Extra {
-		if s, ok := v.(string); ok && s != "" {
-			settings[k] = s
-		}
-	}
-	if n.SNI != "" {
-		settings["server_name"] = n.SNI
-	}
-	if n.Path != "" {
-		settings["path"] = n.Path
-	}
-	settingsJSON, _ := json.Marshal(settings)
-	return &model.Inbound{
-		Name:      orDefault(n.Name, n.Host),
-		Core:      coreName,
-		Protocol:  n.Protocol,
-		Port:      n.Port,
-		Transport: orDefault(n.Network, "tcp"),
-		TLS:       orDefault(n.Security, "none"),
-		Settings:  string(settingsJSON),
-		Enabled:   false, // 草稿不参与渲染，确认后手动启用
-		Draft:     true,
-	}
-}
 
 // ---- apply pipeline ----
 

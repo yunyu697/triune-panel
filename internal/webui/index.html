@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.0.4 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.5 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -745,7 +745,7 @@ canvas{display:block;width:100%}
         <div class="quick-grid">
           <button class="quick" onclick="openInboundModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></span>新增入站</button>
           <button class="quick" onclick="openClientModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
-          <button class="quick" onclick="goto('import')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>导入链接</button>
+          <button class="quick" onclick="goto('import')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>导入配置</button>
           <button class="quick" onclick="goto('gen')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
           <button class="quick" onclick="goto('apply')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
           <button class="quick" onclick="goto('settings')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
@@ -804,17 +804,42 @@ canvas{display:block;width:100%}
     <!-- 导入 -->
     <section id="v-import" class="view">
       <div class="card">
-        <h3>反向导入分享链接</h3>
-        <p class="muted" style="margin-bottom:12px">粘贴 vless:// vmess:// trojan:// ss:// hysteria2:// tuic:// 链接（可多条，或整段 base64 订阅）。</p>
-        <div class="radio-row">
-          <label><input type="radio" name="imode" value="external" checked> 导入为外部节点<span class="muted">（仅订阅聚合，零风险）</span></label>
-          <label><input type="radio" name="imode" value="inbound"> 生成本地入站草稿<span class="muted">（需应用后才生效）</span></label>
-          <select id="im_core" class="input" style="width:120px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+        <h3>导入入站配置<span class="muted" style="font-weight:400">（3x-ui / x-ui 导出、或 xray 原生 inbounds 段）</span></h3>
+        <p class="muted" style="margin-bottom:12px">
+          粘贴 JSON，或直接选文件。3x-ui 的入站导出（数组、<code>settings</code>/<code>streamSettings</code> 为字符串）与
+          xray 配置里的 <code>inbounds</code> 段都能识别。导入的入站一律是<strong>未启用</strong>状态，
+          核对无误后再打开开关、应用配置。
+        </p>
+        <textarea id="js_text" class="input mono" style="min-height:190px;font-size:12px"
+          placeholder='[{"remark":"vless-reality","port":443,"protocol":"vless","settings":"{\"clients\":[{\"id\":\"uuid\",\"email\":\"user1\"}]}","streamSettings":"{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{...}}"}, ...]'></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+          <label class="btn sm" style="cursor:pointer;margin:0">选择 JSON 文件
+            <input type="file" id="js_file" accept=".json,.txt,application/json,text/plain" style="display:none" onchange="jsPickFile(this)">
+          </label>
+          <span class="muted" id="js_filemsg" style="font-size:12.5px"></span>
+          <span class="spacer" style="flex:1"></span>
+          <span class="muted" style="font-size:13px">导入到内核</span>
+          <select id="js_core" class="input" style="width:130px" onchange="jsParsed=null;$('js_go').disabled=true">
+            <option value="xray">xray（3x-ui 默认）</option>
+            <option value="singbox">sing-box</option>
+            <option value="mihomo">mihomo</option>
+          </select>
+          <button class="btn" onclick="jsPreview()">解析预览</button>
+          <button class="btn primary" id="js_go" onclick="jsImport()" disabled>确认导入</button>
         </div>
-    <textarea id="im_text" class="input" placeholder="在此粘贴链接..."></textarea>
-    <div style="margin-top:12px"><button class="btn primary" onclick="doImport()">解析并导入</button></div>
-    <div id="immsg" style="margin-top:8px"></div>
-  </div>
+        <div id="js_preview" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3>分享链接<span class="muted" style="font-weight:400">（只导入为外部节点，用于订阅聚合）</span></h3>
+        <p class="muted" style="margin-bottom:12px">
+          粘贴 vless:// vmess:// trojan:// ss:// hysteria2:// tuic:// 链接（可多条，或整段 base64 订阅）。
+          分享链接是客户端视角的快照，<strong>没有</strong> Reality 私钥、证书与多用户，反推不出服务端——
+          要建入站请用上面的 JSON 导入。
+        </p>
+        <textarea id="im_text" class="input" placeholder="在此粘贴链接..."></textarea>
+        <div style="margin-top:12px"><button class="btn primary" onclick="doImport()">解析并导入</button></div>
+        <div id="immsg" style="margin-top:8px"></div>
+      </div>
   <div class="card">
     <h3>订阅 URL 聚合<span class="muted" style="font-weight:400">（多节点聚合：拉取远端订阅并入外部节点，仅聚合进本面板订阅输出）</span></h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1365,9 +1390,16 @@ canvas{display:block;width:100%}
       <div id="ib_dyn_tls" class="full" style="display:none"><div class="frm" id="ib_dyn_tls_inner"></div></div>
       <div class="full" id="ib_dyn_row" style="display:none"><div class="frm" id="ib_dyn_inner"></div></div>
       <div class="full" id="ib_reality_row" style="display:none">
-        <div style="display:flex;gap:10px;align-items:center">
-          <button class="btn sm" onclick="genReality()">重新生成 Reality 密钥对</button>
-          <span class="muted mono" id="ibkey" style="font-size:11.5px"></span>
+        <div class="frm">
+          <div class="full"><label>Reality 私钥 private_key <span class="muted" style="font-weight:400">（服务端用，可手改/粘贴）</span></label>
+            <textarea id="ib_f_privkey" class="input mono" style="min-height:54px;font-size:12px" placeholder="base64url，43 字符" oninput="this.dataset.dirty='1'"></textarea></div>
+          <div class="full"><label>Reality 公钥 pbk <span class="muted" style="font-weight:400">（发给客户端；由私钥推导）</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input id="ib_f_pubkey" class="input mono" readonly style="flex:1;min-width:180px" placeholder="点右侧按钮生成或推导">
+              <button class="btn sm" onclick="ibDerivePub()">由私钥推导</button>
+              <button class="btn sm" onclick="genReality()">重新生成</button>
+              <button class="btn sm" onclick="ibCopyPub()">复制公钥</button>
+            </div></div>
         </div>
       </div>
       <details class="full">
@@ -3921,7 +3953,7 @@ const VIEWS = [
   ["inbounds","入站","网络服务","管理监听端口、协议、传输与 TLS"],
   ["clients","用户","网络服务","账号、凭据、配额与到期时间"],
   ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
-  ["import","导入链接","配置","反向解析订阅链接为节点或入站"],
+  ["import","导入配置","配置","从 3x-ui / xray 的 JSON 导入入站，或把分享链接聚合为外部节点"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
   ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
   ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
@@ -7538,61 +7570,97 @@ function ibSuggestNamePort() {
   $("ib_name").dataset.auto = "1";
 }
 
+/* 入站表单的下拉候选：能选就不让人手打，手打一定会打错大小写和分隔符 */
+const IB_ALPN = [["", "不指定（内核默认）"], ["h2,http/1.1", "h2 + http/1.1"], ["http/1.1", "http/1.1"], ["h2", "h2"], ["h3", "h3"]];
+const IB_SS_METHODS = [
+  ["aes-256-gcm", "aes-256-gcm（默认）"], ["aes-128-gcm", "aes-128-gcm"],
+  ["chacha20-ietf-poly1305", "chacha20-ietf-poly1305"],
+  ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm（多用户）"],
+  ["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"],
+  ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"],
+  ["none", "none（不加密，仅内网）"]
+];
+const IB_SS_NET = [["tcp,udp", "TCP + UDP（默认）"], ["tcp", "仅 TCP"], ["udp", "仅 UDP"]];
+const IB_HANDSHAKE_SITES = ["www.apple.com", "www.microsoft.com", "www.cloudflare.com",
+  "addons.mozilla.org", "www.bing.com", "www.lovelive-anime.jp"];
+const IB_SPIDER = [["", "不指定（默认 /）"], ["/", "/"], ["/x", "/x"], ["/api/v1", "/api/v1"]];
+
 // ibDynamic 按协议/传输/TLS 渲染需要的动态字段；表单值写回 settings
 function ibDynamic(userTriggered) {
   const core = $("ib_core").value, proto = ibProto(), tr = $("ib_transport").value, tls = $("ib_tls").value;
   let s = ibGetSettings();
   if (userTriggered) {
     // 切换走后清理不再适用的键，避免残留脏配置
-    if (tr !== "ws") delete s.path;
+    if (tr !== "ws") { delete s.path; delete s.ws_host; }
     if (tr !== "grpc") delete s.service_name;
-    if (tls !== "tls") { delete s.server_name; delete s.certificate_path; delete s.key_path; }
-    if (tls !== "reality") { delete s.handshake_server; delete s.server_names; delete s.private_key; delete s.pbk; delete s.short_id; }
-    if (proto !== "shadowsocks") delete s.method;
-    if (!(proto === "vless" && core === "xray")) delete s.flow;
+    if (tr !== "tcp") delete s.accept_proxy_protocol;
+    if (tls !== "tls") { delete s.server_name; delete s.certificate_path; delete s.key_path; delete s.alpn; }
+    if (tls !== "reality") { delete s.handshake_server; delete s.handshake_port; delete s.server_names; delete s.private_key; delete s.pbk; delete s.short_id; delete s.short_ids; delete s.spider_x; delete s.max_time_diff; }
+    if (proto !== "shadowsocks") { delete s.method; delete s.ss_network; }
+    if (proto !== "vless") delete s.flow;
   }
-  const esc = v => String(v||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  const esc = v => String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  const sel = (id, pairs, cur) => `<select id="${id}" class="input">` + pairs.map(([v,n]) =>
+    `<option value="${esc(v)}"${String(cur||"")===v?" selected":""}>${n}</option>`).join("") + `</select>`;
   let rows = "";
 
+  // ---- 传输层 ----
   if (tr === "ws") {
     const def = s.path || ("/ws-" + Math.random().toString(36).slice(2,6));
-    rows += `<div><label>WS 路径（自动生成）</label><input id="ib_f_path" class="input" value="${esc(def)}"></div>`;
+    rows += `<div><label>WS 路径</label><input id="ib_f_path" class="input" value="${esc(def)}"></div>`;
+    rows += `<div><label>WS Host 头 <span class="muted" style="font-weight:400">（CDN 前置时必填）</span></label>
+      <input id="ib_f_wshost" class="input" value="${esc(s.ws_host)}" placeholder="cdn.example.com"></div>`;
   }
   if (tr === "grpc") {
     rows += `<div><label>gRPC 服务名</label><input id="ib_f_svc" class="input" value="${esc(s.service_name)}" placeholder="可留空"></div>`;
   }
-  if (proto === "vless" && core === "xray") {
-    const fv = s.flow || "";
-    rows += `<div><label>Flow（Reality 时推荐 vision）</label><select id="ib_f_flow" class="input">
-      <option value="" ${fv===""?"selected":""}>无</option>
-      <option value="xtls-rprx-vision" ${fv==="xtls-rprx-vision"?"selected":""}>xtls-rprx-vision</option></select></div>`;
+  if (tr === "tcp" && core === "xray") {
+    rows += `<div><label>PROXY protocol <span class="muted" style="font-weight:400">（前面有 nginx/haproxy 时开）</span></label>
+      ${sel("ib_f_pp", [["0","否"],["1","是"]], String(s.accept_proxy_protocol||"0"))}</div>`;
+  }
+
+  // ---- 协议级 ----
+  if (proto === "vless") {
+    rows += `<div><label>Flow</label>${sel("ib_f_flow",
+      [["", "无"], ["xtls-rprx-vision", "xtls-rprx-vision（Reality/TLS 推荐）"]], s.flow)}</div>`;
   }
   if (proto === "shadowsocks") {
-    const mv = s.method || "aes-256-gcm";
-    const ms = ["aes-256-gcm","aes-128-gcm","chacha20-ietf-poly1305","2022-blake3-aes-256-gcm","2022-blake3-chacha20-poly1305"];
-    rows += `<div><label>加密方法</label><select id="ib_f_method" class="input">
-      ${ms.map(m=>`<option ${m===mv?"selected":""}>${m}</option>`).join("")}</select></div>`;
+    rows += `<div><label>加密方法</label>${sel("ib_f_method", IB_SS_METHODS, s.method || "aes-256-gcm")}</div>`;
+    rows += `<div><label>网络</label>${sel("ib_f_ssnet", IB_SS_NET, s.ss_network || "tcp,udp")}</div>`;
   }
   $("ib_dyn_row").style.display = rows ? "" : "none";
   $("ib_dyn_inner").innerHTML = rows;
 
+  // ---- TLS ----
   let tlsRows = "";
   if (tls === "tls") {
-    tlsRows += `<div><label>TLS 域名 SNI（可选）</label><input id="ib_f_sni" class="input" value="${esc(s.server_name)}" placeholder="panel.example.com"></div>`;
-    tlsRows += `<div><label>证书路径（可选，留空可后补或用面板 ACME）</label><input id="ib_f_cert" class="input" value="${esc(s.certificate_path)}" placeholder="/opt/triune-panel/data/certs/fullchain.pem"></div>`;
-    tlsRows += `<div><label>私钥路径（可选）</label><input id="ib_f_key" class="input" value="${esc(s.key_path)}" placeholder="/opt/triune-panel/data/certs/privkey.pem"></div>`;
+    tlsRows += `<div><label>TLS 域名 SNI</label><input id="ib_f_sni" class="input" value="${esc(s.server_name)}" placeholder="panel.example.com"></div>`;
+    tlsRows += `<div><label>ALPN</label>${sel("ib_f_alpn", IB_ALPN, s.alpn || "")}</div>`;
+    tlsRows += `<div><label>证书路径 <span class="muted" style="font-weight:400">（留空可用面板 ACME）</span></label><input id="ib_f_cert" class="input" value="${esc(s.certificate_path)}" placeholder="/opt/triune-panel/data/certs/fullchain.pem"></div>`;
+    tlsRows += `<div><label>私钥路径</label><input id="ib_f_key" class="input" value="${esc(s.key_path)}" placeholder="/opt/triune-panel/data/certs/privkey.pem"></div>`;
   }
   if (tls === "reality") {
-    tlsRows += `<div><label>Reality 握手目标网站</label><input id="ib_f_handshake" class="input" value="${esc(s.handshake_server||"www.apple.com")}" placeholder="www.apple.com"></div>`;
-    if (core === "xray") {
-      tlsRows += `<div><label>Reality 伪装域名（空格分隔多个）</label><input id="ib_f_snames" class="input" value="${esc(s.server_names||s.server_name||"www.apple.com")}" placeholder="www.apple.com"></div>`;
-    }
-    // short_id 两个内核都用（xray 落在 shortIds，sing-box 落在 reality.short_id）
-    tlsRows += `<div><label>short_id（可选，0-8 位十六进制）</label><input id="ib_f_shortid" class="input" value="${esc(s.short_id)}" placeholder="留空或 ab12"></div>`;
+    tlsRows += `<div><label>握手目标 dest</label><input id="ib_f_handshake" class="input" list="ib_sites" value="${esc(s.handshake_server || "www.apple.com")}" placeholder="www.apple.com">
+      <datalist id="ib_sites">${IB_HANDSHAKE_SITES.map(d=>`<option value="${d}">`).join("")}</datalist></div>`;
+    tlsRows += `<div><label>握手端口</label><input id="ib_f_hsport" class="input" type="number" min="1" max="65535" value="${esc(s.handshake_port || 443)}"></div>`;
+    tlsRows += `<div><label>SNI serverNames <span class="muted" style="font-weight:400">（逗号分隔多个）</span></label>
+      <input id="ib_f_snames" class="input" value="${esc(s.server_names || s.server_name || "www.apple.com")}" placeholder="www.apple.com,apple.com"></div>`;
+    tlsRows += `<div><label>shortIds <span class="muted" style="font-weight:400">（逗号分隔；留空=允许空 ID）</span></label>
+      <input id="ib_f_shortids" class="input mono" value="${esc(Array.isArray(s.short_ids) ? s.short_ids.join(",") : (s.short_ids || s.short_id || ""))}" placeholder="ab12,cd34"></div>`;
+    tlsRows += `<div><label>spiderX</label>${sel("ib_f_spider", IB_SPIDER, s.spider_x || "")}</div>`;
+    tlsRows += `<div><label>maxTimeDiff <span class="muted" style="font-weight:400">（毫秒，0=默认）</span></label>
+      <input id="ib_f_mtd" class="input" type="number" min="0" value="${esc(s.max_time_diff || 0)}"></div>`;
   }
   $("ib_dyn_tls").style.display = tlsRows ? "" : "none";
   $("ib_dyn_tls_inner").innerHTML = tlsRows;
-  $("ib_reality_row").style.display = tls === "reality" ? "" : "none";
+
+  // ---- Reality 密钥对（独立区块，不随 innerHTML 重建，避免正在输入的私钥被清掉）----
+  const isReality = tls === "reality";
+  $("ib_reality_row").style.display = isReality ? "" : "none";
+  if (isReality) {
+    if (!$("ib_f_privkey").dataset.dirty) $("ib_f_privkey").value = s.private_key || "";
+    $("ib_f_pubkey").value = s.pbk || "";
+  }
   $("ib_hint").textContent = IB_PROTO_HINT[proto] || "";
 
   if (userTriggered) ibPutSettings(s);
@@ -7603,33 +7671,52 @@ function ibFormToSettings() {
   const core = $("ib_core").value, proto = ibProto(), tr = $("ib_transport").value, tls = $("ib_tls").value;
   const s = ibGetSettings();
   const g = id => { const el = $(id); return el ? el.value.trim() : ""; };
-  const setIf = (k, v) => { if (v) s[k] = v; else delete s[k]; };
-  if (tr === "ws") setIf("path", g("ib_f_path"));
+  const setIf = (k, v) => { if (v !== "" && v != null) s[k] = v; else delete s[k]; };
+  if (tr === "ws") { setIf("path", g("ib_f_path")); setIf("ws_host", g("ib_f_wshost")); }
   if (tr === "grpc") setIf("service_name", g("ib_f_svc"));
+  if (tr === "tcp" && core === "xray") {
+    if (g("ib_f_pp") === "1") s.accept_proxy_protocol = 1; else delete s.accept_proxy_protocol;
+  }
+  if (proto === "vless") setIf("flow", g("ib_f_flow"));
+  if (proto === "shadowsocks") {
+    setIf("method", g("ib_f_method"));
+    const net = g("ib_f_ssnet");
+    if (net && net !== "tcp,udp") s.ss_network = net; else delete s.ss_network;
+  }
   if (tls === "tls") {
     setIf("server_name", g("ib_f_sni"));
+    setIf("alpn", g("ib_f_alpn"));
     setIf("certificate_path", g("ib_f_cert"));
     setIf("key_path", g("ib_f_key"));
   }
   if (tls === "reality") {
     setIf("handshake_server", g("ib_f_handshake"));
-    if (core === "xray") setIf("server_names", g("ib_f_snames"));
-    setIf("short_id", g("ib_f_shortid"));
-    // 分享链接里叫 sid，服务端渲染读 short_id；顺手统一掉，
-    // 免得导入的入站因为字段名不同而丢失 short_id
-    if (!s.short_id && s.sid) { s.short_id = s.sid; }
-    delete s.sid;
+    const hp = +g("ib_f_hsport") || 443;
+    if (hp !== 443) s.handshake_port = hp; else delete s.handshake_port;
+    setIf("server_names", g("ib_f_snames"));
+    // shortIds 存数组：xray 的 "" 是合法短 ID，拼成字符串会把它当空项丢掉
+    const rawSids = g("ib_f_shortids");
+    if (rawSids === "") { delete s.short_ids; }
+    else { s.short_ids = rawSids.split(",").map(x => x.trim()); delete s.short_id; }
+    setIf("spider_x", g("ib_f_spider"));
+    const mtd = +g("ib_f_mtd") || 0;
+    if (mtd > 0) s.max_time_diff = mtd; else delete s.max_time_diff;
+    // 私钥/公钥以表单为准：手改私钥后必须重新推导公钥，否则两边对不上
+    const pk = g("ib_f_privkey"), pub = g("ib_f_pubkey");
+    if (pk) s.private_key = pk; else delete s.private_key;
+    if (pub) s.pbk = pub; else delete s.pbk;
   }
-  if (proto === "shadowsocks") setIf("method", $("ib_f_method") ? $("ib_f_method").value : "");
-  if (proto === "vless" && core === "xray") setIf("flow", $("ib_f_flow") ? $("ib_f_flow").value : "");
   return s;
 }
 
 async function openInboundModal(id) {
   $("ibtitle").textContent = id ? "编辑入站" : "新增入站";
   $("ib_name").dataset.editing = id || "";
-  $("ibkey").textContent = "";
   $("ib_name").dataset.auto = id ? "0" : "1";
+  // 每次打开都清掉"用户改过私钥"的标记，否则新入站会沿用上一条的脏值
+  $("ib_f_privkey").dataset.dirty = "";
+  $("ib_f_privkey").value = "";
+  $("ib_f_pubkey").value = "";
   try { window.__ibAll = await req("/api/inbounds"); } catch(e){ window.__ibAll = []; }
   let v = { name:"", core:"singbox", protocol:"vless", listen:"", port:"", transport:"tcp", tls:"none", settings:"{}" };
   if (id) { const i = (window.__ibAll).find(x=>x.id===id); if (i) v = i; }
@@ -7661,15 +7748,20 @@ async function openInboundModal(id) {
 }
 async function saveInbound() {
   const editing = $("ib_name").dataset.editing;
-  // Reality 必须有服务端私钥：缺了就自动生成，而不是把用户拦在弹窗里
-  // （从分享链接/旧版本导入的入站只有公钥 pbk，没有私钥）
-  if ($("ib_tls").value === "reality" && !ibGetSettings().private_key) {
-    try {
-      await genReality();
-      toast("已自动生成 Reality 密钥对：客户端需改用新的公钥（重新导出/扫码）", "info");
-    } catch (e) {
-      toast("Reality 密钥对生成失败：" + (e.message || e), "err");
-      return;
+  // Reality 必须有服务端私钥。缺了就自动生成——但只在这里兜底，
+  // 手填的私钥一律以表单为准（导入的配置可能自带私钥）。
+  if ($("ib_tls").value === "reality") {
+    if (!$("ib_f_privkey").value.trim()) {
+      try {
+        await genReality(true);
+        toast("已自动生成 Reality 密钥对：客户端需改用新的公钥（重新导出/扫码）", "info");
+      } catch (e) {
+        toast("Reality 密钥对生成失败：" + (e.message || e), "err");
+        return;
+      }
+    } else if (!$("ib_f_pubkey").value.trim()) {
+      // 有私钥没公钥：能推就推，推不出来让用户自己点
+      try { await ibDerivePub(true); } catch (e) { /* 交给后端 apply 时报错 */ }
     }
   }
   let settings;
@@ -7741,19 +7833,42 @@ async function delInbound(id) {
   if (!(await ask("删除入站", "删除入站不会立即影响运行中的配置（下次应用后生效）。确定删除？"))) return;
   try { await req("/api/inbounds/"+id, { method:"DELETE" }); toast("已删除"); loadInbounds(); } catch(e){ toast(e.message,"err"); }
 }
-async function genReality() {
-  const core = $("ib_core").value;
+async function genReality(quiet) {
   try {
-    const j = await req("/api/tools/reality-keypair", { method:"POST", body:{ core } });
-    let s = {}; try { s = JSON.parse($("ib_settings").value || "{}"); } catch(e){}
-    s.private_key = j.private_key;
-    // 公钥必须跟着私钥一起换：留着旧 pbk 会让客户端用错公钥，
-    // 表现为握手一直失败（而服务端日志看起来完全正常）
-    s.pbk = j.public_key;
-    $("ib_settings").value = JSON.stringify(s, null, 2);
-    $("ibkey").textContent = "public_key（发给客户端）: " + j.public_key;
-    toast("Reality 密钥对已生成并写入 Settings");
-  } catch (e) { toast(e.message + "（需先在设置中配置 " + core + " 二进制路径）", "err"); }
+    // 不传 core：密钥是标准 X25519，后端用 crypto/ecdh 直接算，与内核无关
+    const j = await req("/api/tools/reality-keypair", { method:"POST", body:{} });
+    $("ib_f_privkey").value = j.private_key;
+    $("ib_f_privkey").dataset.dirty = "1";
+    $("ib_f_pubkey").value = j.public_key;
+    if (!quiet) toast("已生成新的 Reality 密钥对：客户端需改用新公钥", "info");
+    return j;
+  } catch (e) {
+    if (!quiet) toast("生成密钥对失败：" + e.message, "err");
+    throw e;
+  }
+}
+
+// ibDerivePub 由私钥推导公钥。手改私钥后必须重推，否则客户端拿到的 pbk
+// 与服务端私钥不匹配，表现为"握手一直失败而服务端日志一切正常"。
+async function ibDerivePub(quiet) {
+  const pk = $("ib_f_privkey").value.trim();
+  if (!pk) { if (!quiet) toast("先填私钥，或点「重新生成」", "warn"); return ""; }
+  try {
+    const j = await req("/api/tools/reality-keypair", { method:"POST", body:{ private_key: pk } });
+    $("ib_f_pubkey").value = j.public_key;
+    if (!quiet) toast("已由私钥推导出公钥");
+    return j.public_key;
+  } catch (e) {
+    if (!quiet) toast(e.message, "err");
+    throw e;
+  }
+}
+
+async function ibCopyPub() {
+  const v = $("ib_f_pubkey").value.trim();
+  if (!v) { toast("还没有公钥", "warn"); return; }
+  try { await navigator.clipboard.writeText(v); toast("公钥已复制"); }
+  catch (e) { toast("复制失败，请手动选中：" + v, "err"); }
 }
 
 /* ---- 流量 ---- */
@@ -8246,17 +8361,98 @@ function redrawCharts() {
 
 /* ---- 导入 ---- */
 async function doImport() {
-  const mode = document.querySelector('input[name=imode]:checked').value;
   try {
-    const j = await req("/api/import", { method:"POST", body:{ text:$("im_text").value, mode, core:$("im_core").value } });
+    const j = await req("/api/import", { method:"POST", body:{ text:$("im_text").value } });
     const ok = (j.created||[]).length;
     $("immsg").innerHTML =
-      (j.created||[]).map(s => `<div class="muted" style="color:var(--ok)">✓ ${s}</div>`).join("") +
-      (j.failed||[]).map(s => `<div class="muted" style="color:var(--err)">✕ ${s}</div>`).join("") +
-      (j.parse_errors||[]).map(s => `<div class="muted" style="color:var(--err)">✕ 解析失败: ${s}</div>`).join("");
-    if (mode === "inbound" && ok > 0) toast(`已导入 ${ok} 条草稿，应用配置后生效`, "info");
-    else if (ok > 0) { toast(`已导入 ${ok} 条外部节点`); loadExternal(); }
+      (j.created||[]).map(s => `<div class="muted" style="color:var(--ok)">✓ ${escHtml(s)}</div>`).join("") +
+      (j.failed||[]).map(s => `<div class="muted" style="color:var(--err)">✕ ${escHtml(s)}</div>`).join("") +
+      (j.parse_errors||[]).map(s => `<div class="muted" style="color:var(--err)">✕ 解析失败: ${escHtml(s)}</div>`).join("");
+    if (ok > 0) { toast(`已导入 ${ok} 条外部节点`); loadExternal(); }
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- JSON 配置导入（3x-ui / xray inbounds）---- */
+let jsParsed = null;   // 上一次"解析预览"的结果，确认导入时直接复用同一批入站
+
+function jsPickFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 8 * 1024 * 1024) { toast("文件超过 8 MB，请拆分后再导入", "err"); input.value = ""; return; }
+  const r = new FileReader();
+  r.onload = () => {
+    $("js_text").value = String(r.result || "");
+    $("js_filemsg").textContent = `${f.name} · ${(f.size/1024).toFixed(1)} KB`;
+    jsPreview();
+  };
+  r.onerror = () => toast("读取文件失败", "err");
+  r.readAsText(f);
+}
+
+async function jsPreview() {
+  const text = $("js_text").value.trim();
+  if (!text) { toast("先粘贴 JSON 或选一个文件", "warn"); return; }
+  const core = $("js_core").value;
+  $("js_preview").innerHTML = `<p class="muted">解析中…</p>`;
+  try {
+    const j = await req("/api/inbounds/import-json", { method:"POST", body:{ text, core, dry_run:true } });
+    jsParsed = j;
+    jsRenderPreview(j);
+    $("js_go").disabled = !(j.summary && j.summary.importable > 0);
+  } catch (e) {
+    jsParsed = null;
+    $("js_go").disabled = true;
+    $("js_preview").innerHTML = `<div class="muted" style="color:var(--err)">✕ ${escHtml(e.message)}</div>`;
+  }
+}
+
+function jsRenderPreview(j) {
+  const items = j.items || [];
+  if (!items.length) { $("js_preview").innerHTML = `<p class="muted">没有可导入的入站</p>`; return; }
+  const s = j.summary || {};
+  const head = `<p class="muted" style="margin:0 0 8px">
+    共 ${s.total} 条：可导入 <strong>${s.importable}</strong> 条${s.skipped ? `，跳过 <strong style="color:var(--err)">${s.skipped}</strong> 条` : ""}
+    · 目标内核 <code>${escHtml(j.core)}</code> · 导入后均为「未启用」状态</p>`;
+  const rows = items.map(it => {
+    const st = it.skip ? `<span style="color:var(--err)">跳过</span>` : `<span style="color:var(--ok)">✓</span>`;
+    const warns = (it.warnings||[]).map(w =>
+      `<div style="font-size:12px;color:var(--warn,#c47f17);margin-top:2px">⚠ ${escHtml(w)}</div>`).join("");
+    const cls = (it.clients||[]).map(c => {
+      const exp = c.expires_at ? `，到期 ${escHtml(c.expires_at)}` : "";
+      const q = c.quota_gb ? `，配额 ${c.quota_gb} GB` : "";
+      return `<span style="display:inline-block;margin:0 6px 4px 0;padding:1px 7px;border:1px solid var(--line);border-radius:10px;font-size:11.5px">${escHtml(c.name)}${c.enabled?"":"（停用）"}${q}${exp}</span>`;
+    }).join("");
+    return `<tr>
+      <td>${st}</td>
+      <td>${escHtml(it.name)}${warns ? `<div style="margin-top:3px">${warns}</div>` : ""}</td>
+      <td>${escHtml(it.protocol)}</td>
+      <td>${it.port}</td>
+      <td>${escHtml(it.transport)}${it.tls && it.tls !== "none" ? " / " + escHtml(it.tls) : ""}</td>
+      <td style="max-width:280px">${cls || '<span class="muted">无用户</span>'}</td>
+    </tr>`;
+  }).join("");
+  $("js_preview").innerHTML = head + `<div class="tbl-wrap"><table>
+    <thead><tr><th>状态</th><th>名称 / 提示</th><th>协议</th><th>端口</th><th>传输 / TLS</th><th>用户</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+async function jsImport() {
+  if (!jsParsed) { await jsPreview(); if (!jsParsed) return; }
+  const s = jsParsed.summary || {};
+  if (!s.importable) { toast("没有可导入的入站", "err"); return; }
+  if (!(await ask("确认导入", `将导入 ${s.importable} 条入站（跳过 ${s.skipped||0} 条）到 ${jsParsed.core} 内核。\n导入后是「未启用」状态，不会改动正在运行的配置；核对无误后再逐个打开开关并应用。`))) return;
+  $("js_go").disabled = true;
+  try {
+    const j = await req("/api/inbounds/import-json", { method:"POST",
+      body:{ text: $("js_text").value, core: $("js_core").value, dry_run:false } });
+    jsRenderPreview(j);
+    const failed = (j.failed || []).length;
+    if (failed) toast(`导入完成，${failed} 条失败：${j.failed[0]}`, "warn");
+    else toast(`已导入 ${(j.items||[]).filter(x=>!x.skip).length} 条入站（未启用）`);
+    loadInbounds();
+    jsParsed = null;
+  } catch (e) { toast(e.message, "err"); }
+  finally { $("js_go").disabled = false; }
 }
 
 /* ---- 外部节点 ---- */
@@ -9319,7 +9515,7 @@ const AU_LABEL = {
   "client.create":"新增用户","client.update":"修改用户","client.delete":"删除用户",
   "client.reset-token":"重置订阅令牌",
   "apply":"应用配置","apply.dry-run":"预检","rollback":"回滚配置","switch-core":"切换内核",
-  "import":"导入链接","external":"外部节点","auth2fa":"二次验证",
+  "import":"导入配置","external":"外部节点","auth2fa":"二次验证",
   "cert.issue":"证书签发","update":"版本更新","restore":"数据恢复","audit.clear":"清空审计",
   "admin":"管理员账号","rbac.deny":"越权拦截",
   "session":"登录设备","session.revoke":"吊销会话"

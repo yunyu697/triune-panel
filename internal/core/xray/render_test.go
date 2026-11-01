@@ -110,3 +110,86 @@ func TestRenderShadowsocks(t *testing.T) {
 		t.Error("method 不应残留在入站顶层")
 	}
 }
+
+// 导入的 3x-ui 配置带多 shortIds、多 serverNames、自定义握手端口、alpn、
+// spiderX、maxTimeDiff、fallbacks：这些都要如实落进 xray 的正确位置。
+func TestRenderImportedRealityMultiValues(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "imported", Core: "xray", Protocol: "vless",
+		Port: 24443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com","handshake_port":8443,
+			"server_names":"www.apple.com,apple.com","short_ids":["ab12",""],"spider_x":"/x",
+			"max_time_diff":60000,"flow":"xtls-rprx-vision","fallbacks":[{"dest":80,"alpn":""}]}`,
+	}
+	obj, err := x.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u1", Credential: "uuid-1", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	rs := obj["streamSettings"].(map[string]any)["realitySettings"].(map[string]any)
+	if rs["dest"] != "www.apple.com:8443" {
+		t.Errorf("dest 应用自定义端口: %v", rs["dest"])
+	}
+	names, _ := rs["serverNames"].([]string)
+	if len(names) != 2 {
+		t.Errorf("serverNames 应保留两个: %v", rs["serverNames"])
+	}
+	sids, _ := rs["shortIds"].([]string)
+	if len(sids) != 2 || sids[0] != "ab12" || sids[1] != "" {
+		t.Errorf("shortIds 应含空串: %#v", rs["shortIds"])
+	}
+	if rs["spiderX"] != "/x" || core.FieldInt(in.Settings, "max_time_diff") != 60000 {
+		t.Errorf("spiderX/maxTimeDiff 丢: %v / %v", rs["spiderX"], rs["maxTimeDiff"])
+	}
+	vs := obj["settings"].(map[string]any)
+	if fb, ok := vs["fallbacks"].([]any); !ok || len(fb) != 1 {
+		t.Errorf("fallbacks 应透传: %#v", vs["fallbacks"])
+	}
+}
+
+// TLS 的 alpn 与 ws 的 Host 头（CDN 前置场景）不能丢。
+func TestRenderImportedTLSExtras(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "ws", Core: "xray", Protocol: "vmess",
+		Port: 24444, Transport: "ws", TLS: "tls",
+		Settings: `{"path":"/ray","ws_host":"cdn.example.com","server_name":"cdn.example.com",
+			"alpn":"h2,http/1.1","certificate_path":"/c.pem","key_path":"/k.pem"}`,
+	}
+	obj, err := x.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	st := obj["streamSettings"].(map[string]any)
+	ts := st["tlsSettings"].(map[string]any)
+	alpn, _ := ts["alpn"].([]string)
+	if len(alpn) != 2 || alpn[0] != "h2" {
+		t.Errorf("alpn 解析错: %#v", ts["alpn"])
+	}
+	ws := st["wsSettings"].(map[string]any)
+	hdrs, _ := ws["headers"].(map[string]any)
+	if hdrs["Host"] != "cdn.example.com" {
+		t.Errorf("ws Host 头丢失: %#v", ws)
+	}
+}
+
+// settings 里的 short_ids 也可能是逗号串（表单填写），要能等价处理。
+func TestShortIDsAcceptsBothForms(t *testing.T) {
+	for _, c := range []struct {
+		settings string
+		want     int
+	}{
+		{`{"short_ids":["a","b"]}`, 2},
+		{`{"short_ids":"a, b"}`, 2},
+		{`{"short_id":"only"}`, 1},
+		{`{}`, 1}, // 没配时给 [""]，xray 要求 shortIds 至少是数组
+	} {
+		if got := core.ShortIDs(c.settings); len(got) != c.want {
+			t.Errorf("ShortIDs(%s) = %#v，长度应为 %d", c.settings, got, c.want)
+		}
+	}
+}

@@ -81,7 +81,15 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 			continue
 		}
 		switch in.Protocol {
-		case "vless", "vmess":
+		case "vless":
+			u := map[string]any{"name": c.Name, "uuid": c.Credential}
+			// flow（xtls-rprx-vision）是 vless 的用户级参数，3x-ui 导出的
+			// vision 入站不带它客户端会退回普通 TLS，性能差一截
+			if flow := core.Field(in.Settings, "flow"); flow != "" {
+				u["flow"] = flow
+			}
+			users = append(users, u)
+		case "vmess":
 			users = append(users, map[string]any{"name": c.Name, "uuid": c.Credential})
 		case "trojan", "hysteria2", "anytls":
 			users = append(users, map[string]any{"name": c.Name, "password": c.Credential})
@@ -143,6 +151,9 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		if sn := core.Field(in.Settings, "server_name"); sn != "" {
 			tls["server_name"] = sn
 		}
+		if alpn := core.FieldList(in.Settings, "alpn"); len(alpn) > 0 {
+			tls["alpn"] = alpn
+		}
 		if cp := core.Field(in.Settings, "certificate_path"); cp != "" {
 			tls["certificate_path"] = cp
 		}
@@ -158,15 +169,25 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 	case "reality":
 		priv := core.Field(in.Settings, "private_key")
 		if priv == "" {
-			return nil, fmt.Errorf("Reality 入站缺少服务端私钥（private_key）：请在入站编辑里点「重新生成 Reality 密钥对」后保存")
+			return nil, fmt.Errorf("Reality 入站缺少服务端私钥（private_key）：请在入站编辑里点「生成密钥对」后保存")
+		}
+		hs := core.Field(in.Settings, "handshake_server")
+		if hs == "" {
+			hs = core.Field(in.Settings, "server_name")
+		}
+		hp := core.FieldInt(in.Settings, "handshake_port")
+		if hp <= 0 || hp > 65535 {
+			hp = 443
 		}
 		reality := map[string]any{
 			"enabled":     true,
-			"handshake":   map[string]any{"server": core.Field(in.Settings, "handshake_server"), "server_port": 443},
+			"handshake":   map[string]any{"server": hs, "server_port": hp},
 			"private_key": priv,
 		}
-		if sid := core.Field(in.Settings, "short_id"); sid != "" {
-			reality["short_id"] = []string{sid}
+		// sing-box 的 short_id 是字符串数组（1.12+）；只配空短 ID 时不写，
+		// 写 [""] 会被校验拒收
+		if sids := core.ShortIDs(in.Settings); len(sids) > 0 && !(len(sids) == 1 && sids[0] == "") {
+			reality["short_id"] = sids
 		}
 		obj["tls"] = map[string]any{"enabled": true, "reality": reality}
 	}

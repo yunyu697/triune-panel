@@ -48,7 +48,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 
 | 领域 | 能做什么 |
 |---|---|
-| **入站** | 三内核随时互切 · 协议按内核联动 · 端口自动放行防火墙 · 连通性自检 |
+| **入站** | 三内核随时互切 · 协议按内核联动 · 端口自动放行防火墙 · 连通性自检 · 3x-ui / xray JSON 导入 |
 | **用户** | 配额/到期自动停用 · 三种订阅格式 · 二维码 · 令牌重置 · 批量导出 |
 | **生成** | mihomo / sing-box · sing-box 版本矩阵 · 规则标签 · 本机内核实校 |
 | **保存** | 命名保存（存参数不只存文件）· 随时下载 · 重新生成先比差异 |
@@ -577,14 +577,49 @@ frame-ancestors 'none'
 刻意**不下发** `Cross-Origin-Resource-Policy`：`/sub/<token>` 会被各种订阅客户端
 拉取，其中一些是浏览器里的 Web 面板，CORP 会把它们挡掉，收益小于风险。
 
-## 反向导入现有链接（迁移不失效）
+## 导入配置（3x-ui / xray 的入站定义）
 
-**导入链接** 页支持粘贴 `vless://` `vmess://` `trojan://` `ss://` `hysteria2://` `tuic://`
-（可多条，也支持整段 base64 订阅内容），两种模式：
+**导入配置** 页支持两种输入来源，各管一件事：
 
-- **外部节点**：只存进订阅聚合，不生成本地配置、不触碰任何现有服务器 —— 零风险
-- **本地入站草稿**：生成本机入站（`draft` 状态，不参与渲染），确认后启用并 apply，
-  校验通过才真正生效 —— 迁移期内现有配置始终在线
+### JSON → 本地入站（服务端配置）
+
+粘贴或选文件，两种形态都认：
+
+- **3x-ui / x-ui 的入站导出**：数组，`settings` / `streamSettings` 是**字符串**形式的 JSON；
+- **xray 原生配置**：`{"inbounds":[...]}` 对象，字段本身就是 JSON；
+- 单个入站对象（`{"protocol":"vless",...}`）也可以。
+
+导入流程是「解析预览 → 确认导入」两步，预览会逐条列出协议、端口、传输/TLS、用户，
+以及**映射不了的字段**（如 `h2`、`xhttp` 传输会降级为 tcp 并明确提示）。
+导入的入站一律 `enabled=false`：不点启用就绝不会进内核配置。
+
+映射规则（服务端视角，字段落在面板的 `settings` 里）：
+
+| 3x-ui / xray | 面板 |
+|---|---|
+| `streamSettings.network` | `tcp` / `ws`（`path`、`host`→`ws_host`）/ `grpc`（`serviceName`） |
+| `security: tls` | `server_name`、`alpn`、`certificate_path`、`key_path` |
+| `security: reality` | `handshake_server` + `handshake_port`、`server_names`、`private_key`、`short_ids`（**数组，含空串**）、`spider_x`、`max_time_diff`、`pbk`（公钥，仅供分享） |
+| `settings.clients` | 面板用户：`email`→名称、`id`/`password`→凭据、`totalGB`（字节）→`quota_gb`、`expiryTime`（毫秒）→到期时间、`enable`→启用 |
+| `settings.fallbacks` | 原样保留（vless） |
+| `sniffing` / `allocate` | 原样透传（仅 xray 目标内核） |
+| `flow`（客户端级） | 提到入站级 `flow`（面板按入站渲染；多值不同时取第一个并提示） |
+
+Reality 私钥在 3x-ui 的导出里是**有**的（`privateKey`），所以这类导入是完整的；
+只有分享链接才没有私钥——这也是链接不再支持「生成入站」的原因。
+
+**这套导入不覆盖的**（都会在预览里逐条说明，不会静默改配置）：`dokodemo-door` /
+`wireguard` / `tunnel` 协议（面板渲染器不生成）、xray 下的 `socks`/`http` 入站、
+`h2` / `httpupgrade` / `xhttp` / `splithttp` / `kcp` / `quic` 传输（降级为 tcp）、
+内联 PEM 证书（只支持文件路径）、以及 3x-ui 的 DNS 与路由规则（面板没有路由编辑器）。
+
+### 分享链接 → 外部节点（只做订阅聚合）
+
+粘贴 `vless://` `vmess://` `trojan://` `ss://` `hysteria2://` `tuic://`（可多条，
+也支持整段 base64 订阅），**只存进订阅聚合**，不生成本地配置。
+
+链接是客户端视角的快照：没有 Reality 私钥（只有公钥 `pbk`）、没有证书、没有多用户。
+反推出来的服务端必然缺东西，表现为「导入成功、一启用就报错」，所以这条路径已移除。
 
 ## 订阅输出
 
@@ -1347,6 +1382,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v1.0.5 | 导入改成 JSON（3x-ui / xray 入站定义）；移除「链接反推入站」；入站表单每项可改，Reality 密钥对可编辑 |
 | v1.0.4 | 「最新版本」按 semver 排序（预发布段曾按字符串比，默认选中了旧 alpha）；滚动 tag 用 `updated_at` 兜底 |
 | v1.0.3 | 修掉启用/切换内核的各类报错：三内核 9 处渲染错误、3 处静默失败、Reality 密钥自动生成 |
 | v1.0.2 | 命令行 `tp` 全套（只读 + 写操作，走 unix socket）；支持加到主屏（PWA）；设置页分组的五个缺口 |

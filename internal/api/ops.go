@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,7 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"triune/internal/model"
 	"triune/internal/update"
 )
 
@@ -106,59 +108,75 @@ func (a *Server) handleTrafficDaily(w http.ResponseWriter, r *http.Request) {
 
 // ---- tools ----
 
-// POST /api/tools/reality-keypair {"core":"singbox"|"xray"}
+// POST /api/tools/reality-keypair
+//
+//	{"core":"singbox"|"xray"}            生成一对新密钥
+//	{"private_key":"..."}                由已有私钥推导公钥（导入配置后核对用）
+//
+// 密钥用 Go 的 crypto/ecdh 算，不依赖内核二进制：X25519 是标准算法，
+// 私钥 32 字节、编码为 base64url（43 字符），与 xray/sing-box 完全一致。
+// 这样即使面板还没装内核，也能编辑 Reality 入站——以前的实现会在这里
+// 报「未配置二进制路径」，把一个纯数学问题变成运维问题。
 func (a *Server) handleRealityKeypair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Core string `json:"core"`
+		Core       string `json:"core"`
+		PrivateKey string `json:"private_key"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.Core == "" {
-		// 前端旧版本可能没带 core：默认用 sing-box（x25519 密钥对通用）
-		req.Core = model.CoreSingBox
-	}
-	bin, _ := a.Store.GetSetting("bin_" + req.Core)
-	if bin == "" {
-		fail(w, 400, "未配置 "+req.Core+" 二进制路径，请先到「设置 → 组件更新」安装内核")
+
+	if pk := strings.TrimSpace(req.PrivateKey); pk != "" {
+		pub, err := realityPubFromPriv(pk)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]string{"private_key": pk, "public_key": pub})
 		return
 	}
-	var cmd *exec.Cmd
-	if req.Core == model.CoreXray {
-		cmd = execCmd(bin, "x25519")
-	} else {
-		cmd = execCmd(bin, "generate", "reality-keypair")
-	}
-	out, err := cmd.CombinedOutput()
+
+	priv, pub, err := newRealityKeypair()
 	if err != nil {
-		fail(w, 500, fmt.Sprintf("%v: %s", err, string(out)))
-		return
-	}
-	priv, pub := parseKeypair(string(out))
-	if priv == "" || pub == "" {
-		fail(w, 500, "无法解析输出:\n"+string(out))
+		fail(w, 500, "生成密钥对失败: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]string{"private_key": priv, "public_key": pub})
 }
 
-func parseKeypair(out string) (priv, pub string) {
-	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(ln)
-		lower := strings.ToLower(ln)
-		switch {
-		case strings.HasPrefix(lower, "private") || strings.HasPrefix(lower, "privatekey"):
-			priv = afterColon(ln)
-		case strings.HasPrefix(lower, "public") || strings.HasPrefix(lower, "password"):
-			pub = afterColon(ln)
-		}
+// newRealityKeypair 生成 X25519 密钥对（base64url，无填充）。
+func newRealityKeypair() (priv, pub string, err error) {
+	k, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", err
 	}
-	return
+	enc := base64.RawURLEncoding
+	return enc.EncodeToString(k.Bytes()), enc.EncodeToString(k.PublicKey().Bytes()), nil
 }
 
-func afterColon(s string) string {
-	if i := strings.Index(s, ":"); i >= 0 {
-		return strings.TrimSpace(s[i+1:])
+// realityPubFromPriv 由私钥推导公钥。私钥格式兼容 base64url（xray/sing-box）
+// 与标准 base64（部分面板导出的可能带 +/=）。
+func realityPubFromPriv(s string) (string, error) {
+	raw, err := decodeRealityKey(s)
+	if err != nil {
+		return "", err
 	}
-	return s
+	k, err := ecdh.X25519().NewPrivateKey(raw)
+	if err != nil {
+		return "", fmt.Errorf("私钥不合法（%d 字节，应为 32 字节的 base64）：%v", len(raw), err)
+	}
+	return base64.RawURLEncoding.EncodeToString(k.PublicKey().Bytes()), nil
+}
+
+func decodeRealityKey(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "private_key=")
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding,
+	} {
+		if b, err := enc.DecodeString(s); err == nil && len(b) == 32 {
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("私钥应是 32 字节的 base64（base64url 43 字符），收到 %q", truncate(s, 20))
 }
 
 // GET /api/tools/uuid：生成一个 UUID。

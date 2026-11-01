@@ -8,6 +8,43 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.0.5
+
+**导入改成「服务端定义进、客户端链接出」**：删掉「分享链接 → 本地入站」，
+换成 3x-ui / xray 的 JSON 导入；入站表单补齐到每一项都能手改。
+
+1. **移除链接反推入站**：链接里没有 Reality 私钥、没有证书、没有多用户，
+   反推出来的入站"看着导入成功、一启用就报错"。分享链接现在只进外部节点
+   （订阅聚合），后端 `POST /api/import` 不再接受 `mode=inbound`。
+2. **新增 `POST /api/inbounds/import-json`**（3x-ui / x-ui 导出、xray 原生
+   `inbounds` 段、单个入站对象三种形态都认）：`dry_run=true` 先预览，
+   确认后写库，导入的入站一律 `enabled=false`——不点启用绝不进内核配置。
+   - 传输 `tcp`/`ws`（含 Host 头）/`grpc`；`h2`、`xhttp` 等面板不生成的传输
+     会降级为 tcp 并**逐条给出警告**，不静默改配置；
+   - TLS：`serverName`、`alpn`、证书与私钥路径；内联 PEM 会提示"只支持文件路径"；
+   - Reality：`dest`（拆成 host + 端口）、多 `serverNames`、`privateKey`、
+     多 `shortIds`（**保留空串**，xray 的 `""` 是合法短 ID）、`spiderX`、
+     `maxTimeDiff`、`publicKey`；
+   - 用户：`email`→名称、`id`/`password`→凭据、`totalGB`→配额 GB、
+     `expiryTime`→到期时间、`enable`→启用状态、`subId`→订阅令牌；
+   - `fallbacks`、`sniffing`、`allocate` 原样透传（后两者仅 xray 目标内核）。
+3. **入站表单不再"只能改一半"**：协议、传输、TLS、Flow、加密方法、网络、
+   ALPN、spiderX、PROXY protocol 全部改成下拉/勾选，Reality 的**私钥与公钥
+   都能直接编辑**，并提供「由私钥推导公钥」（手改私钥后公钥对不上是经典的
+   "握手一直失败而服务端日志正常"）；高级 Settings JSON 仍在，可透传任何字段。
+4. **Reality 密钥对不再依赖内核二进制**：改用 Go 的 `crypto/ecdh` 直接算 X25519，
+   没装内核算不出密钥的问题消失；`/api/tools/reality-keypair` 同时支持
+   `{"private_key":"..."}` 推导公钥。
+5. **渲染器补齐导入带来的字段**：xray 的多 `shortIds`、`serverNames`、`alpn`、
+   `spiderX`、`maxTimeDiff`、`fallbacks`、ws 的 `Host` 头、`acceptProxyProtocol`、
+   ss 的 `network`；sing-box 的 `alpn`、vless 用户的 `flow`、reality 的
+   `short_id` 数组与自定义握手端口。
+
+实测（真实二进制）：xray 26.10.31 与 sing-box 1.15.0-alpha.13 上，把同一份 3x-ui
+导出分别导入两个内核、启用并 apply，端口级健康检查通过；渲染出的 reality
+`shortIds` 为 `["ab12",""]`、`spiderX`/`maxTimeDiff`/`fallbacks`/`sniffing`
+与 ws 的 `Host` 头均按原样出现。
+
 ## v1.0.4
 
 「最新版本」排错了：版本列表的第一条就是装/更新弹窗默认选中的那条，而预发布段
