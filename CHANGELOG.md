@@ -8,6 +8,50 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.0.3
+
+这是一次「启用内核 / 切换内核各种报错」的集中修复，问题全部在真机上用
+sing-box 1.14.4 / Xray 26.10.31 / mihomo v1.19.33 复现并验证。
+
+1. **xray 的 Reality 入站根本起不来**：`realitySettings.dest` 必须是 `host:port`，
+   而面板把表单里的裸域名（`www.apple.com`）原样写入，xray 直接判为非法 target
+   （`please fill in a valid value for "target"`）。现在自动补 `:443`，并在缺
+   `serverNames` 时回退为握手目标的主机名、`shortIds` 始终给数组。
+   这也是「sing-box 切 xray 必失败」的根因。
+2. **三内核 × 协议矩阵 9 处渲染错误**（全部实测复现后修掉）：
+   - sing-box：TUIC 用户缺 `uuid`；hysteria2/tuic 多写了 `transport` 字段；
+     mixed/socks 用户多了 `name` 字段（严格校验拒收）。
+   - mihomo：mixed/socks/http 的 `users` 必须是对象数组而非 `"user:pass"` 字符串；
+     tuic/hysteria2 的 `users` 是 map；trojan 缺用户时直接给可读错误。
+   - xray：补上 shadowsocks 服务端渲染（此前选得到协议但渲染器直接报不支持）。
+3. **mihomo 的 listener 静默不监听**：mihomo 对证书路径有安全白名单
+   （只允许其 home 与 `SAFE_PATHS`），面板数据目录下的证书被拒绝后它只记一条
+   `listen err` 日志、进程照常存活 —— 界面显示"已启用"、端口却没人听。
+   现在证书以 PEM 内容内联进 listener，同时给 mihomo 显式 `-d` 固定 home，
+   证书不可读在渲染期就报错。
+4. **启用失败不再"显示成功"**：
+   - 应用前做端口预检（TCP 先试连接、再试独占绑定，兼容 BSD 的 SO_REUSEADDR
+     行为），端口被别的程序占用时直接 422，并把刚备份的旧配置写回、重启旧内核，
+     不会因为一次失败的应用把线上服务停掉；
+   - 应用后做端口级健康检查（不只是"进程存活"），逐个入站探测是否真的在监听，
+     未监听则判失败并附内核日志尾部。xray 端口被占时会静默继续运行，这类问题
+     以前完全看不出来；
+   - `Pipeline.Apply` 不再吞掉内核启动错误。
+5. **修改入站不再反复要求生成 Reality 密钥**：保存时若发现缺 `private_key`
+   （分享链接导入的入站只有公钥），自动生成密钥对并同步更新 `pbk`，不再弹错
+   拦住保存；顺手把分享链接里的 `sid` 归一成 `short_id`，切换协议/TLS 时也不再
+   删除已有的私钥。生成有变化时会提示"客户端需改用新公钥"。
+6. **切换内核弹窗只列出支持该协议的内核**，不再让人选完才被后端预检拒绝；
+   xray 的 Reality 表单补上 short_id 输入框。
+7. mihomo 不再默认写 `mixed-port: 7890`（服务端用不到，还会与宿主机服务抢端口
+   导致内核启动即退出）。
+
+新增单测：三内核渲染兼容性 9 项（tuic uuid / 无 transport / socks 无 name /
+reality dest 端口 / serverNames 回退 / shadowsocks / mihomo users 类型 /
+证书内联与缺失报错 / 无 mixed-port）。
+
+---
+
 ## v1.0.2
 
 1. **设置页支持深链接**：`goto('settings', 'maintain')` 可以直接落到指定分组。

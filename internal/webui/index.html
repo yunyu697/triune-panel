@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.0.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -7461,7 +7461,7 @@ async function importSubURL() {
 const IB_SPECS = {
   singbox: { protocols:["vless","vmess","trojan","shadowsocks","hysteria2","tuic","anytls","mixed","socks"],
              transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
-  xray:    { protocols:["vless","vmess","trojan"],
+  xray:    { protocols:["vless","vmess","trojan","shadowsocks"],
              transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
   mihomo:  { protocols:["mixed","socks","http","shadowsocks","vmess","trojan","tuic","hysteria2"],
              transports:["tcp"], tls:["none","tls"] }
@@ -7585,10 +7585,10 @@ function ibDynamic(userTriggered) {
   if (tls === "reality") {
     tlsRows += `<div><label>Reality 握手目标网站</label><input id="ib_f_handshake" class="input" value="${esc(s.handshake_server||"www.apple.com")}" placeholder="www.apple.com"></div>`;
     if (core === "xray") {
-      tlsRows += `<div><label>Reality 伪装域名（空格分隔多个）</label><input id="ib_f_snames" class="input" value="${esc(s.server_names||"www.apple.com")}" placeholder="www.apple.com"></div>`;
-    } else {
-      tlsRows += `<div><label>short_id（可选）</label><input id="ib_f_shortid" class="input" value="${esc(s.short_id)}" placeholder="留空或 0-8 位十六进制"></div>`;
+      tlsRows += `<div><label>Reality 伪装域名（空格分隔多个）</label><input id="ib_f_snames" class="input" value="${esc(s.server_names||s.server_name||"www.apple.com")}" placeholder="www.apple.com"></div>`;
     }
+    // short_id 两个内核都用（xray 落在 shortIds，sing-box 落在 reality.short_id）
+    tlsRows += `<div><label>short_id（可选，0-8 位十六进制）</label><input id="ib_f_shortid" class="input" value="${esc(s.short_id)}" placeholder="留空或 ab12"></div>`;
   }
   $("ib_dyn_tls").style.display = tlsRows ? "" : "none";
   $("ib_dyn_tls_inner").innerHTML = tlsRows;
@@ -7614,8 +7614,11 @@ function ibFormToSettings() {
   if (tls === "reality") {
     setIf("handshake_server", g("ib_f_handshake"));
     if (core === "xray") setIf("server_names", g("ib_f_snames"));
-    else setIf("short_id", g("ib_f_shortid"));
-    if (!s.private_key) { toast("Reality 需要密钥对，请点击「重新生成 Reality 密钥对」", "err"); throw new Error("need-reality-keys"); }
+    setIf("short_id", g("ib_f_shortid"));
+    // 分享链接里叫 sid，服务端渲染读 short_id；顺手统一掉，
+    // 免得导入的入站因为字段名不同而丢失 short_id
+    if (!s.short_id && s.sid) { s.short_id = s.sid; }
+    delete s.sid;
   }
   if (proto === "shadowsocks") setIf("method", $("ib_f_method") ? $("ib_f_method").value : "");
   if (proto === "vless" && core === "xray") setIf("flow", $("ib_f_flow") ? $("ib_f_flow").value : "");
@@ -7658,9 +7661,20 @@ async function openInboundModal(id) {
 }
 async function saveInbound() {
   const editing = $("ib_name").dataset.editing;
+  // Reality 必须有服务端私钥：缺了就自动生成，而不是把用户拦在弹窗里
+  // （从分享链接/旧版本导入的入站只有公钥 pbk，没有私钥）
+  if ($("ib_tls").value === "reality" && !ibGetSettings().private_key) {
+    try {
+      await genReality();
+      toast("已自动生成 Reality 密钥对：客户端需改用新的公钥（重新导出/扫码）", "info");
+    } catch (e) {
+      toast("Reality 密钥对生成失败：" + (e.message || e), "err");
+      return;
+    }
+  }
   let settings;
   try { settings = JSON.stringify(ibFormToSettings()); }
-  catch(e){ if (e.message !== "need-reality-keys") toast("Settings JSON 无效: " + e.message, "err"); return; }
+  catch(e){ toast("Settings JSON 无效: " + e.message, "err"); return; }
   const body = { name:$("ib_name").value, core:$("ib_core").value, protocol:ibProto(),
     listen:$("ib_listen").value, port:+$("ib_port").value, transport:$("ib_transport").value,
     tls:$("ib_tls").value, settings };
@@ -7690,7 +7704,14 @@ async function openSwitchModal(id) {
   const i = all.find(x=>x.id===id); if (!i) return;
   swInbound = i;
   $("sw_inbound").value = `#${i.id} ${i.name}（当前 ${i.core}，端口 ${i.port}）`;
-  $("sw_to").innerHTML = ["singbox","xray","mihomo"].filter(c=>c!==i.core).map(c=>`<option>${c}</option>`).join("");
+  // 只列出同时支持该协议的内核，避免选完才被后端预检拒绝
+  const opts = ["singbox","xray","mihomo"]
+    .filter(c => c !== i.core && (IB_SPECS[c]||{protocols:[]}).protocols.includes(i.protocol));
+  if (!opts.length) {
+    toast(`协议 ${i.protocol} 只有 ${i.core} 支持，无法切换内核`, "err");
+    return;
+  }
+  $("sw_to").innerHTML = opts.map(c => `<option>${c}</option>`).join("");
   $("sw_preview").classList.add("hide"); $("sw_preview").textContent = "";
   $("sw_go").disabled = false;
   openModal("mSwitch");
@@ -7726,8 +7747,9 @@ async function genReality() {
     const j = await req("/api/tools/reality-keypair", { method:"POST", body:{ core } });
     let s = {}; try { s = JSON.parse($("ib_settings").value || "{}"); } catch(e){}
     s.private_key = j.private_key;
-    // 同时写入 pbk（客户端出站所需的公钥），保证生成的配置可直接使用
-    if (!s.pbk) s.pbk = j.public_key;
+    // 公钥必须跟着私钥一起换：留着旧 pbk 会让客户端用错公钥，
+    // 表现为握手一直失败（而服务端日志看起来完全正常）
+    s.pbk = j.public_key;
     $("ib_settings").value = JSON.stringify(s, null, 2);
     $("ibkey").textContent = "public_key（发给客户端）: " + j.public_key;
     toast("Reality 密钥对已生成并写入 Settings");

@@ -15,12 +15,14 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"triune/internal/core"
+	"triune/internal/firewall"
 	"triune/internal/model"
 )
 
@@ -178,6 +180,7 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "更新数据库失败，已还原: "+err.Error())
 			return
 		}
+		t.Core = req.To // 让响应里的入站展示与切换结果一致
 	}
 
 	// ---- 3. 停旧内核进程（释放端口）----
@@ -269,8 +272,11 @@ func (a *Server) applyWithRevision(coreName string, input []core.InboundWithClie
 	return res, nil
 }
 
-// healthCheck 确认内核进程在短暂观察窗口内持续存活。
-// 端口被占、配置运行期错误等"启动即退出"的问题都会在这里暴露。
+// healthCheck 确认内核不仅"活着"，而且真的在监听它该监听的端口。
+//
+// 只看进程存活是不够的：xray 端口被占、mihomo listener 证书加载失败
+// 都只记一条日志、进程继续跑，界面显示"已启用"而实际没有服务。
+// 这里逐个入站探测监听状态，未监听直接判失败并带上内核日志尾部。
 func (a *Server) healthCheck(coreName string) error {
 	if a.ProcMgr == nil {
 		return nil
@@ -278,15 +284,70 @@ func (a *Server) healthCheck(coreName string) error {
 	for i := 0; i < 3; i++ {
 		time.Sleep(700 * time.Millisecond)
 		if alive, _ := a.ProcMgr.Status(coreName); !alive {
-			logs := a.ProcMgr.Logs(coreName, a.DataDir+"/cores/"+coreName, 15)
-			detail := ""
-			for _, l := range logs {
-				detail += l + "\n"
-			}
-			return fmt.Errorf("内核进程启动后退出（健康检查失败）。最近日志：\n%s", detail)
+			return fmt.Errorf("内核进程启动后退出（健康检查失败）。最近日志：\n%s", a.coreLogTail(coreName, 15))
 		}
 	}
+	ins, err := a.Store.ListInbounds(coreName)
+	if err != nil {
+		return nil // 查不到入站时不做端口判定，避免误报
+	}
+	var missing []string
+	for _, in := range ins {
+		if !in.Enabled || in.Draft {
+			continue
+		}
+		if !portListening(in) {
+			missing = append(missing, fmt.Sprintf("%s (%s:%d/%s)",
+				in.Name, orAll(in.Listen), in.Port, firewall.ProtoOf(in.Protocol, in.Transport)))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("内核进程在运行，但以下入站端口没有监听：%s\n常见原因：端口被其它程序占用、证书加载失败、协议参数不合法。\n最近日志：\n%s",
+			strings.Join(missing, "、"), a.coreLogTail(coreName, 20))
+	}
 	return nil
+}
+
+// coreLogTail 读取内核日志尾部（与 proc.Manager.Logs 一致的数据源）。
+func (a *Server) coreLogTail(coreName string, n int) string {
+	logs := a.ProcMgr.Logs(coreName, a.DataDir+"/cores/"+coreName, n)
+	return strings.Join(logs, "\n")
+}
+
+func orAll(listen string) string {
+	if listen == "" {
+		return "::"
+	}
+	return listen
+}
+
+// portListening 探测入站端口是否真的处于监听状态。
+// TCP 直接拨号；UDP 没有可靠的"拨通"语义，改用独占绑定反证：
+// 能绑上说明没有进程在监听它。
+func portListening(in *model.Inbound) bool {
+	host := in.Listen
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	proto := firewall.ProtoOf(in.Protocol, in.Transport)
+	if proto == "udp" {
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, in.Port))
+		if err != nil {
+			return true // 地址解析不了就不下结论
+		}
+		c, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return true // 绑不上 = 已被占用 = 有进程在监听
+		}
+		c.Close()
+		return false
+	}
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, in.Port), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
 }
 
 // restoreCores 把入站的 core 字段还原为切换前的值。

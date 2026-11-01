@@ -67,3 +67,71 @@ func TestRenderValidJSON(t *testing.T) {
 		t.Fatalf("output not valid json: %v", err)
 	}
 }
+
+// TUIC 的 user 必须有 uuid（只给 password 会被内核拒收），
+// hysteria2/tuic 不能带 transport 字段（unknown field "transport"）。
+func TestRenderQUICProtocolsCompat(t *testing.T) {
+	s := &SingBox{}
+	clients := []*model.Client{{Name: "u1", Credential: "cred-1", Enabled: true}}
+
+	tuic := &model.Inbound{Name: "tuic", Core: "singbox", Protocol: "tuic",
+		Port: 443, Transport: "udp", TLS: "tls",
+		Settings: `{"certificate_path":"/tmp/c.pem","key_path":"/tmp/k.pem"}`}
+	obj, err := s.renderInbound(core.InboundWithClients{Inbound: tuic, Clients: clients})
+	if err != nil {
+		t.Fatalf("tuic render: %v", err)
+	}
+	if _, ok := obj["transport"]; ok {
+		t.Errorf("tuic 不应有 transport 字段: %v", obj["transport"])
+	}
+	users, _ := obj["users"].([]any)
+	if len(users) != 1 {
+		t.Fatalf("tuic users = %v", obj["users"])
+	}
+	u := users[0].(map[string]any)
+	if u["uuid"] != "cred-1" {
+		t.Errorf("tuic user 缺少 uuid: %v", u)
+	}
+
+	hy2 := &model.Inbound{Name: "hy2", Core: "singbox", Protocol: "hysteria2",
+		Port: 8443, Transport: "udp", TLS: "tls",
+		Settings: `{"certificate_path":"/tmp/c.pem","key_path":"/tmp/k.pem"}`}
+	obj2, err := s.renderInbound(core.InboundWithClients{Inbound: hy2, Clients: clients})
+	if err != nil {
+		t.Fatalf("hysteria2 render: %v", err)
+	}
+	if _, ok := obj2["transport"]; ok {
+		t.Errorf("hysteria2 不应有 transport 字段: %v", obj2["transport"])
+	}
+}
+
+// socks/mixed 的 user 只有 username/password，多余 name 会导致严格校验失败。
+func TestRenderSocksUsersNoNameField(t *testing.T) {
+	s := &SingBox{}
+	in := &model.Inbound{Name: "socks", Core: "singbox", Protocol: "socks", Port: 1080, Transport: "tcp"}
+	obj, err := s.renderInbound(core.InboundWithClients{Inbound: in,
+		Clients: []*model.Client{{Name: "u1", Credential: "p1", Enabled: true}}})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	users, _ := obj["users"].([]any)
+	if len(users) != 1 {
+		t.Fatalf("users = %v", obj["users"])
+	}
+	u := users[0].(map[string]any)
+	if _, ok := u["name"]; ok {
+		t.Errorf("socks user 不应有 name 字段: %v", u)
+	}
+	if u["username"] != "u1" || u["password"] != "p1" {
+		t.Errorf("socks user 字段不对: %v", u)
+	}
+}
+
+// 强制要求证书的协议在缺证书时应给出可读错误，而不是内核内部报错。
+func TestRenderRequiresCertMessage(t *testing.T) {
+	s := &SingBox{}
+	in := &model.Inbound{Name: "anytls", Core: "singbox", Protocol: "anytls", Port: 443, Transport: "tcp", TLS: "tls"}
+	if _, err := s.renderInbound(core.InboundWithClients{Inbound: in}); err == nil {
+		t.Fatal("anytls 缺证书时应当报错")
+	}
+}

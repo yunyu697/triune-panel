@@ -58,7 +58,7 @@ func (m *Manager) Start(name, binPath, cfgPath, workDir string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(binPath, runArgs(name, cfgPath)...)
+	cmd := exec.Command(binPath, runArgs(name, cfgPath, workDir)...)
 	cmd.Dir = workDir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -170,14 +170,16 @@ func splitLines(s string) []string {
 }
 
 // runArgs 各内核的运行参数。
-func runArgs(name, cfgPath string) []string {
+// mihomo 需要显式 -d：否则 home 目录落到 ~/.config/mihomo，
+// 证书路径白名单（SAFE_PATHS / home）与面板数据目录不重合。
+func runArgs(name, cfgPath, workDir string) []string {
 	switch name {
 	case "singbox":
 		return []string{"run", "-c", cfgPath}
 	case "xray":
 		return []string{"run", "-c", cfgPath}
 	case "mihomo":
-		return []string{"-f", cfgPath}
+		return []string{"-d", workDir, "-f", cfgPath}
 	}
 	return []string{"-c", cfgPath}
 }

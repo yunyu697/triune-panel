@@ -4,6 +4,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 
@@ -121,6 +122,26 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 			clients = append(clients, map[string]any{"password": c.Credential, "email": c.Name})
 		}
 		obj["settings"] = map[string]any{"clients": clients}
+	case "shadowsocks":
+		// xray 的 shadowsocks 服务端密码是入站级单值（2022 系列方法
+		// 才支持多用户），与 sing-box 渲染保持一致：取首个有效用户。
+		obj["protocol"] = "shadowsocks"
+		method := core.Field(in.Settings, "method")
+		if method == "" {
+			method = "aes-256-gcm"
+		}
+		password := ""
+		for _, c := range iw.Clients {
+			if c.Enabled {
+				password = c.Credential
+				break
+			}
+		}
+		ss := map[string]any{"method": method, "network": "tcp,udp"}
+		if password != "" {
+			ss["password"] = password
+		}
+		obj["settings"] = ss
 	default:
 		return nil, fmt.Errorf("protocol %q not supported by xray renderer", in.Protocol)
 	}
@@ -157,13 +178,45 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 		stream["tlsSettings"] = ts
 	case "reality":
 		stream["security"] = "reality"
+		priv := core.Field(in.Settings, "private_key")
+		if priv == "" {
+			return nil, fmt.Errorf("Reality 入站缺少服务端私钥（private_key）：请在入站编辑里点「重新生成 Reality 密钥对」后保存")
+		}
 		rs := map[string]any{
-			"privateKey":  core.Field(in.Settings, "private_key"),
-			"dest":        core.Field(in.Settings, "handshake_server"),
-			"serverNames": strings.Fields(core.Field(in.Settings, "server_names")),
+			"privateKey": priv,
+			"show":       false,
+		}
+		// xray 的 dest（新版本报错里叫 target）必须是 host:port，
+		// 只写域名（面板表单的默认值就是裸域名）会被判为非法目标，
+		// 表现为「切换内核预检失败：please fill in a valid value for "target"」。
+		dest := core.Field(in.Settings, "handshake_server")
+		if dest == "" {
+			dest = core.Field(in.Settings, "server_name")
+		}
+		if dest != "" {
+			if _, _, err := net.SplitHostPort(dest); err != nil {
+				dest = net.JoinHostPort(strings.Trim(dest, "[]"), "443")
+			}
+			rs["dest"] = dest
+		}
+		// serverNames 缺省回退：直接用握手目标的主机名，
+		// 否则 xray 会认为 REALITY 配置不完整。
+		names := strings.Fields(core.Field(in.Settings, "server_names"))
+		if len(names) == 0 {
+			names = strings.Fields(core.Field(in.Settings, "server_name"))
+		}
+		if len(names) == 0 && dest != "" {
+			if host, _, err := net.SplitHostPort(dest); err == nil {
+				names = []string{host}
+			}
+		}
+		if len(names) > 0 {
+			rs["serverNames"] = names
 		}
 		if sid := core.Field(in.Settings, "short_id"); sid != "" {
 			rs["shortIds"] = []string{sid}
+		} else {
+			rs["shortIds"] = []string{""} // 空的短 ID 合法，留空时也必须给数组
 		}
 		stream["realitySettings"] = rs
 	}

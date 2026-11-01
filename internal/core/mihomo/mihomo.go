@@ -9,6 +9,7 @@ package mihomo
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 
 	"triune/internal/core"
@@ -30,8 +31,9 @@ func (m *Mihomo) ValidateCmd(bin, cfg string) *exec.Cmd {
 }
 
 func (m *Mihomo) Render(ins []core.InboundWithClients, opts core.RenderOpts) ([]byte, error) {
+	// 服务端不需要 mixed-port：额外的 7890 监听既与入站无关，
+	// 又容易与机器上已有服务抢端口，导致内核启动即退出。
 	doc := map[string]any{
-		"mixed-port":   7890,
 		"allow-lan":    true,
 		"mode":         "rule",
 		"log-level":    "info",
@@ -86,19 +88,21 @@ func (m *Mihomo) renderListener(iw core.InboundWithClients) (map[string]any, err
 	switch in.Protocol {
 	case "mixed":
 		l["type"] = "mixed"
-		var auth []string
-		for _, c := range iw.Clients {
-			if c.Enabled {
-				auth = append(auth, c.Name+":"+c.Credential)
-			}
-		}
-		if len(auth) > 0 {
-			l["users"] = auth
+		// mihomo 的 mixed/socks/http listener 用户是对象数组，
+		// 写成 "user:pass" 字符串会被拒收（'users[0]' expected a map）
+		if u := mihomoUsers(iw.Clients); len(u) > 0 {
+			l["users"] = u
 		}
 	case "socks":
 		l["type"] = "socks"
+		if u := mihomoUsers(iw.Clients); len(u) > 0 {
+			l["users"] = u
+		}
 	case "http":
 		l["type"] = "http"
+		if u := mihomoUsers(iw.Clients); len(u) > 0 {
+			l["users"] = u
+		}
 	case "shadowsocks":
 		l["type"] = "shadowsocks"
 		l["cipher"] = core.Field(in.Settings, "method")
@@ -117,27 +121,79 @@ func (m *Mihomo) renderListener(iw core.InboundWithClients) (map[string]any, err
 			}
 		}
 		l["users"] = users
-	case "trojan", "tuic", "hysteria2":
+	case "trojan":
+		l["type"] = "trojan"
+		u := mihomoUsers(iw.Clients)
+		if len(u) == 0 {
+			return nil, fmt.Errorf("Trojan 入站至少需要一个启用用户（mihomo 的 trojan listener 必须有 users）")
+		}
+		l["users"] = u
+		if err := mihomoTLS(l, in); err != nil {
+			return nil, err
+		}
+	case "tuic", "hysteria2":
 		l["type"] = in.Protocol
-		var users []any
+		// tuic/hysteria2 的 users 是 map（用户名 → 密码），
+		// 与其它 listener 的对象数组不同，写错会被拒收。
+		u := map[string]string{}
 		for _, c := range iw.Clients {
 			if c.Enabled {
-				users = append(users, map[string]any{"username": c.Name, "password": c.Credential})
+				u[c.Name] = c.Credential
 			}
 		}
-		l["users"] = users
-		if in.TLS == "tls" {
-			l["tls"] = true
-			if sn := core.Field(in.Settings, "server_name"); sn != "" {
-				l["sni"] = sn
-			}
-			if cp := core.Field(in.Settings, "certificate_path"); cp != "" {
-				l["certificate"] = cp
-				l["private-key"] = core.Field(in.Settings, "key_path")
-			}
+		if len(u) > 0 {
+			l["users"] = u
+		}
+		if err := mihomoTLS(l, in); err != nil {
+			return nil, err
+		}
+		// 这两个 listener 强制要求证书，缺失时给出可读的错误，
+		// 而不是让内核吐 "unset fields: certificate, private-key"。
+		if l["certificate"] == nil || l["private-key"] == nil {
+			return nil, fmt.Errorf("%s 入站必须配置 TLS 证书（填写证书路径与私钥路径，或使用面板 ACME 签发）", in.Protocol)
 		}
 	default:
 		return nil, fmt.Errorf("protocol %q not supported by mihomo renderer (vless inbound is not supported by mihomo)", in.Protocol)
 	}
 	return l, nil
+}
+
+// mihomoUsers 构造 listener 的用户对象数组（username/password）。
+func mihomoUsers(cs []*model.Client) []any {
+	var out []any
+	for _, c := range cs {
+		if c.Enabled {
+			out = append(out, map[string]any{"username": c.Name, "password": c.Credential})
+		}
+	}
+	return out
+}
+
+// mihomoTLS 把 TLS 证书/SNI 写入 listener。
+// mihomo 的 listener 没有 tls 布尔开关 —— 给了证书即为 TLS，
+// 只写 tls: true 既无效也可能触发未知字段。
+//
+// 证书直接内联 PEM 内容而不是写路径：mihomo 对证书路径有安全白名单
+// （只允许其 home 目录与 SAFE_PATHS），面板数据目录下的证书会被拒绝，
+// 表现为 listener 静默不监听、进程却照常在跑——极难排查。
+func mihomoTLS(l map[string]any, in *model.Inbound) error {
+	if sn := core.Field(in.Settings, "server_name"); sn != "" {
+		l["sni"] = sn
+	}
+	cp := core.Field(in.Settings, "certificate_path")
+	kp := core.Field(in.Settings, "key_path")
+	if cp == "" || kp == "" {
+		return nil
+	}
+	cert, err := os.ReadFile(cp)
+	if err != nil {
+		return fmt.Errorf("读取证书失败（%s）：%w", cp, err)
+	}
+	key, err := os.ReadFile(kp)
+	if err != nil {
+		return fmt.Errorf("读取私钥失败（%s）：%w", kp, err)
+	}
+	l["certificate"] = string(cert)
+	l["private-key"] = string(key)
+	return nil
 }

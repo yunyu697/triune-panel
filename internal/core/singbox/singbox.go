@@ -83,10 +83,18 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		switch in.Protocol {
 		case "vless", "vmess":
 			users = append(users, map[string]any{"name": c.Name, "uuid": c.Credential})
-		case "trojan", "hysteria2", "tuic", "anytls":
+		case "trojan", "hysteria2", "anytls":
 			users = append(users, map[string]any{"name": c.Name, "password": c.Credential})
+		case "tuic":
+			// TUIC 的认证是 uuid + password（v5），只给 password 会被拒收
+			// （missing uuid for user N）
+			users = append(users, map[string]any{
+				"name": c.Name, "uuid": c.Credential, "password": c.Credential,
+			})
 		case "mixed", "socks":
-			users = append(users, map[string]any{"name": c.Name, "username": c.Name, "password": c.Credential})
+			// sing-box 的 socks/mixed 用户只有 username/password 两个字段，
+			// 多余的 name 会被严格校验拒收（unknown field "name"）
+			users = append(users, map[string]any{"username": c.Name, "password": c.Credential})
 		case "shadowsocks":
 			// shadowsocks 的密码在入站级别（下方统一设置），不进 users 数组
 		default:
@@ -108,7 +116,12 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 	}
 
 	// transport
-	if in.Transport != "" && in.Transport != "tcp" {
+	// hysteria2/tuic/anytls 是自带传输的协议（QUIC / 自定义），
+	// 没有 transport 字段；把表单里的 udp 或 tcp 原样写进去会被
+	// 严格校验拒收（unknown field "transport"）。
+	if !singboxHasTransport(in.Protocol) {
+		// 跳过
+	} else if in.Transport != "" && in.Transport != "tcp" && in.Transport != "udp" {
 		tr := map[string]any{"type": in.Transport}
 		switch in.Transport {
 		case "ws":
@@ -136,12 +149,21 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		if kp := core.Field(in.Settings, "key_path"); kp != "" {
 			tls["key_path"] = kp
 		}
+		// 这些协议在 sing-box 里 TLS 是强制的，没证书只会得到
+		// "missing certificate" 这种内核内部报错，这里提前说清楚。
+		if _, hasCert := tls["certificate_path"]; !hasCert && singboxRequiresCert(in.Protocol) {
+			return nil, fmt.Errorf("%s 入站必须配置 TLS 证书：请填写证书路径与私钥路径（或先用面板 ACME 签发）", in.Protocol)
+		}
 		obj["tls"] = tls
 	case "reality":
+		priv := core.Field(in.Settings, "private_key")
+		if priv == "" {
+			return nil, fmt.Errorf("Reality 入站缺少服务端私钥（private_key）：请在入站编辑里点「重新生成 Reality 密钥对」后保存")
+		}
 		reality := map[string]any{
 			"enabled":     true,
 			"handshake":   map[string]any{"server": core.Field(in.Settings, "handshake_server"), "server_port": 443},
-			"private_key": core.Field(in.Settings, "private_key"),
+			"private_key": priv,
 		}
 		if sid := core.Field(in.Settings, "short_id"); sid != "" {
 			reality["short_id"] = []string{sid}
@@ -149,4 +171,23 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		obj["tls"] = map[string]any{"enabled": true, "reality": reality}
 	}
 	return obj, nil
+}
+
+// singboxHasTransport 判断该协议是否支持 transport 字段。
+// hysteria2/tuic/anytls 自带传输层，写入 transport 会被严格校验拒收。
+func singboxHasTransport(protocol string) bool {
+	switch protocol {
+	case "vless", "vmess", "trojan", "shadowsocks":
+		return true
+	}
+	return false
+}
+
+// singboxRequiresCert 判断该协议在 sing-box 中是否强制要求证书。
+func singboxRequiresCert(protocol string) bool {
+	switch protocol {
+	case "anytls", "hysteria2", "tuic":
+		return true
+	}
+	return false
 }

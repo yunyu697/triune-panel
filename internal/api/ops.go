@@ -112,9 +112,13 @@ func (a *Server) handleRealityKeypair(w http.ResponseWriter, r *http.Request) {
 		Core string `json:"core"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Core == "" {
+		// 前端旧版本可能没带 core：默认用 sing-box（x25519 密钥对通用）
+		req.Core = model.CoreSingBox
+	}
 	bin, _ := a.Store.GetSetting("bin_" + req.Core)
 	if bin == "" {
-		fail(w, 400, "未配置 "+req.Core+" 二进制路径")
+		fail(w, 400, "未配置 "+req.Core+" 二进制路径，请先到「设置 → 组件更新」安装内核")
 		return
 	}
 	var cmd *exec.Cmd

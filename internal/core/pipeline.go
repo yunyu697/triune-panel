@@ -12,8 +12,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"triune/internal/proc"
@@ -128,10 +130,12 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 	cfgPath := filepath.Join(dir, c.FileName())
 
 	// 1. 备份当前配置（若存在）
-	if old, err := os.ReadFile(cfgPath); err == nil {
+	var oldCfg []byte
+	if b, err := os.ReadFile(cfgPath); err == nil {
+		oldCfg = b
 		_ = os.MkdirAll(m.backupDir(name), 0o755)
 		bak := filepath.Join(m.backupDir(name), fmt.Sprintf("%s.%s.bak", time.Now().Format("20060102-150405"), c.Ext()))
-		_ = os.WriteFile(bak, old, 0o600)
+		_ = os.WriteFile(bak, b, 0o600)
 	}
 
 	// 2. 写临时文件
@@ -157,9 +161,28 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 	restarted := false
 	if m.ProcMgr != nil {
 		if bin, _ := m.Settings.Get("bin_" + name); bin != "" {
-			if err := m.ProcMgr.Restart(name, bin, cfgPath, m.coreDir(name)); err == nil {
-				restarted = true
+			// 先停旧进程释放端口，再做端口预检：
+			// 端口被别的程序占着时，内核往往只记一条日志就"启动成功"
+			// （xray 尤为明显），界面显示已启用但根本连不上。
+			m.ProcMgr.Stop(name)
+			if perr := checkPortsFree(ins); perr != nil {
+				// 回滚：把刚才备份的运行配置写回并重启旧内核，
+				// 不能让一次失败的应用把线上服务停掉。
+				if len(oldCfg) > 0 {
+					if werr := os.WriteFile(cfgPath, oldCfg, 0o600); werr == nil {
+						_ = m.ProcMgr.Start(name, bin, cfgPath, m.coreDir(name))
+					}
+				}
+				return &ApplyResult{Core: name, Validated: res.validated, Restarted: false, Hash: hash}, perr
 			}
+			if err := m.ProcMgr.Restart(name, bin, cfgPath, m.coreDir(name)); err != nil {
+				// 配置已经原子替换成功，但进程起不来（二进制不可执行、
+				// 工作目录不可写……）。必须把错误抛出去，否则界面显示
+				// "已启用"而实际没有任何服务在跑。
+				return &ApplyResult{Core: name, Validated: res.validated, Restarted: false, Hash: hash},
+					fmt.Errorf("配置已更新，但 %s 启动失败：%w", name, err)
+			}
+			restarted = true
 		}
 	}
 	return &ApplyResult{Core: name, Validated: res.validated, Restarted: restarted, Hash: hash}, nil
@@ -200,4 +223,56 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "\n...(truncated)"
+}
+
+// checkPortsFree 校验入站端口当前是否空闲（必须在旧进程停止之后调用）。
+// 内核在端口被占时经常只记一条日志就"启动成功"，所以启动前主动探一遍。
+func checkPortsFree(ins []InboundWithClients) error {
+	seen := map[string]bool{}
+	for _, iw := range ins {
+		in := iw.Inbound
+		proto := "tcp"
+		switch in.Protocol {
+		case "hysteria2", "tuic":
+			proto = "udp"
+		}
+		if in.Transport == "udp" {
+			proto = "udp"
+		}
+		host := in.Listen
+		if host == "0.0.0.0" || host == "::" {
+			host = ""
+		}
+		key := fmt.Sprintf("%s/%s/%d", proto, host, in.Port)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		addr := net.JoinHostPort(host, strconv.Itoa(in.Port))
+		if proto == "udp" {
+			ua, err := net.ResolveUDPAddr("udp", addr)
+			if err != nil {
+				continue
+			}
+			c, err := net.ListenUDP("udp", ua)
+			if err != nil {
+				return fmt.Errorf("端口 %d/UDP 已被其它程序占用，%s 无法启动（%v）", in.Port, in.Name, err)
+			}
+			c.Close()
+			continue
+		}
+		// TCP 先看能不能连上：有程序在监听时连接必然成功。
+		// 这一步跨平台可靠（BSD/macOS 的 SO_REUSEADDR 允许对已监听
+		// 端口重复 bind，单靠 bind 判不出来）。
+		if c, err := net.DialTimeout("tcp", addr, 700*time.Millisecond); err == nil {
+			c.Close()
+			return fmt.Errorf("端口 %d/TCP 已被其它程序占用（连接成功），%s 无法启动", in.Port, in.Name)
+		}
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("端口 %d/TCP 已被其它程序占用，%s 无法启动（%v）", in.Port, in.Name, err)
+		}
+		ln.Close()
+	}
+	return nil
 }

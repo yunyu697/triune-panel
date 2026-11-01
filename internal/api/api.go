@@ -1038,6 +1038,20 @@ func (a *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevApplied, "")
 	res.RevisionID = rev.ID
+	// 启动后短暂观察：端口占用、证书缺失、协议参数错误等"启动即退出"
+	// 的问题在这里暴露，而不是界面上显示成功、实际没有服务在监听。
+	if res.Restarted {
+		if herr := a.healthCheck(req.Core); herr != nil {
+			_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevFailed, herr.Error())
+			a.auditFail(r, AuditApply, req.Core, "内核启动后退出："+herr.Error())
+			writeJSON(w, 422, map[string]any{
+				"error":       herr.Error(),
+				"revision_id": rev.ID,
+				"hint":        "配置已写入，但内核进程没能存活；修正上方错误后重新应用即可",
+			})
+			return
+		}
+	}
 	a.changed(r, AuditApply, req.Core, fmt.Sprintf("应用成功，修订 #%d", rev.ID))
 	writeJSON(w, 200, res)
 }
