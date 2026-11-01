@@ -1,6 +1,7 @@
 # 构建产物（二进制通过 GitHub Releases 发布，不入库）
 triune-panel
 triune-panel-*
+dist/
 deploy/triune-panel-linux-*
 deploy/sha256sums.txt
 deploy/triune-panel-darwin-*
