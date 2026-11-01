@@ -75,7 +75,7 @@ if git ls-remote --tags --exit-code origin "refs/tags/$VER" >/dev/null 2>&1; the
   die "远端已有 tag $VER"
 fi
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[[ "$BRANCH" == "main" ]] || say "! 当前分支是 $BRANCH，不是 main"
+[[ "$BRANCH" == "main" ]] || say "! 当前分支是 ${BRANCH}，不是 main"
 
 if [[ -n "$NOTES" ]]; then
   [[ -f "$NOTES" ]] || die "找不到说明文件: $NOTES"
@@ -85,8 +85,8 @@ else
   NOTES="$(mktemp -t triune-notes)"
   trap 'rm -f "$NOTES"' EXIT
   awk -v v="## $VER" 'index($0,v)==1{f=1;next} f&&/^## /{exit} f' CHANGELOG.md > "$NOTES"
-  [[ -s "$NOTES" ]] || die "CHANGELOG.md 里没有「## $VER」小节，也没有用 --notes 指定说明"
-  NOTE_SRC="CHANGELOG.md 的「## $VER」小节"
+  [[ -s "$NOTES" ]] || die "CHANGELOG.md 里没有「## ${VER}」小节，也没有用 --notes 指定说明"
+  NOTE_SRC="CHANGELOG.md 的「## ${VER}」小节"
 fi
 
 step "构建四平台二进制"
@@ -117,7 +117,7 @@ ASSETS+=("dist/sha256sums.txt")
 cp dist/triune-panel-* dist/sha256sums.txt deploy/
 
 step "将执行"
-say "  版本    $VER（标题 $TITLE）"
+say "  版本    ${VER}（标题 ${TITLE}）"
 say "  tag     $VER → $(git rev-parse --short HEAD)"
 say "  资产    ${#ASSETS[@]} 个"
 say "  说明    $NOTE_SRC"

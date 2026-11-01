@@ -82,3 +82,22 @@ jobs:
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
           shellcheck -S warning -e SC2206 \
             deploy/install.sh deploy/uninstall.sh deploy/check-version.sh deploy/release.sh
+
+      - name: 中文标点紧跟变量（$VAR，）
+        run: |
+          # bash 会把中文标点的首字节算进变量名，set -u 下直接 unbound variable。
+          # shellcheck 查不出来（它认 UTF-8 字节为标识符的一部分），只能自己扫。
+          python3 - <<'PY'
+          import glob, re, sys
+          bad = []
+          for p in glob.glob("deploy/*.sh"):
+              for i, line in enumerate(open(p, encoding="utf-8"), 1):
+                  for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*", line):
+                      nxt = line[m.end():m.end() + 1]
+                      if nxt and ord(nxt) > 127:
+                          bad.append(f"{p}:{i}: {m.group(0)}{nxt}  ← 改成 ${{{m.group(0)[1:]}}}{nxt}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("OK：没有变量紧跟中文标点")
+          PY

@@ -47,7 +47,7 @@ echo "=== Triune Panel 卸载 ==="
 
 # ---- 1. 停止并禁用服务（面板退出时会一并停止其托管的内核进程）----
 if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then
-  echo "→ 停止服务 $SERVICE（含其托管的 sing-box / xray / mihomo 内核进程）"
+  echo "→ 停止服务 ${SERVICE}（含其托管的 sing-box / xray / mihomo 内核进程）"
   $SUDO systemctl disable --now "$SERVICE" 2>/dev/null || $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
   sleep 1
 else
@@ -76,7 +76,7 @@ fi
 DATA_DIR="$INSTALL_DIR/data"
 if [[ -d "$DATA_DIR" ]]; then
   if [[ $PURGE -eq 1 ]]; then
-    echo "→ --purge 模式：删除数据目录 $DATA_DIR（含数据库/证书/内核副本/备份）"
+    echo "→ --purge 模式：删除数据目录 ${DATA_DIR}（含数据库/证书/内核副本/备份）"
     $SUDO rm -rf "$DATA_DIR"
   elif [[ -t 0 ]]; then
     printf "是否同时删除数据目录 %s（数据库、证书、自动备份等，删除后不可恢复）？[y/N] " "$DATA_DIR"
@@ -85,10 +85,10 @@ if [[ -d "$DATA_DIR" ]]; then
       $SUDO rm -rf "$DATA_DIR"
       echo "→ 数据目录已删除"
     else
-      echo "→ 数据目录已保留: $DATA_DIR（重装脚本会自动复用）"
+      echo "→ 数据目录已保留: ${DATA_DIR}（重装脚本会自动复用）"
     fi
   else
-    echo "→ 数据目录已保留: $DATA_DIR（默认保留，重装可恢复全部数据）"
+    echo "→ 数据目录已保留: ${DATA_DIR}（默认保留，重装可恢复全部数据）"
     echo "  确认不再需要可手动执行: sudo rm -rf $DATA_DIR"
     echo "  或执行彻底卸载: curl -fsSL https://raw.githubusercontent.com/yunyu697/triune-panel/main/deploy/uninstall.sh | sudo bash -s -- --purge"
   fi
