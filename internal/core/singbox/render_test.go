@@ -188,3 +188,127 @@ func TestRenderRealityEmptyShortIDOmitted(t *testing.T) {
 		t.Errorf("空短 ID 不该写进 short_id: %#v", r["short_id"])
 	}
 }
+
+// http 入站：用户字段是 username/password，凭据 "user:pass" 要拆开。
+func TestRenderHTTPUsers(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{
+		Name: "h", Core: "singbox", Protocol: "http", Port: 8080,
+		Transport: "tcp", TLS: "none",
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "h1", Credential: "h1:hp1", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	u := obj["users"].([]any)[0].(map[string]any)
+	if u["username"] != "h1" || u["password"] != "hp1" {
+		t.Errorf("http 用户应拆成 h1/hp1：%#v", u)
+	}
+	if _, ok := u["name"]; ok {
+		t.Errorf("sing-box 的 http 用户不该带 name 字段：%#v", u)
+	}
+}
+
+// direct（= dokodemo-door）：override_address / override_port。
+func TestRenderDirectInbound(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{
+		Name: "pf", Core: "singbox", Protocol: "direct", Port: 9000,
+		Transport: "tcp", TLS: "none",
+		Settings: `{"dd_address":"1.1.1.1","dd_port":80,"dd_network":"tcp"}`,
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	if obj["override_address"] != "1.1.1.1" || obj["override_port"] != 80 {
+		t.Errorf("direct 的 override 参数错：%#v", obj)
+	}
+	// dd_* 是面板托管键，不能原样留在顶层
+	if _, ok := obj["dd_address"]; ok {
+		t.Errorf("托管键不应透传到顶层：%#v", obj)
+	}
+}
+
+// 新传输：h2 要改名成 http，httpupgrade / quic 直通；kcp/xhttp 明确报错。
+func TestRenderNewTransports(t *testing.T) {
+	sb := &SingBox{}
+	cases := []struct {
+		transport string
+		settings  string
+		wantType  string
+	}{
+		{"h2", `{"path":"/h2","ws_host":"h.example.com"}`, "http"},
+		{"httpupgrade", `{"path":"/hu","ws_host":"hu.example.com"}`, "httpupgrade"},
+		{"quic", `{"certificate_path":"/tmp/c.pem","key_path":"/tmp/k.pem"}`, "quic"},
+		{"ws", `{"path":"/ws"}`, "ws"},
+		{"grpc", `{"service_name":"g1"}`, "grpc"},
+	}
+	for _, c := range cases {
+		in := &model.Inbound{
+			Name: "v", Core: "singbox", Protocol: "vless", Port: 443,
+			Transport: c.transport, TLS: "none", Settings: c.settings,
+		}
+		if c.transport == "quic" {
+			in.TLS = "tls" // sing-box 的 quic 传输必须跑在 TLS 上
+		}
+		obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+			{Name: "u", Credential: "uuid", Enabled: true},
+		}})
+		if err != nil {
+			t.Fatalf("%s renderInbound: %v", c.transport, err)
+		}
+		tr, _ := obj["transport"].(map[string]any)
+		if tr["type"] != c.wantType {
+			t.Errorf("%s transport.type = %v，期望 %s", c.transport, tr["type"], c.wantType)
+		}
+	}
+	for _, bad := range []string{"kcp", "xhttp"} {
+		in := &model.Inbound{Name: "v", Core: "singbox", Protocol: "vless", Port: 443, Transport: bad}
+		if _, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+			{Name: "u", Credential: "uuid", Enabled: true},
+		}}); err == nil {
+			t.Errorf("%s 传输应报错（sing-box 不支持）", bad)
+		}
+	}
+}
+
+// 导入的 DNS / 路由（已由 importer 转成 sing-box 结构）要原样注入。
+func TestRenderGlobalDNSRoute(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{Name: "v", Core: "singbox", Protocol: "vless", Port: 443, Transport: "tcp"}
+	out, err := sb.Render([]core.InboundWithClients{{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}}}, core.RenderOpts{
+		DNSJSON:   `{"servers":[{"type":"udp","tag":"dns-1-1-1-1","server":"1.1.1.1"}]}`,
+		RouteJSON: `{"rules":[{"ip_cidr":["10.0.0.0/8"],"action":"reject"}]}`,
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := doc["dns"]; !ok {
+		t.Error("DNS 段未注入")
+	}
+	rt, ok := doc["route"].(map[string]any)
+	if !ok {
+		t.Fatal("route 段未注入")
+	}
+	if rules, _ := rt["rules"].([]any); len(rules) != 1 {
+		t.Errorf("路由规则数量错：%#v", rt["rules"])
+	}
+	var hasBlock bool
+	for _, ob := range doc["outbounds"].([]any) {
+		if ob.(map[string]any)["tag"] == "block" {
+			hasBlock = true
+		}
+	}
+	if !hasBlock {
+		t.Errorf("action=reject 应带出 block 出站：%#v", doc["outbounds"])
+	}
+}

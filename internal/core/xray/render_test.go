@@ -1,6 +1,8 @@
 package xray
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"triune/internal/core"
@@ -191,5 +193,192 @@ func TestShortIDsAcceptsBothForms(t *testing.T) {
 		if got := core.ShortIDs(c.settings); len(got) != c.want {
 			t.Errorf("ShortIDs(%s) = %#v，长度应为 %d", c.settings, got, c.want)
 		}
+	}
+}
+
+// socks / http 入站：xray 用 accounts（不是 clients），auth 必须显式给。
+func TestRenderSocksHTTPAccounts(t *testing.T) {
+	x := &Xray{}
+	cases := []struct {
+		proto    string
+		settings string
+		wantAuth string
+	}{
+		{"socks", `{"account_auth":"password","udp":true}`, "password"},
+		{"http", `{}`, "password"},
+		{"socks", `{"account_auth":"noauth"}`, "noauth"},
+	}
+	for _, c := range cases {
+		in := &model.Inbound{
+			Name: "p", Core: "xray", Protocol: c.proto, Port: 1080,
+			Transport: "tcp", TLS: "none", Settings: c.settings,
+		}
+		obj, err := x.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+			{Name: "u1", Credential: "u1:p1", Enabled: true},
+		}})
+		if err != nil {
+			t.Fatalf("%s renderInbound: %v", c.proto, err)
+		}
+		s := obj["settings"].(map[string]any)
+		if s["auth"] != c.wantAuth {
+			t.Errorf("%s auth = %v，期望 %s", c.proto, s["auth"], c.wantAuth)
+		}
+		if c.wantAuth == "password" {
+			accs, _ := s["accounts"].([]any)
+			if len(accs) != 1 {
+				t.Fatalf("%s accounts 数量错：%#v", c.proto, s["accounts"])
+			}
+			a := accs[0].(map[string]any)
+			if a["user"] != "u1" || a["pass"] != "p1" {
+				t.Errorf("%s 账号应拆成 u1/p1：%#v", c.proto, a)
+			}
+		}
+		if c.proto == "socks" && c.wantAuth == "password" && s["udp"] != true {
+			t.Errorf("socks 应保留 udp 开关：%#v", s)
+		}
+	}
+}
+
+// dokodemo-door：端口转发参数落到 settings，缺地址时给出可读错误。
+func TestRenderDokodemoDoor(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "pf", Core: "xray", Protocol: "dokodemo-door", Port: 9000,
+		Transport: "tcp", TLS: "none",
+		Settings: `{"dd_address":"1.1.1.1","dd_port":80,"dd_network":"tcp,udp","dd_follow_redirect":true}`,
+	}
+	obj, err := x.renderInbound(core.InboundWithClients{Inbound: in})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	s := obj["settings"].(map[string]any)
+	if s["address"] != "1.1.1.1" || s["port"] != 80 || s["followRedirect"] != true {
+		t.Errorf("端口转发参数错：%#v", s)
+	}
+	bad := &model.Inbound{Name: "pf", Core: "xray", Protocol: "dokodemo-door", Port: 9000, Settings: `{}`}
+	if _, err := x.renderInbound(core.InboundWithClients{Inbound: bad}); err == nil {
+		t.Error("缺目标地址应报错")
+	}
+}
+
+// 新增传输：h2 / httpupgrade / xhttp / kcp / quic 的字段位置必须正确。
+func TestRenderNewTransports(t *testing.T) {
+	x := &Xray{}
+	cases := []struct {
+		name      string
+		transport string
+		settings  string
+		network   string
+		key       string
+		check     func(t *testing.T, m map[string]any)
+	}{
+		{"httpupgrade", "httpupgrade", `{"path":"/hu","ws_host":"hu.example.com"}`, "httpupgrade", "httpupgradeSettings", func(t *testing.T, m map[string]any) {
+			if m["path"] != "/hu" || m["host"] != "hu.example.com" {
+				t.Errorf("httpupgrade 字段错：%#v", m)
+			}
+		}},
+		{"xhttp", "xhttp", `{"path":"/xh","ws_host":"x.example.com","xhttp_mode":"packet-up"}`, "xhttp", "xhttpSettings", func(t *testing.T, m map[string]any) {
+			if m["mode"] != "packet-up" {
+				t.Errorf("xhttp mode 错：%#v", m)
+			}
+		}},
+		{"kcp", "kcp", `{"kcp_seed":"s3","kcp_header":"srtp"}`, "kcp", "kcpSettings", func(t *testing.T, m map[string]any) {
+			if m["seed"] != "s3" {
+				t.Errorf("kcp seed 错：%#v", m)
+			}
+			if h, _ := m["header"].(map[string]any); h["type"] != "srtp" {
+				t.Errorf("kcp header 错：%#v", m["header"])
+			}
+		}},
+	}
+	for _, c := range cases {
+		in := &model.Inbound{
+			Name: c.name, Core: "xray", Protocol: "vmess", Port: 443,
+			Transport: c.transport, TLS: "none", Settings: c.settings,
+		}
+		obj, err := x.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+			{Name: "u", Credential: "uuid", Enabled: true},
+		}})
+		if err != nil {
+			t.Fatalf("%s renderInbound: %v", c.name, err)
+		}
+		st := obj["streamSettings"].(map[string]any)
+		if st["network"] != c.network {
+			t.Errorf("%s network = %v，期望 %s", c.name, st["network"], c.network)
+		}
+		m, ok := st[c.key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s 缺 %s：%#v", c.name, c.key, st)
+		}
+		c.check(t, m)
+	}
+}
+
+// 未知传输要直接报错，而不是悄悄渲染成 tcp（客户端会连不上）。
+func TestRenderUnknownTransportErrors(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{Name: "x", Core: "xray", Protocol: "vmess", Port: 443, Transport: "weird"}
+	if _, err := x.renderInbound(core.InboundWithClients{Inbound: in}); err == nil {
+		t.Error("未知传输应报错")
+	}
+}
+
+// Xray 26 已移除 h2 / 裸 quic 传输：必须给出「改成 xhttp」的可执行提示，
+// 而不是渲染出一份启动就 FATAL 的配置。
+func TestRenderRemovedTransportsExplain(t *testing.T) {
+	x := &Xray{}
+	for _, tr := range []string{"h2", "quic"} {
+		in := &model.Inbound{Name: "x", Core: "xray", Protocol: "vmess", Port: 443, Transport: tr}
+		_, err := x.renderInbound(core.InboundWithClients{Inbound: in})
+		if err == nil {
+			t.Fatalf("%s 应报错（Xray 26 已移除）", tr)
+		}
+		if !strings.Contains(err.Error(), "xhttp") {
+			t.Errorf("%s 的报错应指出改用 xhttp：%v", tr, err)
+		}
+	}
+}
+
+// 导入的 DNS / 路由：DNS 原样带走，路由追加在统计 API 规则之后，
+// 出现 block 规则时自动补 blackhole 出站（否则校验不过）。
+func TestRenderGlobalDNSRouting(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{Name: "v", Core: "xray", Protocol: "vmess", Port: 443, Transport: "tcp"}
+	out, err := x.Render([]core.InboundWithClients{{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}}}, core.RenderOpts{
+		StatsEnabled: true,
+		DNSJSON:      `{"servers":["1.1.1.1"],"queryStrategy":"UseIP"}`,
+		RouteJSON:    `{"domainStrategy":"IPIfNonMatch","rules":[{"type":"field","ip":["geoip:private"],"outboundTag":"block"}]}`,
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if dns, _ := doc["dns"].(map[string]any); dns["queryStrategy"] != "UseIP" {
+		t.Errorf("DNS 段未注入：%#v", doc["dns"])
+	}
+	rt := doc["routing"].(map[string]any)
+	if rt["domainStrategy"] != "IPIfNonMatch" {
+		t.Errorf("路由顶层字段未合并：%#v", rt)
+	}
+	rules, _ := rt["rules"].([]any)
+	if len(rules) != 2 {
+		t.Fatalf("应是 API 规则 + 导入规则两条：%#v", rules)
+	}
+	if rules[0].(map[string]any)["outboundTag"] != "api" {
+		t.Errorf("API 规则必须在最前：%#v", rules[0])
+	}
+	var hasBlock bool
+	for _, ob := range doc["outbounds"].([]any) {
+		if ob.(map[string]any)["tag"] == "block" {
+			hasBlock = true
+		}
+	}
+	if !hasBlock {
+		t.Errorf("block 规则应带出 blackhole 出站：%#v", doc["outbounds"])
 	}
 }

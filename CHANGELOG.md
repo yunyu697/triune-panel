@@ -8,6 +8,39 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## 未发布（v1.0.6）
+
+**把 v1.0.5 列出的「导入边界」全部补上**：协议、传输、内联证书、DNS/路由。
+全部用真实内核（Xray 26.10.31、sing-box 1.15.0-alpha.13）校验过渲染结果。
+
+1. **新增协议**：xray 的 `socks` / `http`（`accounts` → `用户名:密码` 凭据、
+   `auth`、`udp`）、`dokodemo-door`（端口转发：`address`/`port`/`network`/`followRedirect`）、
+   `wireguard`（`secretKey`/`peers` 原始透传）；sing-box 目标下 `dokodemo-door`
+   自动改叫 `direct`（`override_address`/`override_port`），并新增 `http` 入站。
+2. **新增传输**：`h2`、`httpupgrade`、`xhttp`、`kcp`、`quic`。
+   - Xray 26 已**移除** h2 与裸 QUIC（并入 XHTTP）：导入到 xray 时自动转成
+     `xhttp` + `mode=stream-one` 并提示客户端同步改；直接手配 h2/quic 会在渲染期
+     给出「改用 xhttp」的可执行报错，而不是渲染一份启动即 FATAL 的配置。
+   - sing-box 没有 kcp/xhttp，导入时降级 tcp 并逐条提示；quic 传输必须配 TLS
+     （否则内核启动报 `quic: TLS required`），渲染期提前拦。
+3. **内联 PEM 证书**：不再"只支持文件路径"——导入时自动写成
+   `data/certs/imported/<名称>-<端口>/{fullchain,privkey}.pem`（私钥 0600），
+   xray 也可直接内联渲染；入站表单新增「粘贴 PEM」入口。
+4. **DNS 与路由**：整份 xray 配置的 `dns` / `routing` 一起导入，按内核各存一份：
+   xray 原样注入（路由追加在统计 API 规则之后，出现 block 规则时自动补
+   blackhole 出站）；sing-box 转成 `dns.servers` + `route.rules`
+   （`geosite:`/`geoip:` 集合需要 rule-set，逐条提示未导入）。
+   指向代理出站的规则一律不搬——面板只有 direct/block 出站。
+5. **真实内核校验**：新增 `internal/livecheck`，用真实 xray / sing-box 二进制
+   跑 `run -test` / `check`，覆盖 18 个「协议 × 传输 × 全局段」组合；
+   未设置 `TRINE_XRAY_BIN` / `TRINE_SINGBOX_BIN` 时自动跳过。
+
+这一轮靠真机校验抓出的问题：Xray 26 已移除 h2/QUIC 传输、sing-box 的 quic 传输
+必须带 TLS、sing-box 的 DoH 服务器（域名字符串）需要额外 `domain_resolver`
+（已改为跳过并提示，避免生成起不来的配置）。
+
+---
+
 ## v1.0.5
 
 **导入改成「服务端定义进、客户端链接出」**：删掉「分享链接 → 本地入站」，

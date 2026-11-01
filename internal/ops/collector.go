@@ -29,17 +29,17 @@ type Collector struct {
 	// 用户用量越过告警阈值/配额时触发；nil 表示不告警。
 	Alert func(subject, body string)
 
-	mu        sync.Mutex
-	connLast  map[string][2]int64       // clash 连接计数基线: connID -> [up,down]
-	userLast  map[string]map[string]int // xray 计数基线: core -> "name:dir" -> total
-	disabled  map[int64]bool            // 本轮已处理，避免重复
-	notified  map[int64]int             // clientID -> 已告警级别（0 无 / 1 阈值 / 2 超额）
-	tickUp    int64                     // 本采样周期累计上行增量（实时速率用）
-	tickDown  int64                     // 本采样周期累计下行增量
-	liveUp    float64                   // 实时上行速率（字节/秒）
-	liveDown  float64                   // 实时下行速率（字节/秒）
-	liveAt    time.Time                 // 最近一次速率更新时间
-	stopCh    chan struct{}
+	mu       sync.Mutex
+	connLast map[string][2]int64       // clash 连接计数基线: connID -> [up,down]
+	userLast map[string]map[string]int // xray 计数基线: core -> "name:dir" -> total
+	disabled map[int64]bool            // 本轮已处理，避免重复
+	notified map[int64]int             // clientID -> 已告警级别（0 无 / 1 阈值 / 2 超额）
+	tickUp   int64                     // 本采样周期累计上行增量（实时速率用）
+	tickDown int64                     // 本采样周期累计下行增量
+	liveUp   float64                   // 实时上行速率（字节/秒）
+	liveDown float64                   // 实时下行速率（字节/秒）
+	liveAt   time.Time                 // 最近一次速率更新时间
+	stopCh   chan struct{}
 }
 
 func NewCollector(st *store.Store, pipe *core.PipelineManager) *Collector {
@@ -316,7 +316,7 @@ func (c *Collector) enforceLimits() {
 		// 记录修订（与 API 层 apply 一致，保证自动操作可审计）
 		rev := &model.ConfigRevision{Core: coreName, Status: model.RevPending, Note: "auto: 用户停用后重新应用"}
 		if cc, err := core.Get(coreName); err == nil {
-			if content, rerr := cc.Render(input, c.Pipe.RenderOpts()); rerr == nil {
+			if content, rerr := cc.Render(input, c.Pipe.RenderOptsFor(cc.Name())); rerr == nil {
 				rev.Content = string(content)
 				rev.Hash = shortHash(content)
 			} else {

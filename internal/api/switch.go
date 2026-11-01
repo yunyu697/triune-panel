@@ -153,12 +153,12 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	preview := map[string]any{
-		"to":          req.To,
-		"from":        fromList,
-		"inbounds":    inboundNames(targets),
-		"validated":   res != nil && res.Validated,
-		"hash":        res.Hash,
-		"content":     content,
+		"to":        req.To,
+		"from":      fromList,
+		"inbounds":  inboundNames(targets),
+		"validated": res != nil && res.Validated,
+		"hash":      res.Hash,
+		"content":   content,
 	}
 	if req.DryRun {
 		writeJSON(w, 200, preview)
@@ -257,7 +257,7 @@ func (a *Server) applyWithRevision(coreName string, input []core.InboundWithClie
 		return nil, err
 	}
 	rev := &model.ConfigRevision{Core: coreName, Status: model.RevPending, Note: note}
-	if content, rerr := c.Render(input, a.Pipe.RenderOpts()); rerr == nil {
+	if content, rerr := c.Render(input, a.Pipe.RenderOptsFor(c.Name())); rerr == nil {
 		rev.Content = string(content)
 		rev.Hash = shortHash(content)
 	}

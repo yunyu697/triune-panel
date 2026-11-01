@@ -43,8 +43,10 @@ type ApplyResult struct {
 	Hash       string `json:"hash"`
 }
 
-func (m *PipelineManager) coreDir(name string) string   { return filepath.Join(m.DataDir, "cores", name) }
-func (m *PipelineManager) backupDir(name string) string { return filepath.Join(m.DataDir, "revisions", name) }
+func (m *PipelineManager) coreDir(name string) string { return filepath.Join(m.DataDir, "cores", name) }
+func (m *PipelineManager) backupDir(name string) string {
+	return filepath.Join(m.DataDir, "revisions", name)
+}
 
 // ConfigPath 返回某内核的运行时配置文件路径。
 func (m *PipelineManager) ConfigPath(name string) (string, error) {
@@ -57,6 +59,14 @@ func (m *PipelineManager) ConfigPath(name string) (string, error) {
 
 // RenderOpts 导出给 API 层复用（渲染预览等场景）。
 func (m *PipelineManager) RenderOpts() RenderOpts { return m.renderOpts() }
+
+// RenderOptsFor 带上该内核独有的全局段（导入的 DNS / 路由）。
+func (m *PipelineManager) RenderOptsFor(name string) RenderOpts {
+	o := m.renderOpts()
+	o.DNSJSON, _ = m.Settings.Get(name + "_dns_json")
+	o.RouteJSON, _ = m.Settings.Get(name + "_route_json")
+	return o
+}
 
 // renderOpts 从设置中组装全局渲染选项。
 func (m *PipelineManager) renderOpts() RenderOpts {
@@ -74,7 +84,7 @@ func (m *PipelineManager) DryRun(name string, ins []InboundWithClients) (*ApplyR
 	if err != nil {
 		return nil, "", err
 	}
-	content, err := c.Render(ins, m.renderOpts())
+	content, err := c.Render(ins, m.RenderOptsFor(name))
 	if err != nil {
 		return nil, "", fmt.Errorf("render: %w", err)
 	}
@@ -116,7 +126,7 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 	if err != nil {
 		return nil, err
 	}
-	content, err := c.Render(ins, m.renderOpts())
+	content, err := c.Render(ins, m.RenderOptsFor(name))
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.0.5 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.6 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -807,7 +807,10 @@ canvas{display:block;width:100%}
         <h3>导入入站配置<span class="muted" style="font-weight:400">（3x-ui / x-ui 导出、或 xray 原生 inbounds 段）</span></h3>
         <p class="muted" style="margin-bottom:12px">
           粘贴 JSON，或直接选文件。3x-ui 的入站导出（数组、<code>settings</code>/<code>streamSettings</code> 为字符串）与
-          xray 配置里的 <code>inbounds</code> 段都能识别。导入的入站一律是<strong>未启用</strong>状态，
+          xray 完整配置（含 <code>inbounds</code> + <code>dns</code> / <code>routing</code>）都能识别。
+          协议支持 vless / vmess / trojan / shadowsocks / socks / http / dokodemo-door / wireguard，
+          传输支持 tcp / ws / grpc / h2 / httpupgrade / xhttp / kcp / quic（按目标内核自动降级并提示）。
+          内联 PEM 证书会自动写入 <code>data/certs/</code>。导入的入站一律是<strong>未启用</strong>状态，
           核对无误后再打开开关、应用配置。
         </p>
         <textarea id="js_text" class="input mono" style="min-height:190px;font-size:12px"
@@ -7491,10 +7494,10 @@ async function importSubURL() {
 /* ---- 入站弹窗 ---- */
 /* ---- 入站规格矩阵（与各内核渲染器的支持范围保持同步）---- */
 const IB_SPECS = {
-  singbox: { protocols:["vless","vmess","trojan","shadowsocks","hysteria2","tuic","anytls","mixed","socks"],
-             transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
-  xray:    { protocols:["vless","vmess","trojan","shadowsocks"],
-             transports:["tcp","ws","grpc"], tls:["none","tls","reality"] },
+  singbox: { protocols:["vless","vmess","trojan","shadowsocks","hysteria2","tuic","anytls","mixed","socks","http","direct"],
+             transports:["tcp","ws","grpc","h2","httpupgrade","quic"], tls:["none","tls","reality"] },
+  xray:    { protocols:["vless","vmess","trojan","shadowsocks","socks","http","dokodemo-door","wireguard"],
+             transports:["tcp","ws","grpc","httpupgrade","xhttp","kcp"], tls:["none","tls","reality"] },
   mihomo:  { protocols:["mixed","socks","http","shadowsocks","vmess","trojan","tuic","hysteria2"],
              transports:["tcp"], tls:["none","tls"] }
 };
@@ -7502,7 +7505,9 @@ const IB_PROTO_LABEL = {
   vless:"VLESS（推荐，配 Reality 免域名）", vmess:"VMess", trojan:"Trojan（需域名+证书）",
   shadowsocks:"Shadowsocks（单密码共享）", hysteria2:"Hysteria2（QUIC/UDP，弱网快）",
   tuic:"TUIC（QUIC/UDP 低延迟）", anytls:"AnyTLS（新协议）",
-  mixed:"Mixed（HTTP+SOCKS 本机代理）", socks:"SOCKS5 本机代理", http:"HTTP 本机代理"
+  mixed:"Mixed（HTTP+SOCKS 本机代理）", socks:"SOCKS5（本机代理/多用户）",
+  http:"HTTP 代理（本机/多用户）", "dokodemo-door":"dokodemo-door（端口转发）",
+  direct:"direct（端口转发，sing-box）", wireguard:"WireGuard（原始参数透传）"
 };
 const IB_PROTO_HINT = {
   vless:"最常用组合：Reality 传输 + 443 端口，无需域名和证书，客户端伪装成访问真实网站。",
@@ -7513,11 +7518,15 @@ const IB_PROTO_HINT = {
   tuic:"基于 QUIC（UDP 端口），低延迟；确保放行 UDP。",
   anytls:"TLS 伪装的新一代协议，仅 sing-box 支持。",
   mixed:"给本机或局域网设备用的混合代理端口，公网机器建议配合强密码。",
-  socks:"本机 SOCKS5 代理端口。",
-  http:"本机 HTTP 代理端口。"
+  socks:"本机 SOCKS5 代理端口；多用户时每行一个「用户名:密码」。",
+  http:"本机 HTTP 代理端口；多用户时每行一个「用户名:密码」。",
+  "dokodemo-door":"端口转发：把本机端口原样转到目标地址，不需要用户与订阅。",
+  direct:"端口转发（sing-box 的 direct 入站）：把本机端口转到目标地址。",
+  wireguard:"WireGuard 入站参数（secretKey / peers）以原始 settings 透传，只支持 xray。"
 };
 const IB_PORT_DEFAULT = { vless:443, vmess:10086, trojan:443, shadowsocks:8388,
-  hysteria2:36712, tuic:443, anytls:443, mixed:2080, socks:1080, http:8080 };
+  hysteria2:36712, tuic:443, anytls:443, mixed:2080, socks:1080, http:8080,
+  "dokodemo-door":9000, direct:9000, wireguard:51820 };
 
 function ibSpec() { return IB_SPECS[$("ib_core").value] || IB_SPECS.singbox; }
 function ibProto() { return $("ib_protocol").value; }
@@ -7591,10 +7600,16 @@ function ibDynamic(userTriggered) {
   let s = ibGetSettings();
   if (userTriggered) {
     // 切换走后清理不再适用的键，避免残留脏配置
-    if (tr !== "ws") { delete s.path; delete s.ws_host; }
+    const pathTr = ["ws","h2","httpupgrade","xhttp"];
+    if (!pathTr.includes(tr)) { delete s.path; delete s.ws_host; }
     if (tr !== "grpc") delete s.service_name;
+    if (tr !== "xhttp") delete s.xhttp_mode;
+    if (tr !== "kcp") { delete s.kcp_seed; delete s.kcp_header; }
+    if (tr !== "quic") { delete s.quic_security; delete s.quic_key; delete s.quic_header; }
     if (tr !== "tcp") delete s.accept_proxy_protocol;
-    if (tls !== "tls") { delete s.server_name; delete s.certificate_path; delete s.key_path; delete s.alpn; }
+    if (!["socks","http"].includes(proto)) { delete s.account_auth; delete s.udp; }
+    if (!["dokodemo-door","direct"].includes(proto)) { delete s.dd_address; delete s.dd_port; delete s.dd_network; delete s.dd_follow_redirect; }
+    if (tls !== "tls") { delete s.server_name; delete s.certificate_path; delete s.key_path; delete s.alpn; delete s.certificate_pem; delete s.key_pem; }
     if (tls !== "reality") { delete s.handshake_server; delete s.handshake_port; delete s.server_names; delete s.private_key; delete s.pbk; delete s.short_id; delete s.short_ids; delete s.spider_x; delete s.max_time_diff; }
     if (proto !== "shadowsocks") { delete s.method; delete s.ss_network; }
     if (proto !== "vless") delete s.flow;
@@ -7605,14 +7620,32 @@ function ibDynamic(userTriggered) {
   let rows = "";
 
   // ---- 传输层 ----
-  if (tr === "ws") {
-    const def = s.path || ("/ws-" + Math.random().toString(36).slice(2,6));
-    rows += `<div><label>WS 路径</label><input id="ib_f_path" class="input" value="${esc(def)}"></div>`;
-    rows += `<div><label>WS Host 头 <span class="muted" style="font-weight:400">（CDN 前置时必填）</span></label>
+  // ws / h2 / httpupgrade / xhttp 都用 path + Host，只是内核里叫法不同
+  if (["ws","h2","httpupgrade","xhttp"].includes(tr)) {
+    const def = s.path || (tr === "ws" ? ("/ws-" + Math.random().toString(36).slice(2,6)) : "/");
+    rows += `<div><label>${tr === "ws" ? "WS 路径" : "路径 path"}</label><input id="ib_f_path" class="input" value="${esc(def)}"></div>`;
+    rows += `<div><label>Host 头 <span class="muted" style="font-weight:400">（CDN 前置/虚拟主机时填）</span></label>
       <input id="ib_f_wshost" class="input" value="${esc(s.ws_host)}" placeholder="cdn.example.com"></div>`;
   }
   if (tr === "grpc") {
     rows += `<div><label>gRPC 服务名</label><input id="ib_f_svc" class="input" value="${esc(s.service_name)}" placeholder="可留空"></div>`;
+  }
+  if (tr === "xhttp") {
+    rows += `<div><label>xhttp 模式</label>${sel("ib_f_xhmode",
+      [["auto","auto（默认）"],["packet-up","packet-up"],["stream-up","stream-up"],["stream-one","stream-one"]], s.xhttp_mode || "auto")}</div>`;
+  }
+  if (tr === "kcp") {
+    rows += `<div><label>KCP seed <span class="muted" style="font-weight:400">（客户端必须一致）</span></label>
+      <input id="ib_f_kcpseed" class="input" value="${esc(s.kcp_seed)}" placeholder="留空则随机"></div>`;
+    rows += `<div><label>KCP 伪装头</label>${sel("ib_f_kcpheader",
+      [["","none"],["srtp","srtp"],["utp","utp"],["wechat-video","wechat-video"],["dtls","dtls"],["wireguard","wireguard"]], s.kcp_header || "")}</div>`;
+  }
+  if (tr === "quic") {
+    rows += `<div><label>QUIC 加密</label>${sel("ib_f_qsecurity",
+      [["none","none"],["aes-128-gcm","aes-128-gcm"],["chacha20-poly1305","chacha20-poly1305"]], s.quic_security || "none")}</div>`;
+    rows += `<div><label>QUIC key</label><input id="ib_f_qkey" class="input" value="${esc(s.quic_key)}" placeholder="加密不为 none 时必填"></div>`;
+    rows += `<div><label>QUIC 伪装头</label>${sel("ib_f_qheader",
+      [["","none"],["srtp","srtp"],["utp","utp"],["wechat-video","wechat-video"],["dtls","dtls"],["wireguard","wireguard"]], s.quic_header || "")}</div>`;
   }
   if (tr === "tcp" && core === "xray") {
     rows += `<div><label>PROXY protocol <span class="muted" style="font-weight:400">（前面有 nginx/haproxy 时开）</span></label>
@@ -7628,6 +7661,29 @@ function ibDynamic(userTriggered) {
     rows += `<div><label>加密方法</label>${sel("ib_f_method", IB_SS_METHODS, s.method || "aes-256-gcm")}</div>`;
     rows += `<div><label>网络</label>${sel("ib_f_ssnet", IB_SS_NET, s.ss_network || "tcp,udp")}</div>`;
   }
+  if (proto === "socks" || proto === "http") {
+    rows += `<div><label>认证方式</label>${sel("ib_f_auth",
+      [["noauth","免认证（内网/本机）"],["password","用户名 + 密码"]], s.account_auth || "noauth")}</div>`;
+    if (proto === "socks") {
+      rows += `<div><label>UDP 转发</label>${sel("ib_f_udp",
+        [["0","关闭"],["1","开启（需客户端支持）"]], String(s.udp ? 1 : 0))}</div>`;
+    }
+  }
+  if (proto === "wireguard") {
+    rows += `<div class="full"><div class="muted" style="font-size:12.5px;line-height:1.55">
+      WireGuard 的 <code>secretKey</code> / <code>peers</code> / <code>mtu</code> 填在下方「透传 Settings」里（JSON 对象），
+      面板原样交给 xray，不做结构化校验。
+    </div></div>`;
+  }
+  if (proto === "dokodemo-door" || proto === "direct") {
+    rows += `<div><label>目标地址</label><input id="ib_f_ddaddr" class="input" value="${esc(s.dd_address)}" placeholder="1.1.1.1"></div>`;
+    rows += `<div><label>目标端口</label><input id="ib_f_ddport" class="input" type="number" min="1" max="65535" value="${esc(s.dd_port)}" placeholder="80"></div>`;
+    rows += `<div><label>网络</label>${sel("ib_f_ddnet", [["tcp","TCP"],["udp","UDP"],["tcp,udp","TCP + UDP"]], s.dd_network || "tcp")}</div>`;
+    if (core === "xray") {
+      rows += `<div><label>跟随目标地址</label>${sel("ib_f_ddfollow",
+        [["0","否（固定转发到上面填的地址）"],["1","是（按客户端请求的地址转发）"]], String(s.dd_follow_redirect ? 1 : 0))}</div>`;
+    }
+  }
   $("ib_dyn_row").style.display = rows ? "" : "none";
   $("ib_dyn_inner").innerHTML = rows;
 
@@ -7638,6 +7694,15 @@ function ibDynamic(userTriggered) {
     tlsRows += `<div><label>ALPN</label>${sel("ib_f_alpn", IB_ALPN, s.alpn || "")}</div>`;
     tlsRows += `<div><label>证书路径 <span class="muted" style="font-weight:400">（留空可用面板 ACME）</span></label><input id="ib_f_cert" class="input" value="${esc(s.certificate_path)}" placeholder="/opt/triune-panel/data/certs/fullchain.pem"></div>`;
     tlsRows += `<div><label>私钥路径</label><input id="ib_f_key" class="input" value="${esc(s.key_path)}" placeholder="/opt/triune-panel/data/certs/privkey.pem"></div>`;
+    // 没有现成文件时可以直接粘贴 PEM：保存时后端会落盘成文件，
+    // 这样 sing-box（只认路径）也能用，不用先手动 scp 证书上机。
+    tlsRows += `<div class="full"><details>
+      <summary class="muted" style="cursor:pointer;font-size:12.5px">没有证书文件？直接粘贴 PEM（保存时自动写入 data/certs/）</summary>
+      <div class="frm" style="margin-top:8px">
+        <div class="full"><label>证书 PEM</label><textarea id="ib_f_certpem" class="input mono" style="min-height:60px;font-size:11.5px" placeholder="-----BEGIN CERTIFICATE-----">${esc(s.certificate_pem)}</textarea></div>
+        <div class="full"><label>私钥 PEM</label><textarea id="ib_f_keypem" class="input mono" style="min-height:60px;font-size:11.5px" placeholder="-----BEGIN PRIVATE KEY-----">${esc(s.key_pem)}</textarea></div>
+      </div>
+    </details></div>`;
   }
   if (tls === "reality") {
     tlsRows += `<div><label>握手目标 dest</label><input id="ib_f_handshake" class="input" list="ib_sites" value="${esc(s.handshake_server || "www.apple.com")}" placeholder="www.apple.com">
@@ -7672,10 +7737,34 @@ function ibFormToSettings() {
   const s = ibGetSettings();
   const g = id => { const el = $(id); return el ? el.value.trim() : ""; };
   const setIf = (k, v) => { if (v !== "" && v != null) s[k] = v; else delete s[k]; };
-  if (tr === "ws") { setIf("path", g("ib_f_path")); setIf("ws_host", g("ib_f_wshost")); }
+  if (["ws","h2","httpupgrade","xhttp"].includes(tr)) { setIf("path", g("ib_f_path")); setIf("ws_host", g("ib_f_wshost")); }
   if (tr === "grpc") setIf("service_name", g("ib_f_svc"));
+  if (tr === "xhttp") {
+    const m = g("ib_f_xhmode");
+    if (m && m !== "auto") s.xhttp_mode = m; else delete s.xhttp_mode;
+  }
+  if (tr === "kcp") { setIf("kcp_seed", g("ib_f_kcpseed")); setIf("kcp_header", g("ib_f_kcpheader")); }
+  if (tr === "quic") {
+    const qs = g("ib_f_qsecurity");
+    if (qs && qs !== "none") s.quic_security = qs; else delete s.quic_security;
+    setIf("quic_key", g("ib_f_qkey"));
+    setIf("quic_header", g("ib_f_qheader"));
+  }
   if (tr === "tcp" && core === "xray") {
     if (g("ib_f_pp") === "1") s.accept_proxy_protocol = 1; else delete s.accept_proxy_protocol;
+  }
+  if (proto === "socks" || proto === "http") {
+    const a = g("ib_f_auth");
+    if (a && a !== "noauth") s.account_auth = a; else delete s.account_auth;
+    if (proto === "socks" && g("ib_f_udp") === "1") s.udp = true; else delete s.udp;
+  }
+  if (proto === "dokodemo-door" || proto === "direct") {
+    setIf("dd_address", g("ib_f_ddaddr"));
+    const dp = +g("ib_f_ddport") || 0;
+    if (dp > 0) s.dd_port = dp; else delete s.dd_port;
+    const dn = g("ib_f_ddnet");
+    if (dn && dn !== "tcp") s.dd_network = dn; else delete s.dd_network;
+    if (g("ib_f_ddfollow") === "1") s.dd_follow_redirect = true; else delete s.dd_follow_redirect;
   }
   if (proto === "vless") setIf("flow", g("ib_f_flow"));
   if (proto === "shadowsocks") {
@@ -7688,6 +7777,12 @@ function ibFormToSettings() {
     setIf("alpn", g("ib_f_alpn"));
     setIf("certificate_path", g("ib_f_cert"));
     setIf("key_path", g("ib_f_key"));
+    setIf("certificate_pem", g("ib_f_certpem"));
+    setIf("key_pem", g("ib_f_keypem"));
+    // 填了 PEM 就以 PEM 为准：旧路径可能指向不存在的文件（迁移场景），
+    // 留着会让后端以为「已经有文件」而不落盘。
+    if (s.certificate_pem) delete s.certificate_path;
+    if (s.key_pem) delete s.key_path;
   }
   if (tls === "reality") {
     setIf("handshake_server", g("ib_f_handshake"));
@@ -8433,7 +8528,22 @@ function jsRenderPreview(j) {
   }).join("");
   $("js_preview").innerHTML = head + `<div class="tbl-wrap"><table>
     <thead><tr><th>状态</th><th>名称 / 提示</th><th>协议</th><th>端口</th><th>传输 / TLS</th><th>用户</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${rows}</tbody></table></div>` + jsGlobalHtml(j.global);
+}
+
+// jsGlobalHtml 渲染 DNS/路由全局段的导入结果
+function jsGlobalHtml(g) {
+  if (!g) return "";
+  const warns = (g.warnings || []).map(w =>
+    `<div style="font-size:12px;color:var(--warn,#c47f17);margin-top:3px">⚠ ${escHtml(w)}</div>`).join("");
+  const none = !g.dns_servers && !g.routing_rules;
+  return `<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
+    <div style="font-size:13px;font-weight:600">全局段（DNS / 路由）${none ? '<span class="muted" style="font-weight:400">— 本次 JSON 里没有</span>' : ""}</div>
+    ${none ? "" : `<div class="muted" style="font-size:12.5px;margin-top:3px">
+      DNS 服务器 <strong>${g.dns_servers}</strong> 条 · 路由规则 <strong>${g.routing_rules}</strong> 条 ·
+      ${g.applied ? "已写入（同一内核只保留一份，重复导入会覆盖上一次的）" : "预览；确认导入后写入"}</div>`}
+    ${warns}
+  </div>`;
 }
 
 async function jsImport() {

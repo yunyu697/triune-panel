@@ -29,7 +29,7 @@ const xuiExport = `[
   },
   {
     "id": 4, "remark": "dokodemo", "port": 9999, "protocol": "dokodemo-door",
-    "settings": "{}", "streamSettings": "{}"
+    "settings": "{\"address\":\"1.1.1.1\",\"port\":80,\"network\":\"tcp\",\"followRedirect\":true}", "streamSettings": "{}"
   }
 ]`
 
@@ -120,9 +120,15 @@ func TestParse3xuiExport(t *testing.T) {
 		t.Errorf("ss 客户端错：%+v", s.Clients)
 	}
 
-	// 4) 不支持的协议：跳过但保留条目与原因
-	if !ibs[3].Skip || len(ibs[3].Warnings) == 0 {
-		t.Errorf("dokodemo-door 应标记 Skip 并给原因：%+v", ibs[3])
+	// 4) dokodemo-door（端口转发）：不再跳过，目标地址/端口要映射出来
+	if ibs[3].Skip {
+		t.Errorf("dokodemo-door 不该再被跳过：%+v", ibs[3])
+	}
+	if got := ibs[3].Settings["dd_address"]; got != "1.1.1.1" {
+		t.Errorf("dokodemo-door dd_address = %v，期望 1.1.1.1", got)
+	}
+	if got := ibs[3].Settings["dd_port"]; got != 80 {
+		t.Errorf("dokodemo-door dd_port = %v，期望 80", got)
 	}
 }
 
@@ -213,5 +219,147 @@ func TestParseRealityWithoutKeyWarns(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("缺私钥应给出警告，实际 %v", ibs[0].Warnings)
+	}
+}
+
+// 新一轮补齐的协议与传输：socks/http 账号、dokodemo 端口转发、wireguard 透传、
+// h2/httpupgrade/xhttp/kcp/quic 传输、内联 PEM 证书、DNS 与路由全局段。
+const xuiExtras = `[
+  {"remark":"socks5","port":1080,"protocol":"socks",
+   "settings":"{\"auth\":\"password\",\"udp\":true,\"accounts\":[{\"user\":\"u1\",\"pass\":\"p1\"},{\"user\":\"u2\",\"pass\":\"p2\"}]}",
+   "streamSettings":"{}"},
+  {"remark":"http-proxy","port":8080,"protocol":"http",
+   "settings":"{\"accounts\":[{\"user\":\"h1\",\"pass\":\"hp1\"}]}","streamSettings":"{}"},
+  {"remark":"wg","port":51820,"protocol":"wireguard",
+   "settings":"{\"secretKey\":\"SECRET\",\"mtu\":1420,\"peers\":[{\"publicKey\":\"PUB\",\"allowedIPs\":[\"10.0.0.2/32\"]}]}",
+   "streamSettings":"{}"},
+  {"remark":"h2-node","port":4443,"protocol":"vless",
+   "settings":"{\"clients\":[{\"id\":\"u-uuid\",\"email\":\"a\"}]}",
+   "streamSettings":"{\"network\":\"h2\",\"security\":\"tls\",\"httpSettings\":{\"path\":\"/h2\",\"host\":[\"h2.example.com\"]},\"tlsSettings\":{\"certificates\":[{\"certificate\":[\"-----BEGIN CERTIFICATE-----\",\"MIIB\",\"-----END CERTIFICATE-----\"],\"key\":[\"-----BEGIN PRIVATE KEY-----\",\"MIIE\",\"-----END PRIVATE KEY-----\"]}]}}"},
+  {"remark":"hu-node","port":4444,"protocol":"vless",
+   "settings":"{\"clients\":[{\"id\":\"u2-uuid\"}]}",
+   "streamSettings":"{\"network\":\"httpupgrade\",\"httpupgradeSettings\":{\"path\":\"/hu\",\"host\":\"hu.example.com\"}}"},
+  {"remark":"xhttp-node","port":4445,"protocol":"vless",
+   "settings":"{\"clients\":[{\"id\":\"u3-uuid\"}]}",
+   "streamSettings":"{\"network\":\"xhttp\",\"xhttpSettings\":{\"path\":\"/xh\",\"host\":\"x.example.com\",\"mode\":\"packet-up\"}}"},
+  {"remark":"kcp-node","port":4446,"protocol":"vmess",
+   "settings":"{\"clients\":[{\"id\":\"k-uuid\"}]}",
+   "streamSettings":"{\"network\":\"kcp\",\"kcpSettings\":{\"seed\":\"s3\",\"header\":{\"type\":\"srtp\"}}}"},
+  {"remark":"quic-node","port":4447,"protocol":"vmess",
+   "settings":"{\"clients\":[{\"id\":\"q-uuid\"}]}",
+   "streamSettings":"{\"network\":\"quic\",\"quicSettings\":{\"security\":\"aes-128-gcm\",\"key\":\"qk\",\"header\":{\"type\":\"dtls\"}}}"}
+]`
+
+func TestParseNewProtocolsAndTransports(t *testing.T) {
+	ibs, err := Parse(xuiExtras)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	byName := map[string]*Inbound{}
+	for _, ib := range ibs {
+		byName[ib.Name] = ib
+		if ib.Skip {
+			t.Errorf("%s 不应被跳过：%v", ib.Name, ib.Warnings)
+		}
+	}
+
+	// socks：账号 → user:pass 凭据，auth/udp 落 settings
+	s := byName["socks5"]
+	if s.Settings["account_auth"] != "password" || s.Settings["udp"] != true {
+		t.Errorf("socks auth/udp 映射错：%+v", s.Settings)
+	}
+	if len(s.Clients) != 2 || s.Clients[0].Credential != "u1:p1" || s.Clients[0].Name != "u1" {
+		t.Errorf("socks accounts 映射错：%+v", s.Clients)
+	}
+
+	// http：同样按 accounts 取凭据
+	h := byName["http-proxy"]
+	if len(h.Clients) != 1 || h.Clients[0].Credential != "h1:hp1" {
+		t.Errorf("http accounts 映射错：%+v", h.Clients)
+	}
+
+	// wireguard：整段原样透传，没有用户
+	w := byName["wg"]
+	if _, ok := w.Settings["xray_raw_settings"]; !ok {
+		t.Errorf("wireguard 应保留原始 settings：%+v", w.Settings)
+	}
+	if len(w.Clients) != 0 {
+		t.Errorf("wireguard 不该产生用户：%+v", w.Clients)
+	}
+
+	// 传输映射
+	// 传输名保持中立（h2 / quic 保留原名），由 API 层按目标内核决定落地方式
+	for name, want := range map[string]string{
+		"h2-node": "h2", "hu-node": "httpupgrade", "xhttp-node": "xhttp",
+		"kcp-node": "kcp", "quic-node": "quic",
+	} {
+		if got := byName[name].Transport; got != want {
+			t.Errorf("%s 传输 = %q，期望 %q", name, got, want)
+		}
+	}
+	if v := byName["h2-node"].Settings["path"]; v != "/h2" {
+		t.Errorf("h2 path = %v", v)
+	}
+	if v := byName["h2-node"].Settings["ws_host"]; v != "h2.example.com" {
+		t.Errorf("h2 host = %v", v)
+	}
+	if v := byName["xhttp-node"].Settings["xhttp_mode"]; v != "packet-up" {
+		t.Errorf("xhttp mode = %v", v)
+	}
+	if v := byName["kcp-node"].Settings["kcp_seed"]; v != "s3" {
+		t.Errorf("kcp seed = %v", v)
+	}
+	if v := byName["kcp-node"].Settings["kcp_header"]; v != "srtp" {
+		t.Errorf("kcp header = %v", v)
+	}
+	if v := byName["quic-node"].Settings["quic_security"]; v != "aes-128-gcm" {
+		t.Errorf("quic security = %v", v)
+	}
+
+	// 内联 PEM：不再丢成一句「不支持」，而是保留 PEM 供写库时落盘
+	pem, _ := byName["h2-node"].Settings["certificate_pem"].(string)
+	if !strings.Contains(pem, "BEGIN CERTIFICATE") || !strings.Contains(pem, "MIIB") {
+		t.Errorf("内联证书 PEM 应保留：%q", pem)
+	}
+	if kp, _ := byName["h2-node"].Settings["key_pem"].(string); !strings.Contains(kp, "BEGIN PRIVATE KEY") {
+		t.Errorf("内联私钥 PEM 应保留：%q", kp)
+	}
+}
+
+// 整份 xray 配置：inbounds 之外的 dns / routing / outbounds 也要能用。
+func TestParseGlobalDNSAndRouting(t *testing.T) {
+	cfg := `{
+	  "dns": {"servers": ["1.1.1.1", {"address": "8.8.8.8", "domains": ["geosite:cn"]}], "queryStrategy": "UseIP"},
+	  "routing": {"domainStrategy": "IPIfNonMatch", "rules": [
+	    {"type": "field", "domain": ["geosite:cn"], "outboundTag": "direct"},
+	    {"type": "field", "ip": ["geoip:private"], "outboundTag": "block"},
+	    {"type": "field", "domain": ["geosite:google"], "outboundTag": "proxy"}
+	  ]},
+	  "inbounds": [{"tag":"in1","port":443,"protocol":"vless","settings":{"clients":[{"id":"x"}]},"streamSettings":{"network":"tcp"}}],
+	  "outbounds": [{"protocol":"freedom"},{"protocol":"vmess","tag":"proxy"}]
+	}`
+	r, err := ParseFull(cfg)
+	if err != nil {
+		t.Fatalf("ParseFull: %v", err)
+	}
+	if r.Global == nil {
+		t.Fatal("应解析出全局段")
+	}
+	if servers, ok := r.Global.DNS["servers"].([]any); !ok || len(servers) != 2 {
+		t.Errorf("DNS servers 应保留：%#v", r.Global.DNS["servers"])
+	}
+	rules, _ := r.Global.Routing["rules"].([]any)
+	if len(rules) != 2 {
+		t.Fatalf("应只保留 direct/block 两条规则，实际 %d：%#v", len(rules), rules)
+	}
+	if rules[0].(map[string]any)["outboundTag"] != nil {
+		t.Errorf("direct 规则的 outboundTag 应去掉（默认即 direct）：%#v", rules[0])
+	}
+	if rules[1].(map[string]any)["outboundTag"] != "block" {
+		t.Errorf("block 规则应统一成 block：%#v", rules[1])
+	}
+	joined := strings.Join(r.Global.Warnings, " | ")
+	if !strings.Contains(joined, "代理出站") || !strings.Contains(joined, "路由规则") {
+		t.Errorf("丢弃的代理规则/出站应有提示：%v", r.Global.Warnings)
 	}
 }

@@ -1,8 +1,9 @@
 // Package importer 把外部面板导出的配置解析为面板入站。
 //
-// 目前支持两种输入，都是 xray 生态里的「入站定义」：
+// 支持的输入形态（都是 xray 生态里的定义）：
 //   - 3x-ui / x-ui 的入站导出（数组，settings/streamSettings 是**字符串**形式的 JSON）；
-//   - 原生 xray 配置里的 inbounds 段（对象，字段本身就是 JSON）。
+//   - 原生 xray 配置（对象，含 inbounds 段，顺带把 dns / routing 全局段带进来）；
+//   - 单个入站对象。
 //
 // 设计原则：**能映的映，映不了的带警告保留原始值**。绝不静默丢弃字段，
 // 也绝不猜——猜错的配置会让用户在「看着导入成功」之后踩更深的坑。
@@ -54,8 +55,37 @@ const (
 	SourceArray = "array"
 )
 
-// Parse 解析文本为若干入站。
+// Global 是 xray 配置里的全局段（DNS / 路由 / 出站），不属于任何一条入站。
+//
+// 入站导入如果只搬 inbounds，用户会得到「入站一模一样、但分流规则和 DNS
+// 全没了」的配置——表面上导入成功，实际行为完全不同。所以这些也要搬，
+// 搬不了的（出站代理链）必须显式说明，而不是悄悄扔掉。
+type Global struct {
+	DNS       map[string]any `json:"dns,omitempty"`
+	Routing   map[string]any `json:"routing,omitempty"`
+	Outbounds []any          `json:"outbounds,omitempty"`
+	// Warnings 是全局段的映射提示（与单条入站的 Warnings 分开）。
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// Result 一次解析的完整结果。
+type Result struct {
+	Inbounds []*Inbound `json:"inbounds"`
+	Global   *Global    `json:"global,omitempty"`
+	Source   string     `json:"source"`
+}
+
+// Parse 只取入站（兼容旧调用点/测试）。
 func Parse(text string) ([]*Inbound, error) {
+	r, err := ParseFull(text)
+	if err != nil {
+		return nil, err
+	}
+	return r.Inbounds, nil
+}
+
+// ParseFull 解析文本为若干入站 + 全局段。
+func ParseFull(text string) (*Result, error) {
 	t := strings.TrimSpace(text)
 	if t == "" {
 		return nil, fmt.Errorf("内容为空")
@@ -96,7 +126,88 @@ func Parse(text string) ([]*Inbound, error) {
 			ib.Warnings = append(ib.Warnings, fmt.Sprintf("同批次里有 %d 条同名入站「%s」，导入时会自动加序号", seen[ib.Name], ib.Name))
 		}
 	}
-	return out, nil
+	return &Result{Inbounds: out, Global: globalOf(root), Source: source}, nil
+}
+
+// globalOf 抽取根节点里的 dns / routing / outbounds。
+//
+// 只搬「能安全搬」的部分：
+//   - DNS 原样带走（规则里引用的 geosite/geoip 在 xray 下同样有效）；
+//   - 路由规则只保留指向 direct / block 的（面板渲染的出站只有 direct 与
+//     block 两个）。指向代理出站的规则会连带整条代理链，照搬等于把一台
+//     落地机的出站配置搬到本机，会直接把流量绕一圈甚至断掉，所以丢弃并提示。
+func globalOf(root any) *Global {
+	m, ok := root.(map[string]any)
+	if !ok {
+		return nil
+	}
+	g := &Global{}
+	if d := asMap(m["dns"]); len(d) > 0 {
+		g.DNS = d
+	}
+	if r := asMap(m["routing"]); len(r) > 0 {
+		if rules, ok := r["rules"].([]any); ok && len(rules) > 0 {
+			kept, dropped := filterRoutingRules(rules)
+			if len(kept) > 0 {
+				cp := map[string]any{}
+				for k, v := range r {
+					cp[k] = v
+				}
+				cp["rules"] = kept
+				g.Routing = cp
+			}
+			if dropped > 0 {
+				g.Warnings = append(g.Warnings, fmt.Sprintf("路由规则里有 %d 条指向代理出站（面板只有 direct / block 出站），已跳过；如需分流请在出站侧手工配置", dropped))
+			}
+		}
+	}
+	if ob, ok := m["outbounds"].([]any); ok && len(ob) > 0 {
+		g.Outbounds = ob
+		var proxy int
+		for _, it := range ob {
+			switch asString(asMap(it)["protocol"]) {
+			case "", "freedom", "blackhole", "dns":
+			default:
+				proxy++
+			}
+		}
+		if proxy > 0 {
+			g.Warnings = append(g.Warnings, fmt.Sprintf("配置里有 %d 个代理出站（proxy/其他协议），面板只渲染 direct 出站，未导入", proxy))
+		}
+	}
+	if g.DNS == nil && g.Routing == nil && len(g.Outbounds) == 0 {
+		return nil
+	}
+	return g
+}
+
+// filterRoutingRules 只保留指向内置出站的规则，并把 block 统一成 blackhole 语义。
+func filterRoutingRules(rules []any) (kept []any, dropped int) {
+	for _, it := range rules {
+		r := asMap(it)
+		if len(r) == 0 {
+			continue
+		}
+		switch strings.ToLower(asString(r["outboundTag"])) {
+		case "", "direct", "freedom":
+			cp := map[string]any{}
+			for k, v := range r {
+				cp[k] = v
+			}
+			delete(cp, "outboundTag") // 空 outboundTag = 默认 direct
+			kept = append(kept, cp)
+		case "block", "blocked", "blackhole":
+			cp := map[string]any{}
+			for k, v := range r {
+				cp[k] = v
+			}
+			cp["outboundTag"] = "block"
+			kept = append(kept, cp)
+		default:
+			dropped++
+		}
+	}
+	return kept, dropped
 }
 
 // splitList 把根节点拆成入站对象列表，并判断来源形态。
@@ -158,9 +269,9 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 	ib.Transport = "tcp"
 	ib.TLS = "none"
 
-	if !supportedProtocol(ib.Protocol) {
+	if !protocolKnown(ib.Protocol) {
 		ib.Skip = true
-		warns = append(warns, fmt.Sprintf("协议 %q 面板不支持（支持 vless/vmess/trojan/shadowsocks），已跳过", ib.Protocol))
+		warns = append(warns, fmt.Sprintf("协议 %q 面板不支持（支持 vless/vmess/trojan/shadowsocks/socks/http/dokodemo-door/wireguard），已跳过", ib.Protocol))
 		return ib, warns
 	}
 	if ib.Port <= 0 || ib.Port > 65535 {
@@ -177,6 +288,8 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 	}
 
 	// ---- 传输 ----
+	// 传输名统一成面板/内核都认的短名：tcp ws grpc h2 httpupgrade xhttp kcp quic。
+	// 具体某个内核能不能渲染由 API 层按矩阵提示（xray 全支持，sing-box 没有 kcp/xhttp）。
 	network := strings.ToLower(asString(stream["network"]))
 	switch network {
 	case "", "tcp", "raw":
@@ -208,11 +321,72 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 			warns = append(warns, "gRPC multiMode 面板不生成，导入后如需请手工补")
 		}
 	case "h2", "http":
+		// 传输名保持中立的 h2：xray 26 已移除它、sing-box 里叫 http，
+		// 具体怎么落地由 API 层按目标内核决定（转 xhttp 或原样保留）。
+		ib.Transport = "h2"
+		h2 := asMap(stream["httpSettings"])
+		if h2 == nil {
+			h2 = asMap(stream["h2Settings"])
+		}
+		if p := asString(h2["path"]); p != "" {
+			ib.Settings["path"] = p
+		}
+		if hosts := asList(h2["host"]); len(hosts) > 0 {
+			ib.Settings["ws_host"] = hosts[0]
+		}
+	case "httpupgrade":
+		ib.Transport = "httpupgrade"
+		hu := asMap(stream["httpupgradeSettings"])
+		if p := asString(hu["path"]); p != "" {
+			ib.Settings["path"] = p
+		}
+		if h := asString(hu["host"]); h != "" {
+			ib.Settings["ws_host"] = h
+		}
+	case "xhttp", "splithttp":
+		ib.Transport = "xhttp"
+		xh := asMap(stream["xhttpSettings"])
+		if xh == nil {
+			xh = asMap(stream["splithttpSettings"])
+		}
+		if p := asString(xh["path"]); p != "" {
+			ib.Settings["path"] = p
+		}
+		if h := asString(xh["host"]); h != "" {
+			ib.Settings["ws_host"] = h
+		}
+		if m := asString(xh["mode"]); m != "" {
+			ib.Settings["xhttp_mode"] = m
+		}
+	case "kcp", "mkcp":
+		ib.Transport = "kcp"
+		k := asMap(stream["kcpSettings"])
+		if s := asString(k["seed"]); s != "" {
+			ib.Settings["kcp_seed"] = s
+		}
+		if h := asMap(k["header"]); len(h) > 0 {
+			if t := asString(h["type"]); t != "" {
+				ib.Settings["kcp_header"] = t
+			}
+		}
+	case "quic":
+		// 同样保持中立：sing-box 有 quic 传输，xray 26 已并入 xhttp。
+		ib.Transport = "quic"
+		q := asMap(stream["quicSettings"])
+		if s := asString(q["security"]); s != "" {
+			ib.Settings["quic_security"] = s
+		}
+		if k := asString(q["key"]); k != "" {
+			ib.Settings["quic_key"] = k
+		}
+		if h := asMap(q["header"]); len(h) > 0 {
+			if t := asString(h["type"]); t != "" {
+				ib.Settings["quic_header"] = t
+			}
+		}
+	case "domainsocket":
 		ib.Transport = "tcp"
-		warns = append(warns, "h2 传输面板不支持，已按 tcp 建草稿；若你的客户端依赖 h2 请改用 ws 或手工配置")
-	case "httpupgrade", "xhttp", "splithttp", "kcp", "mkcp", "quic", "domainsocket":
-		ib.Transport = "tcp"
-		warns = append(warns, fmt.Sprintf("传输 %s 面板不支持，已按 tcp 建草稿，请手工核对", network))
+		warns = append(warns, "domainsocket 传输面板不支持，已按 tcp 建草稿")
 	default:
 		ib.Transport = "tcp"
 		warns = append(warns, fmt.Sprintf("未知传输 %q，已按 tcp 导入", network))
@@ -234,11 +408,25 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 			c0 := asMap(certs[0])
 			if f := asString(c0["certificateFile"]); f != "" {
 				ib.Settings["certificate_path"] = f
-			} else if len(asList(c0["certificate"])) > 0 {
-				warns = append(warns, "证书是内联 PEM（没有文件路径），面板只支持证书文件路径，请把证书落到磁盘后填写路径")
 			}
 			if f := asString(c0["keyFile"]); f != "" {
 				ib.Settings["key_path"] = f
+			}
+			// 内联 PEM（certificate / key 是字符串数组，xray 与 3x-ui 都常见）：
+			// 面板按文件路径工作，这里先把 PEM 留下来，写库时落盘成文件——
+			// 比丢一条「面板不支持」有用得多。
+			if ib.Settings["certificate_path"] == nil {
+				if pem := joinPEM(c0["certificate"]); pem != "" {
+					ib.Settings["certificate_pem"] = pem
+				}
+			}
+			if ib.Settings["key_path"] == nil {
+				if pem := joinPEM(c0["key"]); pem != "" {
+					ib.Settings["key_pem"] = pem
+				}
+			}
+			if ib.Settings["certificate_path"] == nil && ib.Settings["certificate_pem"] == nil {
+				warns = append(warns, "证书既没有文件路径也没有内联 PEM，导入后需手工填证书")
 			}
 		}
 		if security == "xtls" {
@@ -318,6 +506,52 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 		if fb, ok := settings["fallbacks"].([]any); ok && len(fb) > 0 {
 			ib.Settings["fallbacks"] = fb
 		}
+	case "socks", "http":
+		// xray 的 socks/http 入站：auth=none|password，socks 还有 udp 开关
+		if a := strings.ToLower(asString(settings["auth"])); a != "" {
+			if a == "none" || a == "noauth" {
+				ib.Settings["account_auth"] = "noauth"
+			} else {
+				ib.Settings["account_auth"] = "password"
+			}
+		}
+		if asBool(settings["udp"]) {
+			ib.Settings["udp"] = true
+		}
+	case "dokodemo-door", "tunnel":
+		// 端口转发：目标地址/端口 + 是否跟随目标地址
+		if a := asString(settings["address"]); a != "" {
+			ib.Settings["dd_address"] = a
+		}
+		if p := asInt(settings["port"]); p > 0 {
+			ib.Settings["dd_port"] = p
+		}
+		if n := asString(settings["network"]); n != "" {
+			ib.Settings["dd_network"] = n
+		}
+		if asBool(settings["followRedirect"]) {
+			ib.Settings["dd_follow_redirect"] = true
+		}
+		if ib.Protocol == "tunnel" {
+			ib.Protocol = "dokodemo-door"
+			warns = append(warns, "tunnel 协议已按 dokodemo-door（端口转发）导入")
+		}
+	case "wireguard":
+		// wireguard 入站没有「用户」概念，参数是一整块密钥与 peer 列表。
+		// 面板不做结构化建模（各内核字段差异大），原样透传给 xray 渲染。
+		clean := map[string]any{}
+		for k, v := range settings {
+			if k == "clients" || k == "accounts" {
+				continue
+			}
+			clean[k] = v
+		}
+		if len(clean) > 0 {
+			ib.Settings["xray_raw_settings"] = clean
+		}
+		if asString(settings["secretKey"]) == "" {
+			warns = append(warns, "WireGuard 入站缺少 secretKey，导入后需手工补")
+		}
 	}
 
 	// ---- 客户端 ----
@@ -345,7 +579,12 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 		}
 	}
 	if len(ib.Clients) == 0 {
-		warns = append(warns, "这条入站没有客户端（3x-ui 里可能是空入站），导入后需要手动加用户")
+		switch ib.Protocol {
+		case "dokodemo-door", "wireguard":
+			// 端口转发 / WireGuard 本来就没有面板用户，不提示
+		default:
+			warns = append(warns, "这条入站没有客户端（3x-ui 里可能是空入站），导入后需要手动加用户")
+		}
 	}
 
 	// ---- 顶层透传（仅 xray 目标内核会用到）----
@@ -365,7 +604,13 @@ func mapOne(m map[string]any, source string) (*Inbound, []string) {
 		var unknown []string
 		for k := range settings {
 			switch k {
-			case "clients", "decryption", "fallbacks", "method", "password", "network":
+			case "clients", "decryption", "fallbacks", "method", "password", "network",
+				// socks / http
+				"accounts", "auth", "udp",
+				// dokodemo-door / tunnel
+				"address", "port", "followRedirect", "timeout",
+				// wireguard（整段原样透传给 xray）
+				"secretKey", "mtu", "peers", "noKernelTun", "reserved", "workers", "domainStrategy":
 			default:
 				unknown = append(unknown, k)
 			}
@@ -393,6 +638,23 @@ func rawClients(settings map[string]any) []map[string]any {
 // shadowsocks 2022 也是 password，socks/http 是 user/pass。
 func mapClients(settings map[string]any, protocol string) []Client {
 	var out []Client
+	// xray 的 socks / http 用 accounts（{user, pass}），不是 clients
+	if protocol == "socks" || protocol == "http" {
+		if arr, ok := settings["accounts"].([]any); ok {
+			for i, it := range toMaps(arr) {
+				u, p := asString(it["user"]), asString(it["pass"])
+				if u == "" && p == "" {
+					continue
+				}
+				out = append(out, Client{
+					Name:       firstNonEmpty(u, fmt.Sprintf("%s-user%d", protocol, i+1)),
+					Credential: u + ":" + p,
+					Enabled:    true,
+				})
+			}
+			return out
+		}
+	}
 	for i, c := range rawClients(settings) {
 		cred := asString(c["id"])
 		if cred == "" {
@@ -443,12 +705,31 @@ func mapClients(settings map[string]any, protocol string) []Client {
 	return out
 }
 
-func supportedProtocol(p string) bool {
+func protocolKnown(p string) bool {
 	switch p {
-	case "vless", "vmess", "trojan", "shadowsocks":
+	case "vless", "vmess", "trojan", "shadowsocks", "socks", "http",
+		"dokodemo-door", "tunnel", "wireguard":
 		return true
 	}
 	return false
+}
+
+// joinPEM 把 xray 的 certificate / key 数组（PEM 文本）拼回一个字符串。
+// 有 base64 形态的也会被认（老版本导出过 base64）。
+func joinPEM(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, it := range t {
+			if s := strings.TrimSpace(asString(it)); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }
 
 // ---- 取值辅助：3x-ui 的 settings/streamSettings 是字符串，xray 配置是对象 ----

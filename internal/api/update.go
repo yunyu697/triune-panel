@@ -66,8 +66,8 @@ func (a *Server) handleComponents(w http.ResponseWriter, r *http.Request) {
 		cores = append(cores, entry)
 	}
 	writeJSON(w, 200, map[string]any{
-		"panel":   map[string]any{"component": "panel", "version": Version},
-		"cores":   cores,
+		"panel": map[string]any{"component": "panel", "version": Version},
+		"cores": cores,
 	})
 }
 
@@ -245,7 +245,7 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 	input, _ := a.buildRenderInput(name)
 	oldBin, _ := a.Store.GetSetting("bin_" + name)
 	if len(input) > 0 {
-		content, rerr := c.Render(input, a.Pipe.RenderOpts())
+		content, rerr := c.Render(input, a.Pipe.RenderOptsFor(c.Name()))
 		if rerr == nil {
 			dir := a.Pipe.DataDir + "/cores/" + name
 			_ = os.MkdirAll(dir, 0o755)
@@ -307,18 +307,18 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 	restartNote := fmt.Sprintf("core %s updated → %s", name, verOut)
 	if len(input) > 0 {
 		if _, err := a.applyWithRevision(name, input, restartNote); err != nil {
-			rollback("apply 失败: "+err.Error())
+			rollback("apply 失败: " + err.Error())
 			return
 		}
 		if err := a.healthCheck(name); err != nil {
-			rollback("健康检查失败: "+err.Error())
+			rollback("健康检查失败: " + err.Error())
 			return
 		}
 	} else if wasRunning {
 		// 无入站但进程在跑（如空配置启动）：直接重启验证
 		if err := a.ProcMgr.Restart(name, target, a.Pipe.DataDir+"/cores/"+name+"/config."+c.Ext(), a.Pipe.DataDir+"/cores/"+name); err == nil {
 			if err := a.healthCheck(name); err != nil {
-				rollback("健康检查失败: "+err.Error())
+				rollback("健康检查失败: " + err.Error())
 				return
 			}
 		}

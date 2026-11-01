@@ -469,6 +469,11 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
+	// 内联 PEM → 落盘（xray 可内联，sing-box 只认路径，统一转成文件最省事）
+	if err := a.materializeInboundPEM(&in); err != nil {
+		fail(w, 400, "证书落盘失败: "+err.Error())
+		return
+	}
 	if err := a.Store.CreateInbound(&in); err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -542,6 +547,10 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Settings == "" {
 		in.Settings = "{}"
+	}
+	if err := a.materializeInboundPEM(&in); err != nil {
+		fail(w, 400, "证书落盘失败: "+err.Error())
+		return
 	}
 	// 运行中的入站不允许直接改内核 —— 必须走 /api/switch-core 安全切换流程
 	// （预检 → 停旧 → 启新 → 健康检查 → 失败自动回滚），否则可能出现
@@ -915,7 +924,6 @@ func (a *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 // ---- apply pipeline ----
 
 // buildRenderInput 汇总某内核所有启用且非草稿的入站及用户。
@@ -972,7 +980,7 @@ func (a *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	content, rerr := c.Render(input, a.Pipe.RenderOpts())
+	content, rerr := c.Render(input, a.Pipe.RenderOptsFor(c.Name()))
 	rev := &model.ConfigRevision{Core: req.Core, Status: model.RevPending, Note: req.Note}
 	if rerr == nil {
 		rev.Content = string(content)

@@ -65,8 +65,77 @@ func (x *Xray) Render(ins []core.InboundWithClients, opts core.RenderOpts) ([]by
 		}
 		doc["inbounds"] = inbounds
 	}
-	doc["outbounds"] = []any{map[string]any{"protocol": "freedom", "tag": "direct"}}
+	doc["outbounds"] = x.outbounds(opts)
+	x.applyGlobal(doc, opts)
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+// outbounds 组装出站：默认只有 direct；导入的路由里出现 block 时补 blackhole，
+// 否则那条规则会因为「找不到出站」而让整份配置校验失败。
+func (x *Xray) outbounds(opts core.RenderOpts) []any {
+	out := []any{map[string]any{"protocol": "freedom", "tag": "direct"}}
+	if x.routeNeedsBlock(opts.RouteJSON) {
+		out = append(out, map[string]any{"protocol": "blackhole", "tag": "block"})
+	}
+	return out
+}
+
+// routeNeedsBlock 判断导入的路由规则是否引用了 block 出站。
+func (x *Xray) routeNeedsBlock(routeJSON string) bool {
+	if routeJSON == "" {
+		return false
+	}
+	var r map[string]any
+	if err := json.Unmarshal([]byte(routeJSON), &r); err != nil {
+		return false
+	}
+	rules, _ := r["rules"].([]any)
+	for _, it := range rules {
+		if m, ok := it.(map[string]any); ok {
+			if tag, _ := m["outboundTag"].(string); tag == "block" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// applyGlobal 把导入的 DNS / 路由段并进文档。
+//
+// 路由的规则**追加**在统计 API 规则之后（API 规则必须优先，否则面板读不到计数）；
+// 其它字段（domainStrategy 等）以导入值为准。
+func (x *Xray) applyGlobal(doc map[string]any, opts core.RenderOpts) {
+	if opts.DNSJSON != "" {
+		var d map[string]any
+		if err := json.Unmarshal([]byte(opts.DNSJSON), &d); err == nil && len(d) > 0 {
+			doc["dns"] = d
+		}
+	}
+	if opts.RouteJSON == "" {
+		return
+	}
+	var r map[string]any
+	if err := json.Unmarshal([]byte(opts.RouteJSON), &r); err != nil || len(r) == 0 {
+		return
+	}
+	imported, _ := r["rules"].([]any)
+	delete(r, "rules")
+	cur, ok := doc["routing"].(map[string]any)
+	if !ok || cur == nil {
+		cur = map[string]any{}
+		doc["routing"] = cur
+	}
+	// 先把导入段自己的顶层字段（domainStrategy 等）并进来，
+	// 但 **不能覆盖** 统计 API 已写好的 rules —— 规则单独追加。
+	for k, v := range r {
+		cur[k] = v
+	}
+	existing, _ := cur["rules"].([]any)
+	if len(imported) > 0 {
+		cur["rules"] = append(existing, imported...)
+	} else if existing != nil {
+		cur["rules"] = existing
+	}
 }
 
 func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error) {
@@ -153,32 +222,144 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 			ss["password"] = password
 		}
 		obj["settings"] = ss
+	case "socks", "http":
+		// xray 的 socks/http 用 accounts（{user,pass}），不是 clients。
+		// auth 必须显式给：不给 auth 时 xray 认为要密码但 accounts 为空，启动即报错。
+		obj["protocol"] = in.Protocol
+		var accounts []any
+		for _, c := range iw.Clients {
+			if !c.Enabled {
+				continue
+			}
+			u, p := core.SplitUserPass(c.Credential, c.Name)
+			accounts = append(accounts, map[string]any{"user": u, "pass": p})
+		}
+		as := map[string]any{"accounts": accounts}
+		auth := core.Field(in.Settings, "account_auth")
+		if auth == "" {
+			if len(accounts) > 0 {
+				auth = "password"
+			} else {
+				auth = "noauth"
+			}
+		}
+		if auth == "noauth" {
+			as["auth"] = "noauth"
+			delete(as, "accounts")
+		} else {
+			as["auth"] = "password"
+		}
+		// udp 只有 socks 有；http 写了会被判未知字段
+		if in.Protocol == "socks" && core.FieldInt(in.Settings, "udp") == 1 {
+			as["udp"] = true
+		}
+		obj["settings"] = as
+	case "dokodemo-door":
+		// 端口转发：把本机端口转到 address:port。常用来把 CDN 回源、
+		// 内网服务暴露出去，面板不需要「用户」概念。
+		obj["protocol"] = "dokodemo-door"
+		ds := map[string]any{
+			"address": core.Field(in.Settings, "dd_address"),
+			"port":    core.FieldInt(in.Settings, "dd_port"),
+		}
+		if ds["address"] == "" {
+			return nil, fmt.Errorf("dokodemo-door 入站缺少目标地址（dd_address）")
+		}
+		if n := core.Field(in.Settings, "dd_network"); n != "" {
+			ds["network"] = n
+		}
+		if core.FieldInt(in.Settings, "dd_follow_redirect") == 1 {
+			ds["followRedirect"] = true
+		}
+		obj["settings"] = ds
+	case "wireguard":
+		// WireGuard 参数是一整块密钥 + peer 列表，面板不做结构化建模，
+		// 导入时原样存在 xray_raw_settings 里，这里直接透传。
+		obj["protocol"] = "wireguard"
+		raw := core.FieldRaw(in.Settings, "xray_raw_settings")
+		m, ok := raw.(map[string]any)
+		if !ok || len(m) == 0 {
+			return nil, fmt.Errorf("WireGuard 入站缺少原始 settings（secretKey/peers）")
+		}
+		clean := map[string]any{}
+		for k, v := range m {
+			clean[k] = v
+		}
+		for _, k := range core.ManagedSettingsKeys {
+			delete(clean, k)
+		}
+		obj["settings"] = clean
 	default:
 		return nil, fmt.Errorf("protocol %q not supported by xray renderer", in.Protocol)
 	}
 
 	// streamSettings
+	// 传输名与内核字段一一对应。写错 network 时 xray 只会在启动时抛
+	// 「unknown transport protocol」，所以这里对未知值直接报错，不猜。
 	stream := map[string]any{"network": "tcp"}
-	if in.Transport != "" && in.Transport != "tcp" {
-		stream["network"] = in.Transport
-		switch in.Transport {
-		case "ws":
-			ws := map[string]any{}
-			if p := core.Field(in.Settings, "path"); p != "" {
-				ws["path"] = p
-			}
-			// Host 头：CDN 前置时客户端要按它握手，服务端匹配同一值
-			if h := core.Field(in.Settings, "ws_host"); h != "" {
-				ws["headers"] = map[string]any{"Host": h}
-			}
-			stream["wsSettings"] = ws
-		case "grpc":
-			g := map[string]any{}
-			if sn := core.Field(in.Settings, "service_name"); sn != "" {
-				g["serviceName"] = sn
-			}
-			stream["grpcSettings"] = g
+	switch tr := in.Transport; tr {
+	case "", "tcp", "raw":
+		// 默认
+	case "ws":
+		stream["network"] = "ws"
+		ws := map[string]any{}
+		if p := core.Field(in.Settings, "path"); p != "" {
+			ws["path"] = p
 		}
+		// Host 头：CDN 前置时客户端要按它握手，服务端匹配同一值
+		if h := core.Field(in.Settings, "ws_host"); h != "" {
+			ws["headers"] = map[string]any{"Host": h}
+		}
+		stream["wsSettings"] = ws
+	case "grpc":
+		stream["network"] = "grpc"
+		g := map[string]any{}
+		if sn := core.Field(in.Settings, "service_name"); sn != "" {
+			g["serviceName"] = sn
+		}
+		stream["grpcSettings"] = g
+	case "h2":
+		// Xray 26 起移除了独立 h2 传输（迁移到 XHTTP 的 stream-one 模式），
+		// 硬写 network=h2 会直接启动失败。这里给出可执行的改法，不猜。
+		return nil, fmt.Errorf("Xray 26 起已移除 h2 传输（合并到 XHTTP 的 stream-one 模式）：请把传输改成 xhttp、模式选 stream-one")
+	case "quic":
+		// 同理：裸 QUIC 传输也并入了 XHTTP（H3）。需要 TLS + ALPN h3。
+		return nil, fmt.Errorf("Xray 26 起已移除裸 QUIC 传输（迁移到 XHTTP 的 stream-one + H3）：请把传输改成 xhttp、模式选 stream-one，并在 TLS 里把 ALPN 设为 h3")
+	case "httpupgrade":
+		stream["network"] = "httpupgrade"
+		hu := map[string]any{}
+		if p := core.Field(in.Settings, "path"); p != "" {
+			hu["path"] = p
+		}
+		if h := core.Field(in.Settings, "ws_host"); h != "" {
+			hu["host"] = h
+		}
+		stream["httpupgradeSettings"] = hu
+	case "xhttp":
+		stream["network"] = "xhttp"
+		xh := map[string]any{}
+		if p := core.Field(in.Settings, "path"); p != "" {
+			xh["path"] = p
+		}
+		if h := core.Field(in.Settings, "ws_host"); h != "" {
+			xh["host"] = h
+		}
+		if m := core.Field(in.Settings, "xhttp_mode"); m != "" {
+			xh["mode"] = m
+		}
+		stream["xhttpSettings"] = xh
+	case "kcp":
+		stream["network"] = "kcp"
+		k := map[string]any{}
+		if sd := core.Field(in.Settings, "kcp_seed"); sd != "" {
+			k["seed"] = sd
+		}
+		if h := core.Field(in.Settings, "kcp_header"); h != "" {
+			k["header"] = map[string]any{"type": h}
+		}
+		stream["kcpSettings"] = k
+	default:
+		return nil, fmt.Errorf("xray 不支持传输 %q（可选 tcp/ws/grpc/httpupgrade/xhttp/kcp）", tr)
 	}
 	// PROXY protocol：前置了 nginx/haproxy 时需要，3x-ui 的 tcpSettings 会带
 	if core.FieldInt(in.Settings, "accept_proxy_protocol") == 1 {
@@ -196,6 +377,13 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 		}
 		if cp := core.Field(in.Settings, "certificate_path"); cp != "" {
 			ts["certificates"] = []any{map[string]any{"certificateFile": cp, "keyFile": core.Field(in.Settings, "key_path")}}
+		} else if pem := core.Field(in.Settings, "certificate_pem"); pem != "" {
+			// 内联 PEM：xray 直接吃 PEM 文本数组，不需要落盘
+			cert := map[string]any{"certificate": []string{pem}}
+			if kp := core.Field(in.Settings, "key_pem"); kp != "" {
+				cert["key"] = []string{kp}
+			}
+			ts["certificates"] = []any{cert}
 		}
 		stream["tlsSettings"] = ts
 	case "reality":

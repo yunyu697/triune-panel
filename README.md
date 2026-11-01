@@ -590,28 +590,52 @@ frame-ancestors 'none'
 - 单个入站对象（`{"protocol":"vless",...}`）也可以。
 
 导入流程是「解析预览 → 确认导入」两步，预览会逐条列出协议、端口、传输/TLS、用户，
-以及**映射不了的字段**（如 `h2`、`xhttp` 传输会降级为 tcp 并明确提示）。
+以及**每一条改动与映射不了的字段**（例如 sing-box 不支持 kcp 会降级 tcp 并提示）。
 导入的入站一律 `enabled=false`：不点启用就绝不会进内核配置。
+
+支持的协议：`vless` / `vmess` / `trojan` / `shadowsocks` / `socks` / `http` /
+`dokodemo-door`（sing-box 下自动改叫 `direct`）/ `wireguard`（原始参数透传，仅 xray）。
+传输：`tcp` / `ws` / `grpc` / `h2` / `httpupgrade` / `xhttp` / `kcp` / `quic`，
+按目标内核的矩阵落地：
+
+| 传输 | xray | sing-box | 说明 |
+|---|---|---|---|
+| tcp / ws / grpc | ✅ | ✅ | |
+| h2 | ➡️ xhttp | ✅（`type: http`） | Xray 26 已移除独立 h2，导入时转成 xhttp `stream-one` 并提示 |
+| httpupgrade | ✅ | ✅ | |
+| xhttp | ✅ | ❌ 降级 tcp | sing-box 没有 xhttp |
+| kcp | ✅ | ❌ 降级 tcp | |
+| quic | ➡️ xhttp | ✅（必须配 TLS） | Xray 26 同样移除了裸 QUIC |
 
 映射规则（服务端视角，字段落在面板的 `settings` 里）：
 
 | 3x-ui / xray | 面板 |
 |---|---|
-| `streamSettings.network` | `tcp` / `ws`（`path`、`host`→`ws_host`）/ `grpc`（`serviceName`） |
-| `security: tls` | `server_name`、`alpn`、`certificate_path`、`key_path` |
+| `streamSettings.network` | `tcp` / `ws`（`path`、`host`→`ws_host`）/ `grpc`（`serviceName`）/ `h2`、`httpupgrade`、`xhttp`（`path`+`host`+`xhttp_mode`）/ `kcp`（`kcp_seed`、`kcp_header`）/ `quic`（`quic_security`、`quic_key`） |
+| `security: tls` | `server_name`、`alpn`、`certificate_path`、`key_path`；**内联 PEM** 会被写成 `data/certs/imported/…` 下的文件（私钥 0600） |
 | `security: reality` | `handshake_server` + `handshake_port`、`server_names`、`private_key`、`short_ids`（**数组，含空串**）、`spider_x`、`max_time_diff`、`pbk`（公钥，仅供分享） |
 | `settings.clients` | 面板用户：`email`→名称、`id`/`password`→凭据、`totalGB`（字节）→`quota_gb`、`expiryTime`（毫秒）→到期时间、`enable`→启用 |
+| `settings.accounts`（socks/http） | 面板用户，凭据存成 `用户名:密码` |
+| `settings.auth` / `udp` | `account_auth`（`noauth`/`password`）、`udp` |
+| `dokodemo-door` 的 `address`/`port`/`network`/`followRedirect` | `dd_address`、`dd_port`、`dd_network`、`dd_follow_redirect` |
 | `settings.fallbacks` | 原样保留（vless） |
 | `sniffing` / `allocate` | 原样透传（仅 xray 目标内核） |
 | `flow`（客户端级） | 提到入站级 `flow`（面板按入站渲染；多值不同时取第一个并提示） |
 
+整份 xray 配置里的 `dns` 与 `routing` 也会一起导入（每个内核一份，重复导入覆盖）：
+
+- xray 目标：原样注入，DNS 照搬、路由规则追加在统计 API 规则之后；
+- sing-box 目标：转成 `dns` / `route` 结构，只搬能一一对应的部分
+  （`geosite:`/`geoip:` 集合需要 rule-set，会逐条提示未导入）；
+- 指向代理出站的路由规则一律**不搬**——面板只有 `direct` 与 `block` 出站，
+  照搬会把流量绕进不存在的出站，规则会直接失效甚至断网。
+
 Reality 私钥在 3x-ui 的导出里是**有**的（`privateKey`），所以这类导入是完整的；
 只有分享链接才没有私钥——这也是链接不再支持「生成入站」的原因。
 
-**这套导入不覆盖的**（都会在预览里逐条说明，不会静默改配置）：`dokodemo-door` /
-`wireguard` / `tunnel` 协议（面板渲染器不生成）、xray 下的 `socks`/`http` 入站、
-`h2` / `httpupgrade` / `xhttp` / `splithttp` / `kcp` / `quic` 传输（降级为 tcp）、
-内联 PEM 证书（只支持文件路径）、以及 3x-ui 的 DNS 与路由规则（面板没有路由编辑器）。
+**仍然不覆盖的**（预览里逐条说明）：`tunnel` 之外的其它 xray 扩展协议、
+mihomo 内核的 DNS/路由（结构完全不同，请手工配）、
+`tlsSettings` 里的 `ech`/`ocspStapling` 等冷门开关。
 
 ### 分享链接 → 外部节点（只做订阅聚合）
 

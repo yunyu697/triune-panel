@@ -23,6 +23,10 @@ type InboundWithClients struct {
 type RenderOpts struct {
 	StatsEnabled bool   // 是否注入流量统计配置
 	StatsSecret  string // 统计 API 鉴权密钥
+	// DNSJSON / RouteJSON 是「随入站一起导入的全局段」，内核原生 JSON。
+	// 空字符串表示没有导入过，渲染时保持面板默认（不写 dns / route）。
+	DNSJSON   string
+	RouteJSON string
 }
 
 // Core 内核适配器接口。

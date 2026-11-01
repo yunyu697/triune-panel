@@ -34,9 +34,18 @@ func ListenOrAll(l string) string {
 // sing-box 对未知字段是严格校验的，多余顶层键会导致配置校验失败。
 var ManagedSettingsKeys = []string{
 	"path", "service_name", "server_name", "server_names", "certificate_path", "key_path",
+	"certificate_pem", "key_pem",
 	"handshake_server", "handshake_port", "private_key", "short_id", "short_ids",
 	"spider_x", "max_time_diff", "alpn", "ws_host", "ss_network", "accept_proxy_protocol",
 	"method", "flow", "pbk", "fallbacks",
+	// socks / http
+	"account_auth", "udp",
+	// dokodemo-door（端口转发）
+	"dd_address", "dd_port", "dd_network", "dd_follow_redirect",
+	// 新增传输的附加参数
+	"xhttp_mode", "kcp_seed", "kcp_header", "quic_security", "quic_key", "quic_header",
+	// WireGuard 的原始 settings（渲染时整体替换 settings 段）
+	"xray_raw_settings",
 	// sniffing / allocate 刻意**不在此列**：它们是 xray 的入站顶层字段，
 	// 由渲染器原样透传；列进来会被 StripManagedKeys 删掉。
 }
@@ -179,6 +188,20 @@ func anyToInt(v any) int {
 		}
 	}
 	return 0
+}
+
+// SplitUserPass 解析 socks / http 的用户凭据。
+// 面板把这对值存成 "user:pass"（导出的 xray 配置就是这种形态）；
+// 没有冒号时按「用户名取用户名称、密码取凭据」处理，
+// 这样手填的 socks 用户（名称 u1 + 凭据 p1）也能得到 u1/p1。
+func SplitUserPass(cred, name string) (user, pass string) {
+	if i := strings.Index(cred, ":"); i > 0 {
+		return cred[:i], cred[i+1:]
+	}
+	if name == "" {
+		name = "user"
+	}
+	return name, cred
 }
 
 func itoa(n int64) string {
