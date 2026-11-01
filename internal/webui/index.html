@@ -210,6 +210,11 @@ body[data-role="admin"] .need-owner{display:none!important}
 .card h3{font-size:15px;font-weight:650;margin-bottom:15px;display:flex;align-items:center;gap:9px;letter-spacing:.2px}
 .card h3 .spacer{flex:1}
 .card h3 .hint{font-size:11.5px;font-weight:400;color:var(--muted)}
+/* 设置页分组条 */
+.set-tabs{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+.set-tabs[hidden]{display:none}
+.set-tabs-hint{font-size:12.5px}
+.card[hidden]{display:none}
 /* 卡片底部操作条：把「保存」这类按钮和上方的说明文字隔开 */
 .card-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
   margin:16px -22px -20px;padding:12px 22px;border-top:1px solid var(--line);
@@ -911,8 +916,18 @@ canvas{display:block;width:100%}
 
     <!-- 设置 -->
     <section id="v-settings" class="view">
+      <!-- 分组：整页十张卡片一屏放不下，按「改什么」切成三组，
+           进来先看常用，其余各归其位。选中的分组记在 localStorage。 -->
+      <div class="set-tabs">
+        <div class="seg" id="set_sect_seg">
+          <button type="button" data-sect="common" class="on">常用</button>
+          <button type="button" data-sect="security">安全</button>
+          <button type="button" data-sect="maintain">运维</button>
+        </div>
+        <span class="muted set-tabs-hint" id="set_sect_hint"></span>
+      </div>
       <!-- 我的账号：所有角色都能看（只读账号进设置页只会看到这一张卡） -->
-      <div class="card">
+      <div class="card" data-sect="security">
         <h3>我的账号<span class="spacer"></span><span class="badge b-idle" id="me_role_badge">—</span></h3>
         <div class="frm">
           <div><label>用户名</label><input id="me_user" class="input" disabled></div>
@@ -926,7 +941,7 @@ canvas{display:block;width:100%}
       </div>
 
       <!-- 登录设备：所有角色都能看，服务端按角色过滤（只读账号只返回自己的会话） -->
-      <div class="card">
+      <div class="card" data-sect="security">
         <h3>登录设备<span class="spacer"></span>
           <span class="muted" style="font-weight:400;font-size:12px" id="sess_count"></span>
           <button class="btn sm" onclick="loadSessions()">刷新</button>
@@ -947,7 +962,7 @@ canvas{display:block;width:100%}
       </div>
 
       <!-- 登录历史：会话表只回答「现在谁还连着」，过去只能翻审计 -->
-      <div class="card">
+      <div class="card" data-sect="security">
         <h3>登录历史<span class="spacer"></span>
           <select id="lh_days" class="input" style="width:120px" onchange="loadLoginHistory()">
             <option value="7">近 7 天</option>
@@ -968,7 +983,7 @@ canvas{display:block;width:100%}
       </div>
 
       <div class="need-admin">
-      <div class="card" id="set_card_basic">
+      <div class="card" id="set_card_basic" data-sect="common">
         <h3>基础设置</h3>
         <div class="frm">
           <div><label>sing-box 二进制路径</label><input id="s_binsingbox" class="input"></div>
@@ -1005,7 +1020,7 @@ canvas{display:block;width:100%}
         <p class="muted" style="margin:0">仅管理本机防火墙，云厂商安全组需在控制台另行放行。iptables 规则重启后不保留，ufw / firewalld 会持久化。</p>
         <div class="card-actions"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
-      <div class="card" id="set_card_notify">
+      <div class="card" id="set_card_notify" data-sect="common">
         <h3>变更通知<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px" id="nt_state"></span></h3>
         <p class="muted" style="margin:0 0 12px">
           改配置时推一条摘要出去：谁、什么时候、改了什么，设置项带<b>字段级 diff</b>（从什么改成什么）。
@@ -1027,7 +1042,7 @@ canvas{display:block;width:100%}
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" data-sect="maintain">
         <h3>ACME 证书（Let's Encrypt · HTTP-01）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
         <div class="frm">
           <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="panel.example.com"></div>
@@ -1043,7 +1058,7 @@ canvas{display:block;width:100%}
         </div>
         <pre class="log hide" id="certinfo" style="margin-top:12px"></pre>
       </div>
-      <div class="card">
+      <div class="card" data-sect="security">
         <h3>登录二次验证（2FA）<span class="spacer"></span><span class="hint" id="fa_mode"></span></h3>
         <p class="muted" style="margin-bottom:12px">在账号密码之外追加一道验证。开启后登录需输入第二步凭据，验证失败同样计入防爆破锁定。两种方式二选一。</p>
         <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
@@ -1084,7 +1099,7 @@ canvas{display:block;width:100%}
           <button class="btn danger sm hide" id="fa_off" onclick="faDisable()">关闭二次验证</button>
         </div>
       </div>
-      <div class="card">
+      <div class="card" data-sect="maintain">
         <h3>面板自更新</h3>
         <p class="muted" style="margin-bottom:12px">当前版本 <b id="curver"></b>。更新流程：下载 → 可执行验证 → sha256 校验 → 备份旧文件 → 原子替换 → 无缝重启，数据与配置不受影响。</p>
         <div class="frm">
@@ -1095,7 +1110,7 @@ canvas{display:block;width:100%}
         <span class="spacer"></span>
         <button class="btn" onclick="loadPanelBackups()">查看历史备份</button>
       </div>
-      <div class="card" id="set_card_update">
+      <div class="card" id="set_card_update" data-sect="maintain">
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
         <div class="tbl-wrap"><table>
@@ -1122,7 +1137,7 @@ canvas{display:block;width:100%}
       </div>
 
       <!-- 管理员账号：只有超级管理员可见（服务端同样只允许 owner 调用） -->
-      <div class="card need-owner">
+      <div class="card need-owner" data-sect="security">
         <h3>管理员账号<span class="spacer"></span>
           <span class="muted" style="font-weight:400;font-size:12px">角色：超级管理员 &gt; 管理员 &gt; 只读</span>
         </h3>
@@ -3884,7 +3899,7 @@ function goto(v) {
   if (v === "overview") setTimeout(loadOverview, 30);
   if (v === "audit") loadAudit();
   if (v === "configs") loadSavedConfigs();
-  if (v === "settings") setTimeout(updateSetBar, 30);
+  if (v === "settings") setTimeout(setSectSaved, 30);
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -8787,6 +8802,74 @@ const SET_BAR_SECTIONS = [
 ];
 let setBarCur = null;
 
+/* ---- 设置页分组 ----
+   整页十张卡片一屏放不下：常用（基础设置 / 通知）、安全（人、密码、登录）、
+   运维（证书与更新）。切换只动 [data-sect] 卡片的 hidden，不动数据。 */
+const SET_SECTS = {
+  common:   "内核路径、节点公开地址、统计与通知",
+  security: "账号密码、二次验证、登录设备与管理员",
+  maintain: "HTTPS 证书、面板自更新、内核版本管理",
+};
+const SET_SECT_ORDER = ["common", "security", "maintain"];
+let setSectCur = "common";   // 当前分组，角色变化后要按新权限重算一遍
+
+/* 当前角色下，每组还剩几张能显示的卡片。
+   先把卡片全显出来再量 offsetParent：.need-admin / .need-owner 是用
+   display:none!important 藏父级的，卡片自身的 hidden 仍是 false，
+   只有 offsetParent 能反映「真的看不到」。 */
+function setSectUsable(cards) {
+  const was = cards.map(el => el.hidden);
+  cards.forEach(el => { el.hidden = false; });
+  const usable = new Set();
+  cards.forEach(el => { if (el.offsetParent !== null) usable.add(el.dataset.sect); });
+  cards.forEach((el, i) => { el.hidden = was[i]; });
+  return usable;
+}
+
+// persist 只在「用户自己点的」时候为真；按存储恢复、角色变化后的重算都不写，
+// 否则只读账号被顶到「安全」会把 owner 存的「运维」冲掉。
+function setSect(name, persist = true) {
+  const cards = [...document.querySelectorAll("#v-settings .card[data-sect]")];
+  const usable = setSectUsable(cards);
+  // 上次存的那组在这个角色下可能是空的（只读账号没有「常用」「运维」），
+  // 退回第一个有内容的组，否则进设置页会是白板。
+  let pick = SET_SECTS[name] ? name : "common";
+  if (!usable.has(pick)) pick = SET_SECT_ORDER.find(s => usable.has(s)) || pick;
+  setSectCur = pick;
+  cards.forEach(el => { el.hidden = el.dataset.sect !== pick; });
+
+  document.querySelectorAll("#set_sect_seg button").forEach(b => {
+    const ok = usable.has(b.dataset.sect);
+    b.classList.toggle("on", b.dataset.sect === pick);
+    b.disabled = !ok;
+    b.title = ok ? "" : "当前角色没有可修改的项";
+  });
+  // 只剩一组时分组条没意义（只读账号只看得到「安全」），整条收起来
+  const tabs = document.querySelector("#v-settings .set-tabs");
+  if (tabs) tabs.hidden = usable.size <= 1;
+
+  const hint = $("set_sect_hint");
+  if (hint) hint.textContent = SET_SECTS[pick];
+  // 只在「要的那组真的要到了」时才记住。因权限被顶到别的组时（只读账号
+  // 被顶到「安全」）不写，否则会把用户自己的选择盖掉。
+  if (persist && pick === name) {
+    try { localStorage.setItem("triune_settings_sect", pick); } catch (e) { /* 隐私模式 */ }
+  }
+  setBarCur = null;   // 分组变了，常驻保存条要重新判定该显示哪一块
+  updateSetBar();
+}
+/* 按记住的分组显示，不写回存储 */
+function setSectSaved() {
+  let want = "common";
+  try { want = localStorage.getItem("triune_settings_sect") || "common"; } catch (e) { /* 隐私模式 */ }
+  setSect(want, false);
+}
+const setSectSeg = $("set_sect_seg");
+if (setSectSeg) setSectSeg.addEventListener("click", e => {
+  const b = e.target.closest("button[data-sect]");
+  if (b) setSect(b.dataset.sect, true);
+});
+
 function updateSetBar() {
   const bar = $("set_bar");
   if (!bar) return;
@@ -8796,7 +8879,10 @@ function updateSetBar() {
   let cur = null;
   for (const s of SET_BAR_SECTIONS) {
     const el = $(s.id);
-    if (el && el.getBoundingClientRect().top <= line) cur = s;
+    // 看不见的卡片不参与判定：被分组隐藏的、以及被权限藏起来的，
+    // rect 全是 0，会被误判成「已滚过」，结果给只读账号递了个「保存设置」。
+    if (!el || !el.offsetParent) continue;
+    if (el.getBoundingClientRect().top <= line) cur = s;
   }
   // 还没滚到任何「有保存按钮」的分区（比如停在「我的账号」）就收起来，
   // 免得显示一个跟眼前内容无关的保存按钮。
@@ -8852,6 +8938,9 @@ function applyRole() {
   if (u) u.textContent = ME.user || "—";
   if (r) { r.textContent = ROLE_LABEL[ROLE] || ROLE || ""; r.className = "whoami-role " + (ROLE || ""); }
   renderNav();
+  // 角色变了，可用的分组也跟着变（只读账号没有「常用」「运维」），
+  // 停在设置页时得按新权限重挑一次，否则会停在刚被禁用的那组。
+  if (CURRENT === "settings") setSectSaved();
 }
 
 async function loadAdmins() {
