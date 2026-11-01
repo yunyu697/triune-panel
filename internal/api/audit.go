@@ -43,6 +43,8 @@ const (
 	AuditAdmin         = "admin"          // 管理员账号增删改
 	AuditSession       = "session.revoke" // 吊销登录会话（踢设备）
 	AuditDeny          = "rbac.deny"      // 越权访问被拒
+	AuditConfig        = "config"         // 保存 / 覆盖 / 下载 / 删除客户端配置
+	AuditTag           = "tag"            // 自定义规则标签增删改
 )
 
 // audit 记录一条审计，操作人取自当前登录账号（匿名请求为空）。

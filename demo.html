@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v0.9.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v0.10.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -324,6 +324,23 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
   padding:6px 14px;border-radius:7px;transition:all var(--t-fast);white-space:nowrap}
 .seg button:hover{color:var(--text)}
 .seg button.on{background:var(--card);color:var(--acc-text);font-weight:600;box-shadow:var(--shadow-sm)}
+
+/* ============ 规则标签 ============ */
+/* 标签是「点一下就套用」的东西，所以整块可点、状态要一眼看得出来：
+   选中态用主色描边 + 浅底，与 .seg 的选中观感保持一致。 */
+.tag-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;
+  padding-top:10px;border-top:1px dashed var(--line)}
+.tag-list{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:180px}
+.tag-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;
+  border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:12.5px;
+  cursor:pointer;transition:var(--t-fast);user-select:none;line-height:1.5}
+.tag-chip:hover{border-color:var(--acc);color:var(--acc-text);background:var(--hover)}
+.tag-chip.on{background:var(--acc-soft);border-color:var(--acc);color:var(--acc-text);font-weight:600}
+.tag-chip .n{font-size:11px;opacity:.65;font-weight:400}
+.tag-chip .x{font-size:14px;line-height:1;opacity:.45;padding:0 1px}
+.tag-chip .x:hover{opacity:1;color:var(--err)}
+.tag-empty{font-size:12.5px;color:var(--muted)}
+.seg.sm button{padding:3px 9px;font-size:12px}
 
 /* ============ 表格 ============ */
 .tbl-wrap{overflow-x:auto;margin:0 -4px;border-radius:var(--r)}
@@ -722,6 +739,15 @@ canvas{display:block;width:100%}
         类型：DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、IP-CIDR6、GEOSITE、GEOIP。<br>
         示例：<code>DOMAIN-SUFFIX,example.com,DIRECT</code>、<code>IP-CIDR,1.2.3.0/24,PROXY</code>、<code>GEOSITE,bilibili,DIRECT</code></p>
         <textarea id="gen_rules" class="input mono" style="min-height:96px" placeholder="DOMAIN-SUFFIX,corp.example.com,DIRECT&#10;DOMAIN-KEYWORD,baidu,DIRECT"></textarea>
+        <div class="tag-bar">
+          <span class="muted" style="font-size:12.5px;white-space:nowrap">规则标签</span>
+          <div id="gen_tags" class="tag-list"></div>
+          <div class="seg sm" id="tag_mode_seg" title="单选：点标签替换输入框内容；多选：逐个追加，再点一次取消">
+            <button data-v="single" class="on">单选</button>
+            <button data-v="multi">多选</button>
+          </div>
+          <button class="btn sm" onclick="openSaveTag()">存为标签</button>
+        </div>
       </div>
 
       <div class="card">
@@ -737,11 +763,33 @@ canvas{display:block;width:100%}
           <button class="btn" id="gen_dl" onclick="genDownload()" disabled>下载文件</button>
           <button class="btn" id="gen_verify" onclick="genVerify()" disabled
                   title="用面板上装的内核跑一次官方 check，验证这份配置能不能被加载">用本机内核校验</button>
+          <button class="btn" id="gen_save" onclick="openSaveConfig()" disabled
+                  title="保存到「配置管理」，随时可以再下载">保存配置</button>
           <span class="muted" id="gen_fn"></span>
         </div>
         <p class="muted hide" id="gen_vres" style="font-size:12.5px;margin:10px 0 0"></p>
         <p class="muted hide" id="gen_check" style="font-size:12.5px;margin:6px 0 0"></p>
         <pre class="log hide" id="gen_out" style="max-height:360px;overflow:auto;margin-top:12px"></pre>
+      </div>
+    </section>
+
+    <!-- 配置管理 -->
+    <section id="v-configs" class="view">
+      <div class="card">
+        <h3>已保存的配置<span class="spacer"></span>
+          <input id="cfg_search" class="input" style="width:200px;padding:5px 10px;font-size:12.5px"
+                 placeholder="搜索名称 / 备注…" oninput="renderSavedConfigs()">
+          <button class="btn sm" onclick="loadSavedConfigs()">刷新</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">保存时会把<b>生成参数</b>一并记下，节点或用户变了可以点「重新生成」拿到新版，
+          再决定覆盖还是另存。配置里含节点凭据，只读账号看不到这一页。</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr>
+            <th>名称</th><th>内核</th><th>目标</th><th>大小</th><th>保存人</th><th>更新时间</th><th class="ta-r">操作</th>
+          </tr></thead>
+          <tbody id="cfgbody"></tbody>
+        </table></div>
+        <p class="muted" id="cfg_count" style="font-size:12.5px;margin-top:10px"></p>
       </div>
     </section>
 
@@ -1073,6 +1121,42 @@ canvas{display:block;width:100%}
     <div class="foot">
       <button class="btn" onclick="closeModal('mClient')">取消</button>
       <button class="btn primary" onclick="saveClient()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 保存 / 重命名 配置 -->
+<div class="overlay" id="mSaveCfg" onclick="if(event.target===this)closeModal('mSaveCfg')">
+  <div class="modal" style="max-width:480px">
+    <h3 id="sc_title">保存配置</h3>
+    <div class="frm">
+      <div class="full"><label>名称</label>
+        <input id="sc_name" class="input" placeholder="例如：家宽-主路由" maxlength="64"></div>
+      <div class="full"><label>备注 <span class="muted" style="font-weight:400">（可选）</span></label>
+        <input id="sc_note" class="input" placeholder="例如：改端口前的备份"></div>
+    </div>
+    <p class="muted" id="sc_meta" style="font-size:12.5px;margin-top:10px"></p>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mSaveCfg')">取消</button>
+      <button class="btn primary" id="sc_ok" onclick="submitSaveConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 存为规则标签 -->
+<div class="overlay" id="mSaveTag" onclick="if(event.target===this)closeModal('mSaveTag')">
+  <div class="modal" style="max-width:480px">
+    <h3>存为规则标签</h3>
+    <div class="frm">
+      <div class="full"><label>标签名称</label>
+        <input id="st_name" class="input" placeholder="例如：公司内网" maxlength="32"></div>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:10px">
+      会把输入框里的规则<b>去重后</b>存成可复用的标签，下次点一下就能套用。</p>
+    <p class="muted" id="st_meta" style="font-size:12.5px;margin-top:6px"></p>
+    <div class="foot">
+      <button class="btn" onclick="closeModal('mSaveTag')">取消</button>
+      <button class="btn primary" onclick="saveRuleTag()">保存</button>
     </div>
   </div>
 </div>
@@ -3630,6 +3714,7 @@ const ICONS = {
   traffic:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   apply:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  configs:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   audit:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/>'
 };
@@ -3640,6 +3725,7 @@ const VIEWS = [
   ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
   ["import","导入链接","配置","反向解析订阅链接为节点或入站"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
+  ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
   ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
   ["settings","设置","系统","内核路径、证书、版本管理与主题"],
   ["audit","审计","系统","登录、配置变更与关键操作留痕"]
@@ -3686,6 +3772,7 @@ function goto(v) {
   loadAll();
   if (v === "overview") setTimeout(loadOverview, 30);
   if (v === "audit") loadAudit();
+  if (v === "configs") loadSavedConfigs();
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -3768,6 +3855,26 @@ if (DEMO) {
   }));
   MDB = {
     version:"v0.8.9-demo",
+    // 演示用的规则标签与已保存配置：让「点标签套用」「保存后下载」这条链路
+    // 在离线演示页里也能完整走一遍
+    ruleTags:[
+      {id:1,name:"公司内网",count:3,created_at:"2026-10-28 14:12:00",
+       rules:"DOMAIN-SUFFIX,corp.example.com,DIRECT\nIP-CIDR,10.0.0.0/8,DIRECT\nIP-CIDR,172.16.0.0/12,DIRECT"},
+      {id:2,name:"广告拦截",count:3,created_at:"2026-10-28 14:20:00",
+       rules:"DOMAIN-KEYWORD,doubleclick,REJECT\nDOMAIN-SUFFIX,googlesyndication.com,REJECT\nDOMAIN-SUFFIX,adservice.google.com,REJECT"},
+      {id:3,name:"国内直连",count:2,created_at:"2026-10-29 09:05:00",
+       rules:"DOMAIN-SUFFIX,cn,DIRECT\nGEOSITE,bilibili,DIRECT"}
+    ],
+    savedConfigs:[
+      {id:2,name:"主路由-singbox1.14",note:"改端口前的备份",core:"singbox",core_version:"1.14",
+       target:"main-router",scenario:"balanced",size:3184,hash:"d3m0b2",created_by:"admin",
+       params:'{"core":"singbox","core_version":"1.14","target":"main-router","inbound_ids":[1,2],"scenario":"balanced"}',
+       created_at:"2026-10-30 21:40:00",updated_at:"2026-10-30 21:40:00"},
+      {id:1,name:"家里电视-mihomo",note:"",core:"mihomo",core_version:"",
+       target:"side-router",scenario:"media",size:2015,hash:"d3m0b1",created_by:"admin",
+       params:'{"core":"mihomo","target":"side-router","inbound_ids":[1],"scenario":"media"}',
+       created_at:"2026-10-27 18:02:00",updated_at:"2026-10-27 18:02:00"}
+    ],
     inbounds:[
       {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
       {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
@@ -5960,6 +6067,7 @@ async function loadGen() {
   genTargetNote();
   renderSBVerSelect();
   syncSBVerVisibility();
+  await loadRuleTags();
 }
 
 function renderScenarios() {
@@ -6090,6 +6198,7 @@ function onSBVerChange() {
   genResult = null;
   $("gen_dl").disabled = true;
   $("gen_verify").disabled = true;
+  $("gen_save").disabled = true;
   $("gen_out").classList.add("hide");
   $("gen_vres").classList.add("hide");
   $("gen_check").classList.add("hide");
@@ -6128,20 +6237,31 @@ function addCustomSetRow(name, url, beh, pol) {
   $("gen_csets").appendChild(d);
 }
 let genLast = null, genLastCore = "singbox";
-async function genGenerate() {
-  const core = genCore, target = genTarget;
+
+/* buildGenParams 把当前页面上的全部选项收成一个请求体。
+   保存配置时原样存进 params，重新生成时原样发回去——所以「一周后想再生成
+   同一份」不用凭记忆把入站、规则集、场景重选一遍。 */
+function buildGenParams() {
   const ids = [...document.querySelectorAll("#gen_inbounds input:checked")].map(i => +i.value);
-  if (!ids.length) { toast("请至少选择一个入站", "warn"); return; }
-  const sets = Object.keys(genChecked).filter(k => genChecked[k]).map(id => ({ id, policy: genPolicies[id] || "PROXY" }));
-  const custom_rules = $("gen_rules").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const sets = Object.keys(genChecked).filter(k => genChecked[k])
+    .map(id => ({ id, policy: genPolicies[id] || "PROXY" }));
+  const custom_rules = dedupeRules($("gen_rules").value);
   const custom_sets = [...document.querySelectorAll("#gen_csets .cset-row")].map(r => ({
     name: r.querySelector(".cs-name").value.trim(),
     url: r.querySelector(".cs-url").value.trim(),
     behavior: r.querySelector(".cs-beh").value,
     policy: r.querySelector(".cs-pol").value
   })).filter(s => s.name && s.url);
-  const body = { core, target, inbound_ids: ids, scenario: genScenario || "custom", sets, custom_rules, custom_sets };
-  if (core === "singbox") body.core_version = genSBVer;
+  const body = { core: genCore, target: genTarget, inbound_ids: ids,
+    scenario: genScenario || "custom", sets, custom_rules, custom_sets };
+  if (genCore === "singbox") body.core_version = genSBVer;
+  return body;
+}
+
+async function genGenerate() {
+  const core = genCore, target = genTarget;
+  const body = buildGenParams();
+  if (!body.inbound_ids.length) { toast("请至少选择一个入站", "warn"); return; }
   toast("生成中…", "info");
   try {
     let j;
@@ -6164,6 +6284,7 @@ async function genGenerate() {
     $("gen_fn").textContent = j.filename;
     $("gen_dl").disabled = false;
     $("gen_verify").disabled = false;
+    $("gen_save").disabled = false;
     // 新配置还没校验过，先清掉上一次的结论，避免张冠李戴
     $("gen_check").classList.add("hide");
     // 版本信息常驻显示，不塞进 toast：用户可能几分钟后才去复制配置，
@@ -6310,6 +6431,360 @@ rules:
     ],
     route
   }, null, 2);
+}
+
+/* ================= 规则标签 ================= */
+//
+// 标签解决的是「同一组规则每次都要重敲一遍」。两种用法：
+//   单选：点标签 → 输入框**替换**成该标签内容（换一组规则用）
+//   多选：点标签 → **追加**到现有内容后（去重），再点一次取消该标签
+//
+// 取消时只移除「该标签独有」的行：如果两行也属于其他已选标签，保留。
+// 手写行若恰好与标签行相同，取消会一并移除——去重后本来就只有一份，
+// 没法区分来源，这一点在标签栏的 title 里写明了。
+
+let RULE_TAGS = [], tagMode = "single", tagActive = new Set();
+
+// dedupeRules 去空行、去首尾空白、去重（保留首次出现的顺序）。
+// 内核不会因为重复行报错，只会白跑一遍匹配，所以在这里就清掉。
+//
+// 入参既接受多行文本也接受数组：applyTag 里会把「已有行」和「标签行」两个
+// 数组合并后再过一遍。注意不能一律 String()——数组会被转成逗号连接的一行，
+// 结果所有规则挤成一条，内核解析不了还不报错。
+function dedupeRules(input) {
+  const lines = Array.isArray(input) ? input : String(input || "").split("\n");
+  const seen = new Set(), out = [];
+  for (const raw of lines) {
+    const s = String(raw).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s); out.push(s);
+  }
+  return out;
+}
+function setRules(lines) { $("gen_rules").value = lines.join("\n"); }
+
+async function loadRuleTags() {
+  try {
+    RULE_TAGS = DEMO ? MDB.ruleTags : await req("/api/rule-tags");
+  } catch(e) { RULE_TAGS = []; }
+  if (!Array.isArray(RULE_TAGS)) RULE_TAGS = [];
+  renderRuleTags();
+}
+
+function renderRuleTags() {
+  const el = $("gen_tags");
+  if (!el) return;
+  if (!RULE_TAGS.length) {
+    el.innerHTML = `<span class="tag-empty">还没有标签，把常用规则存下来下次直接用</span>`;
+    return;
+  }
+  el.innerHTML = RULE_TAGS.map(t => {
+    const on = tagActive.has(t.id);
+    return `<span class="tag-chip${on ? " on" : ""}" onclick="applyTag(${t.id})"
+      title="${escHtml(t.rules)}">
+      <span>${escHtml(t.name)}</span><span class="n">${t.count}</span>
+      <span class="x" onclick="deleteTag(event,${t.id})" title="删除这个标签">×</span></span>`;
+  }).join("");
+}
+
+function applyTag(id) {
+  const t = RULE_TAGS.find(x => x.id === id);
+  if (!t) return;
+  const tagLines = dedupeRules(t.rules);
+  const cur = dedupeRules($("gen_rules").value);
+
+  if (tagMode === "single") {
+    // 单选：替换。点谁就是谁，不 toggle——想换就点另一个。
+    setRules(tagLines);
+    tagActive = new Set([id]);
+  } else if (tagActive.has(id)) {
+    tagActive.delete(id);
+    // 其他已选标签也含这些行时不能删
+    const keep = new Set();
+    tagActive.forEach(a => {
+      const o = RULE_TAGS.find(x => x.id === a);
+      if (o) dedupeRules(o.rules).forEach(l => keep.add(l));
+    });
+    const drop = new Set(tagLines);
+    setRules(cur.filter(l => !drop.has(l) || keep.has(l)));
+  } else {
+    tagActive.add(id);
+    setRules(dedupeRules(cur.concat(tagLines)));
+  }
+  renderRuleTags();
+}
+
+async function deleteTag(ev, id) {
+  ev.stopPropagation();
+  const t = RULE_TAGS.find(x => x.id === id);
+  if (!t) return;
+  if (!await ask("删除标签", `确定删除「${t.name}」？已经生成的配置不受影响。`)) return;
+  try {
+    if (DEMO) MDB.ruleTags = MDB.ruleTags.filter(x => x.id !== id);
+    else await req("/api/rule-tags/" + id, { method: "DELETE" });
+    tagActive.delete(id);
+    toast("已删除标签「" + t.name + "」");
+    await loadRuleTags();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+function openSaveTag() {
+  const lines = dedupeRules($("gen_rules").value);
+  if (!lines.length) { toast("输入框里还没有规则", "warn"); return; }
+  $("st_name").value = "";
+  $("st_meta").textContent = `将保存 ${lines.length} 条规则（重复行已去掉）`;
+  openModal("mSaveTag");
+  setTimeout(() => $("st_name").focus(), 80);
+}
+
+async function saveRuleTag() {
+  const name = $("st_name").value.trim();
+  if (!name) { toast("请输入标签名称", "warn"); return; }
+  const rules = dedupeRules($("gen_rules").value).join("\n");
+  if (!rules) { toast("输入框里还没有规则", "warn"); return; }
+  try {
+    if (DEMO) {
+      if (MDB.ruleTags.some(t => t.name === name)) throw new Error("同名标签已存在");
+      MDB.ruleTags.push({ id: Math.max(0, ...MDB.ruleTags.map(t => t.id)) + 1,
+        name, rules, count: rules.split("\n").length, created_at: "2026-11-01 10:00:00" });
+    } else {
+      await req("/api/rule-tags", { method: "POST", body: { name, rules } });
+    }
+    closeModal("mSaveTag");
+    toast("标签「" + name + "」已保存");
+    await loadRuleTags();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+if ($("tag_mode_seg")) {
+  $("tag_mode_seg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    tagMode = b.dataset.v;
+    [...$("tag_mode_seg").children].forEach(x => x.classList.toggle("on", x === b));
+    if (tagMode === "single") { tagActive.clear(); renderRuleTags(); }
+  });
+}
+
+/* ================= 配置管理 ================= */
+
+const TARGET_LABEL = { client: "客户端", "main-router": "主路由", "side-router": "旁路由" };
+let SAVED_CFGS = [];
+
+function saveBlob(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+async function loadSavedConfigs() {
+  try {
+    SAVED_CFGS = DEMO ? MDB.savedConfigs : await req("/api/configs");
+  } catch(e) { SAVED_CFGS = []; }
+  if (!Array.isArray(SAVED_CFGS)) SAVED_CFGS = [];
+  renderSavedConfigs();
+}
+
+function renderSavedConfigs() {
+  const q = ($("cfg_search").value || "").trim().toLowerCase();
+  const list = SAVED_CFGS.filter(c => !q ||
+    (c.name || "").toLowerCase().includes(q) || (c.note || "").toLowerCase().includes(q));
+  $("cfgbody").innerHTML = list.map(c => {
+    const kern = c.core === "singbox"
+      ? "sing-box" + (c.core_version ? " " + escHtml(c.core_version) : "")
+      : "mihomo";
+    return `<tr>
+      <td><b>${escHtml(c.name)}</b>${c.note ? `<div class="muted" style="font-size:12px">${escHtml(c.note)}</div>` : ""}</td>
+      <td>${kern}</td>
+      <td>${escHtml(TARGET_LABEL[c.target] || c.target || "—")}</td>
+      <td class="mono">${fmtBytes(c.size)}</td>
+      <td>${escHtml(c.created_by || "—")}</td>
+      <td class="muted">${escHtml(c.updated_at || c.created_at || "")}</td>
+      <td class="ta-r">
+        <button class="btn sm" onclick="downloadConfig(${c.id})">下载</button>
+        <button class="btn sm" onclick="regenerateConfig(${c.id})"
+                title="用保存时的参数重新生成，节点变了也不用重新点一遍">重新生成</button>
+        <button class="btn sm" onclick="editConfig(${c.id})">改名</button>
+        <button class="btn sm danger" onclick="deleteConfig(${c.id})">删除</button>
+      </td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="empty">还没有保存的配置。到「配置生成」页生成后点「保存配置」。</td></tr>`;
+
+  $("cfg_count").textContent = SAVED_CFGS.length
+    ? `共 ${SAVED_CFGS.length} 份${q ? `，匹配 ${list.length} 份` : ""}（上限 200 份）`
+    : "";
+}
+
+async function downloadConfig(id) {
+  const c = SAVED_CFGS.find(x => x.id === id);
+  if (!c) return;
+  const ext = c.core === "mihomo" ? "yaml" : "json";
+  try {
+    if (DEMO) {
+      saveBlob(new Blob([demoGenConfig(c.core, c.target, c.core_version)], { type: "text/plain" }),
+        `${c.name}.${ext}`);
+      toast("已开始下载 " + c.name + "." + ext);
+      return;
+    }
+    // 下载接口要带 Bearer，不能直接 location.href（那样会 401 到登录页）
+    const r = await fetch(`/api/configs/${id}/download`, {
+      headers: { Authorization: "Bearer " + TOKEN }
+    });
+    if (!r.ok) {
+      let msg = "下载失败（" + r.status + "）";
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch(_) {}
+      throw new Error(msg);
+    }
+    saveBlob(await r.blob(), `${c.name}.${ext}`);
+    toast("已开始下载 " + c.name + "." + ext);
+  } catch(e){ toast(e.message, "err"); }
+}
+
+async function deleteConfig(id) {
+  const c = SAVED_CFGS.find(x => x.id === id);
+  if (!c) return;
+  if (!await ask("删除配置", `确定删除「${c.name}」？删除后无法恢复。`)) return;
+  try {
+    if (DEMO) MDB.savedConfigs = MDB.savedConfigs.filter(x => x.id !== id);
+    else await req("/api/configs/" + id, { method: "DELETE" });
+    toast("已删除「" + c.name + "」");
+    await loadSavedConfigs();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+function editConfig(id) {
+  const c = SAVED_CFGS.find(x => x.id === id);
+  if (!c) return;
+  $("mSaveCfg").dataset.editId = String(id);
+  $("sc_title").textContent = "重命名配置";
+  $("sc_ok").textContent = "保存";
+  $("sc_name").value = c.name;
+  $("sc_note").value = c.note || "";
+  $("sc_meta").textContent = `${c.core === "singbox" ? "sing-box " + (c.core_version || "") : "mihomo"} · ` +
+    `${TARGET_LABEL[c.target] || c.target || "—"} · ${fmtBytes(c.size)} · 保存于 ${c.created_at || ""}`;
+  openModal("mSaveCfg");
+  setTimeout(() => { $("sc_name").focus(); $("sc_name").select(); }, 80);
+}
+
+/* regenerateConfig 用保存时的参数重跑一遍生成。
+   节点/用户可能已经变了，所以结果未必和存的那份一样——先比，再让用户决定
+   覆盖还是放弃，而不是悄悄改掉他几个月前存的东西。 */
+async function regenerateConfig(id) {
+  const c = SAVED_CFGS.find(x => x.id === id);
+  if (!c) return;
+  let params;
+  try { params = JSON.parse(c.params || "{}"); } catch(_) { params = null; }
+  if (!params || !Array.isArray(params.inbound_ids) || !params.inbound_ids.length) {
+    toast("这份配置没留下可用的生成参数，无法重新生成", "err");
+    return;
+  }
+  toast("重新生成中…", "info");
+  try {
+    let old, fresh;
+    if (DEMO) {
+      await new Promise(r => setTimeout(r, 500));
+      old = { content: demoGenConfig(c.core, c.target, c.core_version) };
+      fresh = { content: demoGenConfig(c.core, c.target, c.core_version) };
+    } else {
+      old = await req("/api/configs/" + id);
+      fresh = await req("/api/export/config", { method: "POST", body: params });
+    }
+    if (old.content === fresh.content) {
+      toast("重新生成完成，内容与保存的版本一致（节点与参数都没变）");
+      return;
+    }
+    const okOverwrite = await ask("配置有变化",
+      `旧版本 ${fmtBytes(old.content.length)} → 新版本 ${fmtBytes(fresh.content.length)}。` +
+      `\n\n覆盖已保存的「${c.name}」？选「取消」则保留原样。`);
+    if (!okOverwrite) { toast("已保留原版本"); return; }
+    if (DEMO) {
+      const t = MDB.savedConfigs.find(x => x.id === id);
+      t.content = fresh.content; t.size = fresh.content.length;
+      t.updated_at = "2026-11-01 10:30:00";
+    } else {
+      await req("/api/configs/" + id, {
+        method: "PUT",
+        body: { content: fresh.content, params: JSON.stringify(params) }
+      });
+    }
+    toast("已覆盖「" + c.name + "」");
+    await loadSavedConfigs();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+/* ---- 保存当前生成结果 ---- */
+
+function defaultConfigName() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const core = genCore === "singbox" ? "singbox" + genSBVer : "mihomo";
+  return `${TARGET_LABEL[genTarget] || genTarget}-${core}-${mm}${dd}`;
+}
+
+function openSaveConfig() {
+  if (!genLast) return;
+  $("mSaveCfg").dataset.editId = "";
+  $("sc_title").textContent = "保存配置";
+  $("sc_ok").textContent = "保存";
+  $("sc_name").value = defaultConfigName();
+  $("sc_note").value = "";
+  const c = genLast.content || "";
+  const lines = (c.match(/\n/g) || []).length + 1;
+  $("sc_meta").textContent =
+    `${genCore === "singbox" ? "sing-box " + genSBVer : "mihomo"} · ` +
+    `${TARGET_LABEL[genTarget] || genTarget} · ${fmtBytes(c.length)} · ${lines} 行`;
+  openModal("mSaveCfg");
+  setTimeout(() => { $("sc_name").focus(); $("sc_name").select(); }, 80);
+}
+
+async function submitSaveConfig() {
+  const name = $("sc_name").value.trim();
+  if (!name) { toast("请输入名称", "warn"); return; }
+  const note = $("sc_note").value.trim();
+  const editId = $("mSaveCfg").dataset.editId;
+
+  try {
+    if (editId) {
+      if (DEMO) {
+        const c = MDB.savedConfigs.find(x => x.id === +editId);
+        if (c) { c.name = name; c.note = note; c.updated_at = "2026-11-01 10:20:00"; }
+      } else {
+        await req("/api/configs/" + editId, { method: "PUT", body: { name, note } });
+      }
+      closeModal("mSaveCfg");
+      toast("已更新");
+      await loadSavedConfigs();
+      return;
+    }
+
+    if (!genLast) { toast("先生成配置", "warn"); return; }
+    const params = JSON.stringify(buildGenParams());
+    const body = {
+      name, note,
+      core: genCore,
+      core_version: genCore === "singbox" ? genSBVer : "",
+      target: genTarget,
+      scenario: genScenario || "custom",
+      params,
+      content: genLast.content
+    };
+    if (DEMO) {
+      MDB.savedConfigs.unshift({
+        id: Math.max(0, ...MDB.savedConfigs.map(x => x.id)) + 1,
+        name, note, core: body.core, core_version: body.core_version,
+        target: body.target, scenario: body.scenario, params,
+        content: body.content, size: body.content.length,
+        hash: "demo", created_by: ME.user || "admin",
+        created_at: "2026-11-01 10:20:00", updated_at: "2026-11-01 10:20:00"
+      });
+    } else {
+      await req("/api/configs", { method: "POST", body });
+    }
+    closeModal("mSaveCfg");
+    toast("已保存到「配置管理」");
+    if (CURRENT === "configs") await loadSavedConfigs();
+  } catch(e){ toast(e.message, "err"); }
 }
 
 /* ---- 用户弹窗 ---- */

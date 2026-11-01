@@ -146,6 +146,40 @@ var migrations = []string{
 	       'owner',1
 	WHERE NOT EXISTS (SELECT 1 FROM admin_users);
 	`,
+	// v5: 保存的客户端配置 + 自定义规则标签
+	//
+	// 配置生成是一次性的：关掉页面就得重新点一遍，改个端口想对比新旧两版也没处放。
+	// 这里把生成结果连同**生成参数**一起落库——只存 content 的话，一周后想重新
+	// 生成就再也拼不回当时的入站/规则集选择了。
+	//
+	// 时间列用 TEXT 存本地时间字符串（与审计一致），不用 DATETIME DEFAULT
+	// CURRENT_TIMESTAMP——那个是 UTC，展示时得处处 .Local()，很容易漏。
+	` 
+	CREATE TABLE IF NOT EXISTS saved_configs (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		name         TEXT NOT NULL,
+		core         TEXT NOT NULL DEFAULT '',
+		core_version TEXT NOT NULL DEFAULT '',
+		target       TEXT NOT NULL DEFAULT '',
+		scenario     TEXT NOT NULL DEFAULT '',
+		note         TEXT NOT NULL DEFAULT '',
+		params       TEXT NOT NULL DEFAULT '{}',
+		content      TEXT NOT NULL DEFAULT '',
+		size         INTEGER NOT NULL DEFAULT 0,
+		hash         TEXT NOT NULL DEFAULT '',
+		created_by   TEXT NOT NULL DEFAULT '',
+		created_at   TEXT NOT NULL DEFAULT '',
+		updated_at   TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE IF NOT EXISTS rule_tags (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		name       TEXT NOT NULL UNIQUE,
+		rules      TEXT NOT NULL DEFAULT '',
+		created_by TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_saved_configs_core ON saved_configs(core, id);
+	`,
 }
 
 func Open(dataDir string) (*Store, error) {

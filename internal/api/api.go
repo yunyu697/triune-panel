@@ -104,6 +104,20 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/export/config", a.write(a.handleExportConfig))
 	// 自检会调用本机内核二进制，属于「能让服务器跑东西」的接口，按 write 档
 	mux.HandleFunc("POST /api/export/verify", a.write(a.handleExportVerify))
+
+	// 保存的客户端配置：内容含节点凭据，整组按 write 档
+	mux.HandleFunc("GET /api/configs", a.write(a.handleConfigsList))
+	mux.HandleFunc("POST /api/configs", a.write(a.handleConfigSave))
+	mux.HandleFunc("GET /api/configs/{id}", a.write(a.handleConfigGet))
+	mux.HandleFunc("PUT /api/configs/{id}", a.write(a.handleConfigUpdate))
+	mux.HandleFunc("DELETE /api/configs/{id}", a.write(a.handleConfigDelete))
+	mux.HandleFunc("GET /api/configs/{id}/download", a.write(a.handleConfigDownload))
+
+	// 自定义规则标签：共享的运维经验，同样只在写档以上可见
+	mux.HandleFunc("GET /api/rule-tags", a.write(a.handleTagsList))
+	mux.HandleFunc("POST /api/rule-tags", a.write(a.handleTagCreate))
+	mux.HandleFunc("PUT /api/rule-tags/{id}", a.write(a.handleTagUpdate))
+	mux.HandleFunc("DELETE /api/rule-tags/{id}", a.write(a.handleTagDelete))
 	// 客户端列表：只读账号也放行，但响应是**脱敏副本**（凭据与订阅令牌置空）。
 	// 之前整条挡在 write 档外，代价是只读账号连「谁用了多少流量」都看不到；
 	// 真正敏感的只有那两列，把整页关掉属于用大炮打蚊子。
