@@ -60,6 +60,14 @@ func TestXrayRendersValidConfig(t *testing.T) {
 			clients: []*model.Client{client("alice", "11111111-2222-3333-4444-555555555555")},
 		},
 		{
+			// 导入来的配置里 serverNames 是数组。曾经 FieldList 只认字符串，
+			// 数组会被整段丢弃、只剩 dest 兜底的那一个 SNI，客户端换用
+			// 另一个合法 SNI 就连不上——渲染结果必须保留全部。
+			name:    "vless-reality-server-names-array",
+			inbound: &model.Inbound{Name: "r2", Core: "xray", Protocol: "vless", Port: 24461, Transport: "tcp", TLS: "reality", Settings: `{"private_key":"` + realityPriv(t) + `","handshake_server":"www.apple.com","handshake_port":443,"server_names":["www.apple.com","apple.com"],"short_ids":"cd34"}`},
+			clients: []*model.Client{client("carol", "22222222-3333-4444-5555-666666666666")},
+		},
+		{
 			name:    "vmess-ws-tls",
 			inbound: &model.Inbound{Name: "w", Core: "xray", Protocol: "vmess", Port: 24444, Transport: "ws", TLS: "tls", Settings: `{"path":"/ray","ws_host":"example.com",` + strings.TrimPrefix(tls, "{")},
 			clients: []*model.Client{client("bob", "99999999-8888-7777-6666-555555555555")},

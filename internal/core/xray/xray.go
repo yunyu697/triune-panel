@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"strconv"
-	"strings"
 
 	"triune/internal/core"
 	"triune/internal/model"
@@ -399,18 +397,9 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 		// xray 的 dest（新版本报错里叫 target）必须是 host:port，
 		// 只写域名（面板表单的默认值就是裸域名）会被判为非法目标，
 		// 表现为「切换内核预检失败：please fill in a valid value for "target"」。
-		dest := core.Field(in.Settings, "handshake_server")
-		if dest == "" {
-			dest = core.Field(in.Settings, "server_name")
-		}
+		// 推导逻辑与诊断探测共用 core.RealityDest，避免两处漂移。
+		dest := core.RealityDest(in)
 		if dest != "" {
-			port := core.FieldInt(in.Settings, "handshake_port")
-			if port <= 0 || port > 65535 {
-				port = 443
-			}
-			if _, _, err := net.SplitHostPort(dest); err != nil {
-				dest = net.JoinHostPort(strings.Trim(dest, "[]"), strconv.Itoa(port))
-			}
 			rs["dest"] = dest
 		}
 		// serverNames 缺省回退：直接用握手目标的主机名，

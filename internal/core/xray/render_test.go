@@ -151,6 +151,31 @@ func TestRenderImportedRealityMultiValues(t *testing.T) {
 	}
 }
 
+// serverNames 用数组写法（导入的配置常见）时不能被截断。
+//
+// FieldList 曾经只认字符串，数组直接返回 nil，渲染就只剩 dest 兜底的那一个
+// SNI。客户端的 SNI 若正好是数组里的第二个，连得上端口却过不了 Reality 认证。
+func TestRenderRealityServerNamesArray(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "arr", Core: "xray", Protocol: "vless",
+		Port: 24462, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com","handshake_port":443,
+			"server_names":["www.apple.com","apple.com"],"short_ids":"cd34"}`,
+	}
+	obj, err := x.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u1", Credential: "uuid-1", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	rs := obj["streamSettings"].(map[string]any)["realitySettings"].(map[string]any)
+	names, _ := rs["serverNames"].([]string)
+	if len(names) != 2 || names[0] != "www.apple.com" || names[1] != "apple.com" {
+		t.Errorf("serverNames 数组应原样保留两项，实际 %#v", rs["serverNames"])
+	}
+}
+
 // TLS 的 alpn 与 ws 的 Host 头（CDN 前置场景）不能丢。
 func TestRenderImportedTLSExtras(t *testing.T) {
 	x := &Xray{}

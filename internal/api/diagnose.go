@@ -90,31 +90,7 @@ func (a *Server) diagnoseInbound(in *model.Inbound) []checkItem {
 
 	// 4. TLS 握手（仅 TCP 类协议且配置了 TLS）
 	if !udpProto && (in.TLS == "tls" || in.TLS == "reality") {
-		addr := net.JoinHostPort("127.0.0.1", fmt.Sprint(in.Port))
-		sni := core.Field(in.Settings, "server_name")
-		if sni == "" {
-			sni = "probe.local"
-		}
-		d := net.Dialer{Timeout: 4 * time.Second}
-		tc, err := tls.DialWithDialer(&d, "tcp", addr, &tls.Config{ServerName: sni, InsecureSkipVerify: true})
-		if err == nil {
-			st := tc.ConnectionState()
-			expiry := ""
-			if len(st.PeerCertificates) > 0 {
-				expiry = "，证书到期 " + st.PeerCertificates[0].NotAfter.Format("2006-01-02")
-			}
-			if in.TLS == "reality" {
-				checks = append(checks, checkItem{Name: "TLS 握手", OK: true, Warn: true,
-					Detail: "Reality 端口可完成 TLS 握手" + expiry + "（Reality 认证在协议层，普通握手能过即说明服务在线）"})
-			} else {
-				checks = append(checks, checkItem{Name: "TLS 握手", OK: true,
-					Detail: fmt.Sprintf("TLS 握手成功（SNI=%s%s）", sni, expiry)})
-			}
-			tc.Close()
-		} else {
-			checks = append(checks, checkItem{Name: "TLS 握手", OK: false, Warn: true,
-				Detail: "TLS 握手失败: " + err.Error() + "（Reality 伪装站点连接被复用时可能拒绝探测，可结合端口监听判断）"})
-		}
+		checks = append(checks, probeTLS(in))
 	}
 
 	// 5. 公网可达（TCP 类才有意义）
@@ -135,6 +111,62 @@ func (a *Server) diagnoseInbound(in *model.Inbound) []checkItem {
 	}
 
 	return checks
+}
+
+// probeTLS 对 TLS / Reality 入站做一次真实的 TLS 握手探测。
+//
+// 单独成函数是为了能被单测直接调用——这里两个坑都踩过：
+//
+//	a) SNI 必须用「渲染时真正生效的值」（core.RealitySNI）。Reality 对不在
+//	   serverNames 里的 SNI 是按设计拒绝的（alert handshake failure），探测
+//	   要是用占位 SNI，配置完全正常也会被报成「握手失败」。
+//	b) 探测地址要对齐入站的实际监听地址。写死 127.0.0.1 的话，只监听某个
+//	   具体 IP 的入站会被误判成连不上。
+//
+// 失败一律是 Warn：握手过不去的成因太多（dest 被墙、客户端要用 shortId），
+// 不足以判定「这条入站坏了」，只提示怎么查。
+func probeTLS(in *model.Inbound) checkItem {
+	addr := net.JoinHostPort(listenOrLocal(in.Listen), fmt.Sprint(in.Port))
+	sni := core.Field(in.Settings, "server_name")
+	if in.TLS == "reality" {
+		sni = core.RealitySNI(in)
+		if sni == "" {
+			return checkItem{Name: "TLS 握手", OK: false, Warn: true,
+				Detail: "Reality 未配置 SNI（serverNames）—— 无法探测，且客户端也必须带 SNI 才能连上。请在入站里补上 sni 后保存并应用"}
+		}
+	}
+	if sni == "" {
+		sni = "probe.local"
+	}
+
+	d := net.Dialer{Timeout: 4 * time.Second}
+	tc, err := tls.DialWithDialer(&d, "tcp", addr, &tls.Config{ServerName: sni, InsecureSkipVerify: true})
+	if err != nil {
+		detail := fmt.Sprintf("TLS 握手失败（探测 %s，SNI=%s）: %v", addr, sni, err)
+		if in.TLS == "reality" {
+			detail += fmt.Sprintf(" —— Reality 的普通握手要靠把连接转给伪装目标 %s 来完成。"+
+				"失败一般说明本机连不上 dest（被墙 / 目标挂了），或该端口上跑的不是这个入站。"+
+				"客户端带 shortId 的真实握手仍可能正常，请结合「端口监听」一起判断", core.RealityDest(in))
+		} else {
+			detail += " —— 端口能连上却拿不到证书，通常是证书或私钥文件读不到、" +
+				"内核没加载这个入站，或端口被别的服务占着"
+		}
+		return checkItem{Name: "TLS 握手", OK: false, Warn: true, Detail: detail}
+	}
+	defer tc.Close()
+
+	st := tc.ConnectionState()
+	expiry := ""
+	if len(st.PeerCertificates) > 0 {
+		expiry = "，证书到期 " + st.PeerCertificates[0].NotAfter.Format("2006-01-02")
+	}
+	if in.TLS == "reality" {
+		// 握手能过只说明「dest 转发生效」，不代表客户端能认证成功。
+		return checkItem{Name: "TLS 握手", OK: true, Warn: true,
+			Detail: fmt.Sprintf("SNI=%s 可完成 TLS 握手%s（Reality 已把连接转给伪装目标；真正的入站认证在协议层，需要客户端带 shortId 才能验证）", sni, expiry)}
+	}
+	return checkItem{Name: "TLS 握手", OK: true,
+		Detail: fmt.Sprintf("TLS 握手成功（SNI=%s%s）", sni, expiry)}
 }
 
 // checkUDPPort 用「尝试独占绑定」判断 UDP 端口是否已被监听：

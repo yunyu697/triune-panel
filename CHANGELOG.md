@@ -37,9 +37,21 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
    `outboundTag: "direct"`；用 `balancerTag` 的规则面板没有负载均衡器，
    改为**丢弃并提示**，不再静默写进配置。真机用例已补进 `internal/livecheck`
    （`imported-route-direct-rule`），走 importer 的真实转换路径再过内核校验。
+4. **修掉「Reality 入站的 TLS 握手检查永远报失败」**：
+   疑心病最重的一条——**服务完全正常，面板却说过不去**。原因是探测用的 SNI
+   读的是 `server_name`，而表单和导入存的是 `server_names`，取不到就退化成占位
+   值 `probe.local`；Reality 对不在 `serverNames` 里的 SNI 是**按设计拒绝**的
+   （`alert handshake failure`），于是每一台正常的 Reality 都会被判失败。
+   现在 SNI 的推导与渲染共用 `core.RealityDest` / `core.RealitySNI`，不会再漂移；
+   探测地址也从写死的 `127.0.0.1` 改为入站的实际监听地址。
+   顺带修了 `FieldList` 只认字符串、把数组形式的 `serverNames` 整段丢弃的问题
+   （导入的配置常见数组写法，丢掉后只剩 dest 兜底的那一个 SNI）。
+   失败文案也分开了：Reality 指向「本机到 dest 不通」，普通 TLS 指向「证书/私钥读不到」。
 
 测试：`outbounds_test.go` 覆盖三内核的出站视图、导入全局段后的规则顺序与来源标注、
-外部节点开关对订阅的影响；`xui_test.go` 覆盖 direct 规则保留出站与 balancer 规则丢弃。
+外部节点开关对订阅的影响；`xui_test.go` 覆盖 direct 规则保留出站与 balancer 规则丢弃；
+`reality_test.go` 钉住 SNI / dest 的取值顺序，`diagnose_test.go` 用真实 TLS 监听验证
+探测本身能成功、能失败、能指向正确原因。
 
 ---
 

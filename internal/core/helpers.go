@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"net"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -107,6 +108,47 @@ func ShortIDs(settings string) []string {
 	return []string{""}
 }
 
+// RealityDest 返回 Reality 的握手目标 host:port（dest）。
+// 表单只填域名时补默认端口，否则 xray 判为非法 target。
+func RealityDest(in *model.Inbound) string {
+	dest := Field(in.Settings, "handshake_server")
+	if dest == "" {
+		dest = Field(in.Settings, "server_name")
+	}
+	if dest == "" {
+		return ""
+	}
+	port := FieldInt(in.Settings, "handshake_port")
+	if port <= 0 || port > 65535 {
+		port = 443
+	}
+	if _, _, err := net.SplitHostPort(dest); err == nil {
+		return dest
+	}
+	return net.JoinHostPort(strings.Trim(dest, "[]"), strconv.Itoa(port))
+}
+
+// RealitySNI 返回 Reality 入站实际生效的 serverNames 第一个值。
+//
+// 取值顺序必须与渲染器一致（server_names → server_name → dest 的主机名）。
+// 诊断探测用错 SNI 不是「小误差」：Reality 对不在 serverNames 里的 SNI 会按
+// 设计拒绝握手（`alert handshake failure`），于是配置完全正常也会被报成
+// 「TLS 握手失败」——曾经就是这样，探测只读 server_name，而表单存的是
+// 复数 server_names，导致 Reality 入站的握手检查全是误报。
+func RealitySNI(in *model.Inbound) string {
+	names := FieldList(in.Settings, "server_names")
+	if len(names) == 0 {
+		names = FieldList(in.Settings, "server_name")
+	}
+	if len(names) > 0 {
+		return names[0]
+	}
+	if host, _, err := net.SplitHostPort(RealityDest(in)); err == nil {
+		return host
+	}
+	return ""
+}
+
 // anyToString 把 JSON 解出来的标量转成字符串。
 func anyToString(v any) string {
 	switch t := v.(type) {
@@ -148,13 +190,23 @@ func FieldInt(settings, key string) int {
 // FieldList 取多值字段：逗号、空格、分号分隔都认（"a.com,b.com" / "a.com b.com"）。
 // 空串与重复值会被去掉，保持顺序。
 func FieldList(settings, key string) []string {
-	s := Field(settings, key)
-	if s == "" {
+	var parts []string
+	// 数组形式（导入的配置，如 "serverNames": ["a.com","b.com"]）必须认，
+	// 否则整组 SNI 会被丢弃、只剩 dest 兜底的那一个——客户端换用另一个
+	// 合法 SNI 就连不上。只认字符串是曾经的漏洞。
+	if arr, ok := FieldRaw(settings, key).([]any); ok {
+		for _, it := range arr {
+			parts = append(parts, anyToString(it))
+		}
+	} else if s := Field(settings, key); s != "" {
+		// 字符串形式：逗号 / 空格 / 分号 / 换行都能分隔（表单里手写的）
+		parts = strings.FieldsFunc(s, func(r rune) bool {
+			return r == ',' || r == ' ' || r == ';' || r == '\n' || r == '\t'
+		})
+	}
+	if len(parts) == 0 {
 		return nil
 	}
-	parts := strings.FieldsFunc(s, func(r rune) bool {
-		return r == ',' || r == ' ' || r == ';' || r == '\n' || r == '\t'
-	})
 	out := make([]string, 0, len(parts))
 	seen := map[string]bool{}
 	for _, p := range parts {
