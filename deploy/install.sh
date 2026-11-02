@@ -468,6 +468,9 @@ fi
 
 # 本次是否「由脚本亲手结束了非 systemd 托管的面板进程」——是的话装完要拉起来
 PANEL_KILLED_MANUAL=0
+# 面板是否是容器里的 PID 1：是的话**不能**停它（停它等于停整个容器，脚本自己也活不了），
+# 只能把新二进制放好，让用户重启容器
+PANEL_IS_INIT=0
 PANEL_OLD_ARGS=()
 PANEL_OLD_PID=""
 
@@ -620,6 +623,15 @@ stop_existing_panel() {
     echo "        若它其实就是面板（改了名字/自编译），请先把 PANEL_PORT 换成别的端口。"
     echo ""
     return 1
+  fi
+
+  # (3.5) 容器里面板常常就是 PID 1。杀掉它 = 杀掉整个容器，脚本自己也会跟着死，
+  #       所以这种情况下不杀，改为「新二进制就位 + 重启容器」，在装完后提示。
+  if [[ " ${ours[*]} " == *" 1 "* ]]; then
+    PANEL_IS_INIT=1
+    echo "→ 面板在本容器内是 PID 1（pid=1），不停止它（停止会连带容器一起消失）"
+    echo "  新二进制放好后重启容器即可生效"
+    return 0
   fi
 
   # (4) 只剩面板自己：手动启动 / docker / openrc / 单元名被改过 / systemd 不可用。
@@ -897,7 +909,9 @@ if [[ "$HAVE_SYSTEMD" -eq 1 ]]; then
 else
   SERVICE_STARTED=0
   echo "→ 未检测到 systemd，跳过服务注册（当前环境可能使用 openrc 等其他 init）"
-  if [[ "$PANEL_KILLED_MANUAL" -eq 1 ]]; then
+  if [[ "$PANEL_IS_INIT" -eq 1 ]]; then
+    echo "→ 新二进制已就位，重启容器让新版本生效：docker restart <容器名>"
+  elif [[ "$PANEL_KILLED_MANUAL" -eq 1 ]]; then
     # 旧进程是我们结束的，拉不起来就必须明说失败——不能让脚本接着打印「安装完成」
     if ! start_panel_manually; then
       echo ""
