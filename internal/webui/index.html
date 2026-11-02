@@ -3990,6 +3990,9 @@ const ICONS = {
   gen:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
   overview:'<path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/>',
   inbounds:'<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  // 出站：门框 + 向外的箭头。别用「托盘+上箭头」——那和「配置管理」的
+  // 下载图标只差箭头方向，侧栏里一眼看过去会认错。
+  outbounds:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   clients:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   traffic:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
@@ -4018,7 +4021,7 @@ const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
    都会 403，与其让人点进去看一堆红字，不如不给入口。
    「用户」保留：服务端返回脱敏副本（凭据与订阅令牌为空），能看到用量与配额，
    但改不了。「设置」保留，里面只显示「我的账号」「登录设备」两张卡。 */
-const VIEWER_VIEWS = ["overview", "inbounds", "clients", "traffic", "settings"];
+const VIEWER_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic", "settings"];
 function visibleViews() {
   return VIEWS.filter(([k]) => !isViewer() || VIEWER_VIEWS.includes(k));
 }
