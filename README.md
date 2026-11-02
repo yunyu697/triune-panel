@@ -142,6 +142,10 @@ GitHub 直连慢时脚本会**自动择优**：脚本内置「GitHub 原始地�
 
 先分清是哪种「旧」——**页面上的版本号来自正在运行的进程**（`/api/version` 返回二进制自报的 `Version`），不是磁盘上的文件。所以版本号还是旧的，基本就是**新二进制已经落盘、但跑着的还是老进程**。
 
+**面板自己会说。** 设置 → 运维 →「面板自更新」里，只要磁盘二进制与运行进程对不上，就会亮一条黄框：*「磁盘上的二进制已经是 v1.1.0，但进程仍在运行 v1.0.9」*，并给出重启命令。`/api/version` 也一并返回 `binary_version`（磁盘）与 `restart_failed`（上次重启失败的说明），脚本里可以直接比。
+
+手动确认：
+
 ```bash
 # 磁盘上那个文件是什么版本
 sudo /opt/triune-panel/triune-panel version
@@ -158,6 +162,11 @@ sudo readlink /proc/$(systemctl show -p MainPID --value triune-panel)/exe
 | 新 | 旧 | 进程没换 | `sudo systemctl restart triune-panel` |
 | 旧 | 旧 | 压根没装上新 | 看下面两条 |
 | 新 | 新 | 只是浏览器/反代缓存 | `Ctrl+Shift+R`；仍不行删 `data/web/index.html` 再重启 |
+
+自更新（面板里点「下载并更新重启」）报错时，这两类原因最常见：
+
+- **`替换失败: … cross-device link`**：数据目录与安装目录不在同一个文件系统（容器把 data 挂成卷、`/var` 是独立分区、data 在 tmpfs）。新二进制会先落到安装目录再原子 rename，所以 1.0.9 之后这个错误不该再出现；更早的版本请用一键脚本升级。
+- **`二进制已换成 vX，但重启失败`**：安装目录所在分区 `noexec`，或容器 / systemd 的安全策略禁掉了 `execve`（seccomp、`SystemCallFilter`）。这两种环境下**任何**自重启手段都不可用，`systemctl restart` 即可（systemd 用的是新文件）。
 
 脚本现在会在装完后回读 `/api/public/info` 核对，对不上**直接报错并给出上面这几条诊断**，不再打印「安装并启动成功」。它同时堵掉了两个容易静默发生的坑：
 

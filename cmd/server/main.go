@@ -133,6 +133,10 @@ func serve(args []string) {
 	srv := api.New(st, pipe, pm, *dataDir)
 	api.Version = Version
 
+	// 上一次自更新若「换了二进制却没重启成功」，会留下一条说明。
+	// 现在能走到这里就说明进程是新的——那条记录已经过期，留着只会误导。
+	_ = st.SetSetting(api.SettingRestartFailed, "")
+
 	// ACME 证书管理器：API 查询与后台签发/续期循环必须使用同一实例，
 	// 否则 API 侧永远看不到后台签发的证书状态。
 	certMgr := certmgr.New(*dataDir, st)

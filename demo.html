@@ -1235,6 +1235,20 @@ canvas{display:block;width:100%}
       <div class="card" data-sect="maintain">
         <h3>面板自更新</h3>
         <p class="muted" style="margin-bottom:12px">当前版本 <b id="curver"></b>。更新流程：下载 → 可执行验证 → sha256 校验 → 备份旧文件 → 原子替换 → 无缝重启，数据与配置不受影响。</p>
+        <!-- 「二进制换了、进程没换」必须看得见：以前这种情况界面一切正常，
+             只有版本号不动，用户只能自己 readlink /proc/<pid>/exe 去查。 -->
+        <div id="ver_mismatch" class="hide"
+             style="margin-bottom:12px;padding:10px 12px;border-radius:9px;font-size:13px;line-height:1.7;
+                    background:color-mix(in srgb,var(--warn) 12%,transparent);
+                    border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)">
+          <b style="color:var(--warn)">磁盘上的二进制已经是 <span id="vm_disk"></span>，但进程仍在运行 <span id="vm_run"></span></b>
+          <div id="vm_msg" class="muted" style="margin-top:4px"></div>
+          <div class="muted" style="margin-top:6px">
+            自更新已经替换了文件，但重启这一步没成功（新进程没起来）。手动重启一次即可生效：
+            <code>sudo systemctl restart triune-panel</code>
+            <button class="btn sm" style="margin-left:8px" onclick="location.reload()">已重启，刷新</button>
+          </div>
+        </div>
         <div class="frm">
           <div class="full"><label>新版本二进制 URL</label><input id="up_url" class="input" placeholder="https://.../triune-panel-linux-amd64"></div>
           <div class="full"><label>sha256（可选）</label><input id="up_sha" class="input mono"></div>
@@ -4392,7 +4406,7 @@ async function mockRoute(path, opts) {
       return { ok: 1, revoked: before - MDB.sessions.length };
     }
   }
-  if (api === "version") return { version: MDB.version };
+  if (api === "version") return { version: MDB.version, binary_version: MDB.version, restart_failed: "" };
   if (api === "status") return { cores: ["singbox","xray","mihomo"].map(c => ({
     core:c, running:c!=="mihomo", config_exists:c!=="mihomo", bin_set:!!MDB.settings["bin_"+c], bin_found:!!MDB.settings["bin_"+c] })) };
   if (api === "inbounds" && rest.includes("/check")) {
@@ -4903,7 +4917,44 @@ async function loadVersion() {
     $("curver").textContent = j.version;
     $("verinfo").textContent = ver;
     const lv = $("logoVer"); if (lv) lv.textContent = ver.replace(/-demo$/i, "");
+    renderVerMismatch(j);
+    // 自更新后刷新回来，核对一次「期望版本」：对不上就是重启没成功
+    let exp = null;
+    try { exp = sessionStorage.getItem("expectVer"); } catch(_) {}
+    if (exp) {
+      try { sessionStorage.removeItem("expectVer"); } catch(_) {}
+      if (normVer(j.version) !== exp) {
+        toast("面板重启后仍是 " + j.version + "，这次更新没生效——看「面板自更新」里的说明", "err");
+      } else {
+        toast("已更新到 " + j.version);
+      }
+    }
   } catch(e){}
+}
+/* 「磁盘版本 ≠ 运行版本」的提示。
+   面板显示的版本号来自**进程**，所以二进制换了但没重启成功时，界面看着一切正常，
+   只有版本号不动 —— 这正是「更新完了还是旧版本」的全部观感。
+   两种证据都算：进程自报的重启失败说明，或磁盘二进制版本与运行版本不一致。 */
+function renderVerMismatch(j) {
+  const box = $("ver_mismatch");
+  if (!box) return;
+  const disk = (j.binary_version || "").trim();
+  const same = disk && normVer(disk) === normVer(j.version);
+  const failed = (j.restart_failed || "").trim();
+  if (same && !failed) { box.classList.add("hide"); return; }
+  $("vm_disk").textContent = disk ? shortVer(disk) : "（读不到）";
+  $("vm_run").textContent = j.version;
+  $("vm_msg").textContent = failed || "";
+  box.classList.remove("hide");
+}
+// 二进制自报的是整行（"triune-panel v1.0.8 (linux/amd64)"），标题里只留版本与平台
+function shortVer(s) {
+  return String(s || "").replace(/^\s*triune-panel\s+/i, "").trim();
+}
+// 比较版本号时忽略二进制自报串里的多余描述（"triune-panel v1.0.9 (linux/amd64)"）
+function normVer(s) {
+  const m = String(s || "").match(/v?\d+\.\d+\.\d+[-\w.]*/i);
+  return m ? m[0].toLowerCase() : String(s || "").trim().toLowerCase();
 }
 async function loadStatus() {
   try {
@@ -9195,7 +9246,10 @@ async function selfUpdate() {
   if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
   toast("下载中…", "info");
   try {
-    await req("/api/self-update", { method:"POST", body:{ url:$("up_url").value, sha256:$("up_sha").value } });
+    const j = await req("/api/self-update", { method:"POST", body:{ url:$("up_url").value, sha256:$("up_sha").value } });
+    // 记住期望版本：刷新回来先核对一次。只报「更新完成」是不够的——
+    // 重启那一步失败时进程仍跑旧映像，用户得等到发现版本号没变才起疑。
+    try { sessionStorage.setItem("expectVer", normVer(j.new_version || "")); } catch(_) {}
     toast("更新完成，面板重启中，5 秒后刷新页面");
     setTimeout(() => location.reload(), 5000);
   } catch (e) { toast(e.message, "err"); }

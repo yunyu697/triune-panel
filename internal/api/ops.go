@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -223,8 +224,44 @@ func (a *Server) handleTrafficLive(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/version
+//
+// 除运行中版本外，还回两样用于排障的东西：
+//   - binary_version：磁盘上那个二进制自报的版本
+//   - restart_failed：上一次自更新「换了文件却没重启成功」的说明
+//
+// 为什么需要它们：面板显示的版本号来自**进程**，所以「二进制换了、进程没换」
+// 时界面看起来一切正常、只有版本号不动。以前这种情况只能靠用户自己去
+// `readlink /proc/<pid>/exe` 看有没有 " (deleted)"。两个值一对比就能一眼看出。
 func (a *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]string{"version": Version})
+	restartFailed, _ := a.Store.GetSetting(SettingRestartFailed)
+	writeJSON(w, 200, map[string]string{
+		"version":        Version,
+		"binary_version": a.diskBinaryVersion(),
+		"restart_failed": restartFailed,
+	})
+}
+
+// diskBinaryVersion 读磁盘上那个二进制自报的版本。
+//
+// 要 fork 一个进程去跑 `-version`，所以缓存 10 秒：页面每次加载都会问一次，
+// 而磁盘上的文件不会一秒一变。读不到就返回空串——这只是个诊断字段，
+// 不能因为它让整个版本接口失败。
+func (a *Server) diskBinaryVersion() string {
+	a.diskVerMu.Lock()
+	defer a.diskVerMu.Unlock()
+	if time.Since(a.diskVerAt) < 10*time.Second {
+		return a.diskVer
+	}
+	a.diskVerAt = time.Now()
+	a.diskVer = ""
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if v, err := update.BinaryVersion(exe, []string{"-version"}); err == nil {
+		a.diskVer = v
+	}
+	return a.diskVer
 }
 
 // GET /api/public/info：免认证，仅暴露面板版本号（登录页展示用）。
@@ -310,25 +347,76 @@ func (a *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	if data, err := os.ReadFile(exe); err == nil {
 		_ = os.WriteFile(versioned, data, 0o755)
 	}
-	bak := exe + ".bak"
-	os.Remove(bak)
-	if err := os.Rename(exe, bak); err != nil {
+
+	// 4. 原子替换。新二进制必须先**落到安装目录**再 rename，见 stageReplace。
+	if err := stageReplace(newBin, exe); err != nil {
 		os.Remove(newBin)
-		fail(w, 500, "备份旧二进制失败: "+err.Error())
-		return
-	}
-	if err := os.Rename(newBin, exe); err != nil {
-		_ = os.Rename(bak, exe) // 还原
 		fail(w, 500, "替换失败: "+err.Error())
 		return
 	}
-	os.Chmod(exe, 0o755)
+	os.Remove(newBin) // 跨设备时源文件还在，清掉
 
-	// 4. 重启（exec 替换进程映像，监听与数据无缝衔接）
+	// 5. 重启（exec 替换进程映像，监听与数据无缝衔接）
 	a.auditOK(r, AuditUpdate, "panel", "面板自更新到 "+newVer)
 	writeJSON(w, 200, map[string]string{"ok": "1", "sha256": got, "new_version": newVer, "msg": "更新完成，正在重启..."})
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		syscall.Exec(exe, os.Args, os.Environ())
-	}()
+	go a.restartSelf(exe, "更新到 "+newVer)
+}
+
+// execSelf / execSelfWait 抽成变量只为了能在测试里替换：
+// 「exec 失败」这条路平时跑不到，但它恰恰是最难查的一类故障。
+var (
+	execSelf     = syscall.Exec
+	execSelfWait = 500 * time.Millisecond
+)
+
+// stageReplace 用「同目录暂存 + rename」把 exe 换成 newBin。
+//
+// 关键在暂存文件的位置：它必须和 exe 在**同一个文件系统**上，rename 才是原子的、
+// 才不会 EXDEV。以前是直接把数据目录里下载好的文件 rename 到安装目录——
+// 单分区机器上一直是对的，但数据目录经常被指到别处（容器挂载卷、独立的
+// /var 分区、tmpfs），那时 rename 返回 "cross-device link"，整个升级原地失败：
+// 二进制没换、进程没换，用户只看到一句英文错误，版本号当然还是旧的。
+func stageReplace(newBin, exe string) error {
+	staged := exe + ".update-new"
+	if err := copyFileTo(newBin, staged); err != nil {
+		return fmt.Errorf("写入安装目录失败（该目录可写吗？）: %w", err)
+	}
+	if err := os.Chmod(staged, 0o755); err != nil {
+		os.Remove(staged)
+		return err
+	}
+	bak := exe + ".bak"
+	os.Remove(bak)
+	if err := os.Rename(exe, bak); err != nil {
+		os.Remove(staged)
+		return fmt.Errorf("备份旧二进制失败（安装目录可写吗？）: %w", err)
+	}
+	if err := os.Rename(staged, exe); err != nil {
+		_ = os.Rename(bak, exe) // 还原
+		os.Remove(staged)
+		return err
+	}
+	return nil
+}
+
+// restartSelf 用 exec 把当前进程映像换成刚替换好的二进制。what 是给人看的动作描述
+//（"更新到 v1.0.9" / "回滚到 v1.0.8"），只用于失败时的那句话。
+//
+// exec 成功时**不会返回**——进程映像已经被换掉了。走到 return 就说明它失败了，
+// 而失败后进程会继续以**旧映像**跑下去（新二进制只在磁盘上）。这时面板对外
+// 一切正常，只有版本号不变，用户看到的就是「更新完了还是旧版本」。
+// 所以这里必须把失败记下来：写日志 + 落一个标记，让 /api/version 和界面能说清楚。
+//
+// 失败原因现实中主要有两种：安装目录所在分区 noexec、以及容器 / systemd 的
+// 安全策略禁掉了 execve（seccomp、SystemCallFilter）。这两种环境下**任何**
+// 自重启手段都不可用，只能明确告诉用户去 `systemctl restart`。
+func (a *Server) restartSelf(exe, what string) {
+	time.Sleep(execSelfWait)
+	err := execSelf(exe, os.Args, os.Environ())
+	if err == nil {
+		return
+	}
+	msg := fmt.Sprintf("二进制已%s，但重启失败（%v）；进程仍在运行 %s", what, err, Version)
+	log.Printf("[update] %s", msg)
+	_ = a.Store.SetSetting(SettingRestartFailed, msg)
 }

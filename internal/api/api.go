@@ -36,6 +36,11 @@ type Server struct {
 	loginFails sync.Map       // ip -> *loginFail（防爆破）
 	totpStaged sync.Map       // uid -> 待绑定的 TOTP 密钥（每账号一份，重启即丢）
 	emailCode  emailCodeState // 登录邮箱验证码（2FA）
+
+	// 磁盘上那个二进制自报的版本，10 秒缓存（见 diskBinaryVersion）
+	diskVerMu sync.Mutex
+	diskVer   string
+	diskVerAt time.Time
 }
 
 // session 结构已迁到 sessions.go（带 IP / UA / 活跃时间，供「登录设备」页使用）。
@@ -1272,6 +1277,12 @@ const ShowCompatCoreSetting = "show_compat_core"
 
 // externalInSubSetting 外部节点是否混入订阅输出（默认关）。
 const externalInSubSetting = "external_in_sub"
+
+// SettingRestartFailed 自更新「二进制换了但重启失败」的说明，空值表示没发生过。
+//
+// 只在 exec 失败时写入，进程下次成功启动时清掉（见 cmd/server/main.go）——
+// 新进程起来了就说明重启这条路是通的，旧记录只会误导。
+const SettingRestartFailed = "update_restart_failed"
 
 // compatCoreAllowed 判断当前设置下能否新建指定内核的入站。
 // 非兼容内核恒为 true；mihomo 只有显式打开开关才允许。

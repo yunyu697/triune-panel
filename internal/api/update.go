@@ -18,8 +18,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
-	"time"
 
 	"triune/internal/core"
 	"triune/internal/update"
@@ -440,10 +438,8 @@ func (a *Server) handlePanelRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "msg": "回滚完成，正在重启..."})
 	a.auditOK(r, AuditUpdate, "panel", "面板回滚到备份 "+req.Backup)
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		syscall.Exec(exe, os.Args, os.Environ())
-	}()
+	// 与自更新共用同一套重启逻辑：exec 失败必须留下痕迹，不能静默继续跑旧映像
+	go a.restartSelf(exe, "回滚到 "+strings.TrimSuffix(req.Backup, ".bak"))
 }
 
 func copyFileTo(src, dst string) error {
