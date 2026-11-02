@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"triune/internal/core"
@@ -310,5 +311,71 @@ func TestRenderGlobalDNSRoute(t *testing.T) {
 	}
 	if !hasBlock {
 		t.Errorf("action=reject 应带出 block 出站：%#v", doc["outbounds"])
+	}
+}
+
+// TestRenderRealityHandshakeFromServerNames 守住「只填了 SNI 的 Reality 入站」
+// 切到 sing-box 的情况：曾经这里只读 handshake_server / server_name，于是渲染出
+// handshake.server="" ——sing-box 的 check 不拦空串，面板显示已启用，客户端却
+// 永远握不上手。现在与 xray 渲染器共用 core.RealityDestParts，回退到 SNI。
+func TestRenderRealityHandshakeFromServerNames(t *testing.T) {
+	s := &SingBox{}
+	in := &model.Inbound{
+		Name: "t-reality", Core: "singbox", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","server_names":["www.apple.com","apple.com"],"short_ids":["ab12"]}`,
+	}
+	obj, err := s.renderInbound(core.InboundWithClients{Inbound: in,
+		Clients: []*model.Client{{Name: "u", Credential: "uuid-1", Enabled: true}}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	tls := obj["tls"].(map[string]any)
+	reality := tls["reality"].(map[string]any)
+	hs := reality["handshake"].(map[string]any)
+	if hs["server"] != "www.apple.com" {
+		t.Errorf("handshake.server = %#v，期望回退到 SNI 第一个", hs["server"])
+	}
+	if hs["server_port"] != 443 {
+		t.Errorf("handshake.server_port = %#v，期望 443", hs["server_port"])
+	}
+}
+
+// TestRenderRealityNativeDest sing-box 也要认 xray 原生 dest 键。
+func TestRenderRealityNativeDest(t *testing.T) {
+	s := &SingBox{}
+	in := &model.Inbound{
+		Name: "t-dest", Core: "singbox", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","dest":"www.apple.com:2053"}`,
+	}
+	obj, err := s.renderInbound(core.InboundWithClients{Inbound: in})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	hs := obj["tls"].(map[string]any)["reality"].(map[string]any)["handshake"].(map[string]any)
+	if hs["server"] != "www.apple.com" || hs["server_port"] != 2053 {
+		t.Errorf("handshake = %#v，期望 www.apple.com:2053", hs)
+	}
+	// dest 不能透传到入站顶层：sing-box 严格校验，会直接拒收
+	if _, leaked := obj["dest"]; leaked {
+		t.Error("settings 里的 dest 被透传到入站顶层")
+	}
+}
+
+// TestRenderRealityMissingHandshake 握手目标完全缺失时要报可读错误。
+func TestRenderRealityMissingHandshake(t *testing.T) {
+	s := &SingBox{}
+	in := &model.Inbound{
+		Name: "t-nohs", Core: "singbox", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV"}`,
+	}
+	_, err := s.renderInbound(core.InboundWithClients{Inbound: in})
+	if err == nil {
+		t.Fatal("缺握手目标应报错")
+	}
+	if !strings.Contains(err.Error(), "握手目标") {
+		t.Errorf("错误信息应说明缺握手目标，实际: %v", err)
 	}
 }

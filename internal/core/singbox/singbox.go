@@ -275,13 +275,13 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		if priv == "" {
 			return nil, fmt.Errorf("Reality 入站缺少服务端私钥（private_key）：请在入站编辑里点「生成密钥对」后保存")
 		}
-		hs := core.Field(in.Settings, "handshake_server")
+		// 握手目标必须与 xray 渲染器用同一套推导：面板里同一个入站经常是
+		// 「先按 xray 配好现实，再一键切到 sing-box」，只在一边认字段就会
+		// 渲染出 handshake.server="" 的配置——sing-box check 不拦空值，
+		// 面板显示已启用，客户端却永远握不上手。
+		hs, hp := core.RealityDestParts(in)
 		if hs == "" {
-			hs = core.Field(in.Settings, "server_name")
-		}
-		hp := core.FieldInt(in.Settings, "handshake_port")
-		if hp <= 0 || hp > 65535 {
-			hp = 443
+			return nil, fmt.Errorf("Reality 入站的握手目标为空：请在入站里填写 handshake_server（或 dest），例如 www.apple.com:443")
 		}
 		reality := map[string]any{
 			"enabled":     true,

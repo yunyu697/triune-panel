@@ -47,6 +47,13 @@ var ManagedSettingsKeys = []string{
 	"xhttp_mode", "kcp_seed", "kcp_header", "quic_security", "quic_key", "quic_header",
 	// WireGuard 的原始 settings（渲染时整体替换 settings 段）
 	"xray_raw_settings",
+	// xray 原生写法 / 结构残留：用户在 settings 里直接贴 xray 片段时会出现。
+	// 它们由渲染器结构化消费（dest → realitySettings.dest），不能原样留在
+	// 入站顶层——xray 会宽容忽略，sing-box 则严格拒收（unknown field），
+	// 表现为「xray 好好的，一切到 sing-box 就校验失败」。
+	// streamSettings 本身是合法的入站顶层字段（渲染器会自己写），不能列进来；
+	// 它的内层结构（tlsSettings 等）不是，透传上去只会污染。
+	"dest", "serverNames", "realitySettings", "tlsSettings", "wsSettings",
 	// sniffing / allocate 刻意**不在此列**：它们是 xray 的入站顶层字段，
 	// 由渲染器原样透传；列进来会被 StripManagedKeys 删掉。
 }
@@ -110,10 +117,29 @@ func ShortIDs(settings string) []string {
 
 // RealityDest 返回 Reality 的握手目标 host:port（dest）。
 // 表单只填域名时补默认端口，否则 xray 判为非法 target。
+//
+// 取值顺序：handshake_server → dest → server_name → server_names 第一个。
+// 中间的 `dest` 是 xray 原生字段名，导入的片段 / 手工贴进来的 settings 里常见。
+// 不认它会渲染出「没有 dest 的 realitySettings」，xray 26 对此的报错是
+// `non-empty "serverNames", please use "serverName" instead`——看起来在说 SNI
+// 字段名写错了，其实原因是缺 dest，会把排查方向带偏。
+//
+// 末尾用 server_names 兜底是为了跟渲染器反向的兜底对称：xray 渲染时
+// serverNames 缺失会用 dest 的主机名，那么 dest 缺失时就该用 serverNames 的
+// 第一个。否则「只填了 SNI 的 xray 入站」切到 sing-box 会得到空 handshake
+// （sing-box check 不拦空串，面板显示已启用，客户端永远握不上手）。
 func RealityDest(in *model.Inbound) string {
 	dest := Field(in.Settings, "handshake_server")
 	if dest == "" {
+		dest = Field(in.Settings, "dest")
+	}
+	if dest == "" {
 		dest = Field(in.Settings, "server_name")
+	}
+	if dest == "" {
+		if names := FieldList(in.Settings, "server_names"); len(names) > 0 {
+			dest = names[0]
+		}
 	}
 	if dest == "" {
 		return ""
@@ -126,6 +152,25 @@ func RealityDest(in *model.Inbound) string {
 		return dest
 	}
 	return net.JoinHostPort(strings.Trim(dest, "[]"), strconv.Itoa(port))
+}
+
+// RealityDestParts 把 RealityDest 拆成主机与端口。
+// 两个渲染器都需要拆分后的值（xray 要 host:port，sing-box 要 host + server_port），
+// 各自手写一次就是两处漂移的起点。
+func RealityDestParts(in *model.Inbound) (host string, port int) {
+	dest := RealityDest(in)
+	if dest == "" {
+		return "", 0
+	}
+	h, p, err := net.SplitHostPort(dest)
+	if err != nil {
+		return strings.Trim(dest, "[]"), 443
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n <= 0 || n > 65535 {
+		return h, 443
+	}
+	return h, n
 }
 
 // RealitySNI 返回 Reality 入站实际生效的 serverNames 第一个值。

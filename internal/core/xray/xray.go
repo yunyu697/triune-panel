@@ -374,7 +374,11 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 			ts["alpn"] = alpn
 		}
 		if cp := core.Field(in.Settings, "certificate_path"); cp != "" {
-			ts["certificates"] = []any{map[string]any{"certificateFile": cp, "keyFile": core.Field(in.Settings, "key_path")}}
+			kp := core.Field(in.Settings, "key_path")
+			if kp == "" {
+				return nil, fmt.Errorf("TLS 入站填了证书路径但没填私钥路径（key_path）")
+			}
+			ts["certificates"] = []any{map[string]any{"certificateFile": cp, "keyFile": kp}}
 		} else if pem := core.Field(in.Settings, "certificate_pem"); pem != "" {
 			// 内联 PEM：xray 直接吃 PEM 文本数组，不需要落盘
 			cert := map[string]any{"certificate": []string{pem}}
@@ -382,6 +386,11 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 				cert["key"] = []string{kp}
 			}
 			ts["certificates"] = []any{cert}
+		} else {
+			// xray 对「TLS 入站没配证书」是**宽容**的：配置校验通过、进程正常
+			// 启动，直到第一个客户端握手才失败。于是面板显示已启用、节点却
+			// 永远连不上，而且健康检查（只拨端口）也发现不了。在这里拦下。
+			return nil, fmt.Errorf("TLS 入站缺少证书：请填写证书路径与私钥路径（certificate_path / key_path），或在设置里给内联 PEM（certificate_pem / key_pem）")
 		}
 		stream["tlsSettings"] = ts
 	case "reality":
@@ -399,9 +408,13 @@ func (x *Xray) renderInbound(iw core.InboundWithClients) (map[string]any, error)
 		// 表现为「切换内核预检失败：please fill in a valid value for "target"」。
 		// 推导逻辑与诊断探测共用 core.RealityDest，避免两处漂移。
 		dest := core.RealityDest(in)
-		if dest != "" {
-			rs["dest"] = dest
+		if dest == "" {
+			// 缺 dest 时 xray 的报错是 `non-empty "serverNames", please use
+			// "serverName" instead`，完全指不到真因（它把这份配置当成了
+			// 旧版 REALITY 格式）。在这里拦下并说清楚该填什么。
+			return nil, fmt.Errorf("Reality 入站缺少握手目标：请填写 handshake_server（或 dest），例如 www.apple.com:443")
 		}
+		rs["dest"] = dest
 		// serverNames 缺省回退：直接用握手目标的主机名，
 		// 否则 xray 会认为 REALITY 配置不完整。
 		names := core.FieldList(in.Settings, "server_names")

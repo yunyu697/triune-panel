@@ -93,6 +93,24 @@ func TestRealityDestPortFill(t *testing.T) {
 			want:     "www.apple.com:443",
 		},
 		{
+			// xray 原生字段名，手工贴 settings 时常见。不认它就会渲染出
+			// 没有 dest 的 realitySettings，而 xray 对此的报错完全指不到真因。
+			name:     "原生 dest 键",
+			settings: `{"dest":"www.apple.com:443"}`,
+			want:     "www.apple.com:443",
+		},
+		{
+			name:     "原生 dest 是裸域名时补端口",
+			settings: `{"dest":"www.apple.com","handshake_port":8443}`,
+			want:     "www.apple.com:8443",
+		},
+		{
+			// handshake_server（表单字段）优先于 dest（残留字段）
+			name:     "handshake_server 优先于 dest",
+			settings: `{"handshake_server":"a.example.com","dest":"b.example.com:443"}`,
+			want:     "a.example.com:443",
+		},
+		{
 			name:     "非法端口回退 443",
 			settings: `{"handshake_server":"www.apple.com","handshake_port":99999}`,
 			want:     "www.apple.com:443",
@@ -104,5 +122,26 @@ func TestRealityDestPortFill(t *testing.T) {
 				t.Errorf("RealityDest = %q，期望 %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestRealityDestParts 两个渲染器都用拆分后的 host/port：
+// xray 要 host:port，sing-box 要 server + server_port。
+func TestRealityDestParts(t *testing.T) {
+	cases := []struct {
+		settings string
+		host     string
+		port     int
+	}{
+		{`{"handshake_server":"www.apple.com"}`, "www.apple.com", 443},
+		{`{"handshake_server":"www.apple.com","handshake_port":8443}`, "www.apple.com", 8443},
+		{`{"dest":"www.apple.com:2053"}`, "www.apple.com", 2053},
+		{`{"server_names":["www.apple.com"]}`, "www.apple.com", 443},
+	}
+	for _, c := range cases {
+		h, p := RealityDestParts(mkIn(c.settings, "reality"))
+		if h != c.host || p != c.port {
+			t.Errorf("RealityDestParts(%s) = %q/%d，期望 %q/%d", c.settings, h, p, c.host, c.port)
+		}
 	}
 }

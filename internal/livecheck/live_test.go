@@ -68,6 +68,15 @@ func TestXrayRendersValidConfig(t *testing.T) {
 			clients: []*model.Client{client("carol", "22222222-3333-4444-5555-666666666666")},
 		},
 		{
+			// settings 用 xray 原生 dest 键（手工贴片段 / 外部工具生成）。
+			// 曾经 RealityDest 只读 handshake_server，渲染出没有 dest 的
+			// realitySettings，xray 的报错是「serverNames 要改 serverName」，
+			// 与真实原因（缺 dest）毫无关系。
+			name:    "vless-reality-native-dest",
+			inbound: &model.Inbound{Name: "r3", Core: "xray", Protocol: "vless", Port: 24462, Transport: "tcp", TLS: "reality", Settings: `{"private_key":"` + realityPriv(t) + `","dest":"www.apple.com:443","server_names":["www.apple.com"],"short_ids":"ef56"}`},
+			clients: []*model.Client{client("dave", "33333333-4444-5555-6666-777777777777")},
+		},
+		{
 			name:    "vmess-ws-tls",
 			inbound: &model.Inbound{Name: "w", Core: "xray", Protocol: "vmess", Port: 24444, Transport: "ws", TLS: "tls", Settings: `{"path":"/ray","ws_host":"example.com",` + strings.TrimPrefix(tls, "{")},
 			clients: []*model.Client{client("bob", "99999999-8888-7777-6666-555555555555")},
@@ -190,6 +199,14 @@ func TestSingboxRendersValidConfig(t *testing.T) {
 			inbound: &model.Inbound{Name: "v3", Core: "singbox", Protocol: "vless", Port: 24550, Transport: "tcp", TLS: "none"},
 			clients: []*model.Client{client("c", "aaaaaaaa-bbbb-cccc-dddd-0000000000f5")},
 			opts:    convertedGlobal(t),
+		},
+		{
+			// 只填了 SNI 的 Reality 入站（先按 xray 配好，再切 sing-box 的典型）：
+			// handshake 必须回退到 server_names 第一个，否则渲染出 server=""
+			// 的配置，sing-box 的 check 并不拦空串，面板显示已启用却永远连不上。
+			name:    "vless-reality-from-server-names",
+			inbound: &model.Inbound{Name: "r4", Core: "singbox", Protocol: "vless", Port: 24551, Transport: "tcp", TLS: "reality", Settings: `{"private_key":"` + realityPriv(t) + `","server_names":["www.apple.com","apple.com"],"short_ids":["ab12"]}`},
+			clients: []*model.Client{client("erin", "44444444-5555-6666-7777-888888888888")},
 		},
 		{
 			name:    "global-dns-route",

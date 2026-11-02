@@ -407,3 +407,82 @@ func TestRenderGlobalDNSRouting(t *testing.T) {
 		t.Errorf("block 规则应带出 blackhole 出站：%#v", doc["outbounds"])
 	}
 }
+
+// TestRenderRealityNativeDest 守住「settings 用 xray 原生 dest 键」的情况：
+// 曾经 RealityDest 只读 handshake_server / server_name，于是渲染出没有 dest 的
+// realitySettings，xray 26 报 `non-empty "serverNames", please use "serverName"`
+// ——错得完全指不到真因（真实原因是缺 dest），把人往改 SNI 字段名上带。
+func TestRenderRealityNativeDest(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "t-dest", Core: "xray", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","dest":"www.apple.com:443","server_names":["www.apple.com"]}`,
+	}
+	obj, err := x.renderInbound(core.InboundWithClients{Inbound: in})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	stream := obj["streamSettings"].(map[string]any)
+	rs, ok := stream["realitySettings"].(map[string]any)
+	if !ok {
+		t.Fatalf("缺 realitySettings: %#v", stream)
+	}
+	if rs["dest"] != "www.apple.com:443" {
+		t.Errorf("realitySettings.dest = %#v，期望 www.apple.com:443", rs["dest"])
+	}
+	// 原生 dest 不能被透传到入站顶层（sing-box 会严格拒收未知字段）
+	if _, leaked := obj["dest"]; leaked {
+		t.Error("settings 里的 dest 被透传到入站顶层")
+	}
+}
+
+// TestRenderRealityMissingDest 缺握手目标时必须报可读错误，而不是把半成品
+// 交给内核（内核的报错会指向 serverNames 字段名）。
+func TestRenderRealityMissingDest(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "t-nodest", Core: "xray", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV"}`,
+	}
+	_, err := x.renderInbound(core.InboundWithClients{Inbound: in})
+	if err == nil {
+		t.Fatal("缺 dest 应报错")
+	}
+	if !strings.Contains(err.Error(), "握手目标") {
+		t.Errorf("错误信息应说明缺握手目标，实际: %v", err)
+	}
+}
+
+// TestRenderTLSWithoutCert TLS 入站不给证书时必须在渲染期拦下。
+// xray 本身对此是宽容的：配置校验通过、进程正常启动，直到第一个客户端
+// 握手才失败——面板显示已启用、节点却永远连不上，健康检查也发现不了。
+func TestRenderTLSWithoutCert(t *testing.T) {
+	x := &Xray{}
+	in := &model.Inbound{
+		Name: "t-tls", Core: "xray", Protocol: "vless",
+		Port: 443, Transport: "tcp", TLS: "tls",
+		Settings: `{"server_name":"test.local"}`,
+	}
+	_, err := x.renderInbound(core.InboundWithClients{Inbound: in,
+		Clients: []*model.Client{{Name: "u", Credential: "uuid-1", Enabled: true}}})
+	if err == nil {
+		t.Fatal("TLS 无证书应报错")
+	}
+	if !strings.Contains(err.Error(), "证书") {
+		t.Errorf("错误信息应提到证书，实际: %v", err)
+	}
+
+	// 只填证书路径不填私钥同理
+	in.Settings = `{"certificate_path":"/etc/ssl/cert.pem"}`
+	if _, err := x.renderInbound(core.InboundWithClients{Inbound: in}); err == nil {
+		t.Error("只给证书不给私钥应报错")
+	}
+
+	// 内联 PEM 应放行
+	in.Settings = `{"certificate_pem":"CERT","key_pem":"KEY"}`
+	if _, err := x.renderInbound(core.InboundWithClients{Inbound: in}); err != nil {
+		t.Errorf("内联 PEM 应能渲染: %v", err)
+	}
+}
