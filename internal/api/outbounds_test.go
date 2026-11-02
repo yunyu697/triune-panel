@@ -253,3 +253,63 @@ func TestExternalNodesGatedBySetting(t *testing.T) {
 		t.Errorf("自己的入站不该被开关影响，实际:\n%s", body)
 	}
 }
+
+// TestSubOnlyEffectiveSSClient shadowsocks 的服务端密码是入站级单值，
+// 渲染时只取首个启用用户。其余用户拿到的节点密码必然对不上——发出去等于
+// 发一个永远连不上的配置，而面板上看起来一切正常（有节点、有流量统计位）。
+func TestSubOnlyEffectiveSSClient(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+
+	in := &model.Inbound{Name: "ss1", Core: "xray", Protocol: "shadowsocks",
+		Port: 24455, Transport: "tcp", TLS: "none", Enabled: true,
+		Settings: `{"method":"aes-256-gcm"}`}
+	if err := a.Store.CreateInbound(in); err != nil {
+		t.Fatal(err)
+	}
+	u1 := &model.Client{Name: "winner", Credential: "first-pass",
+		SubToken: "tok-ss-1", Enabled: true}
+	u2 := &model.Client{Name: "loser", Credential: "second-pass",
+		SubToken: "tok-ss-2", Enabled: true}
+	for _, c := range []*model.Client{u1, u2} {
+		if err := a.Store.CreateClient(c); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Store.SetClientInbounds(c.ID, []int64{in.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sub := func(tok string) string {
+		req := httptest.NewRequest("GET", "/sub/"+tok, nil)
+		req.Host = "panel.example.com"
+		req.RemoteAddr = "203.0.113.9:1234"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("订阅 %s → %d: %s", tok, w.Code, w.Body.String())
+		}
+		raw := w.Body.String()
+		if dec, err := base64.StdEncoding.DecodeString(raw); err == nil {
+			raw = string(dec)
+		}
+		return raw
+	}
+
+	if body := sub("tok-ss-1"); !strings.Contains(body, "ss1") {
+		t.Errorf("首个启用用户应拿到节点，实际:\n%s", body)
+	}
+	if body := sub("tok-ss-2"); strings.Contains(body, "ss1") {
+		t.Errorf("非生效用户不该拿到这个 shadowsocks 节点（密码对不上），实际:\n%s", body)
+	}
+
+	// 首个用户被停用后，生效者顺延到下一个：两边都按 client_id 顺序取，
+	// 渲染器与订阅必须同时换人，否则又变成一个人拿着错密码。
+	u1.Enabled = false
+	if err := a.Store.UpdateClient(u1); err != nil {
+		t.Fatal(err)
+	}
+	if body := sub("tok-ss-2"); !strings.Contains(body, "ss1") {
+		t.Errorf("首个用户停用后应轮到下一个，实际:\n%s", body)
+	}
+}

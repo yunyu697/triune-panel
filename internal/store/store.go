@@ -482,7 +482,11 @@ func (s *Store) ClientInboundIDs(clientID int64) ([]int64, error) {
 
 // InboundClientIDs 返回关联到某入站的所有用户。
 func (s *Store) InboundClientIDs(inboundID int64) ([]int64, error) {
-	rows, err := s.db.Query(`SELECT client_id FROM client_inbounds WHERE inbound_id=?`, inboundID)
+	// 显式排序：渲染器对「只能有一个凭据生效」的协议（shadowsocks）取的是
+	// 第一个用户，订阅生成要按同一个顺序判断谁才是生效者。无 ORDER BY 时
+	// 返回顺序取决于查询计划，两边各自取「第一个」就可能不是同一个人。
+	rows, err := s.db.Query(
+		`SELECT client_id FROM client_inbounds WHERE inbound_id=? ORDER BY client_id`, inboundID)
 	if err != nil {
 		return nil, err
 	}

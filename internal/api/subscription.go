@@ -49,6 +49,13 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		if !ok || !in.Enabled || in.Draft {
 			continue
 		}
+		// shadowsocks 的服务端密码是入站级单值：xray 只有 2022 系列方法支持
+		// 多用户（且凭据必须是 base64 密钥），sing-box 同样只认入站级 password。
+		// 渲染时取的是**首个启用用户**，所以其余用户拿到的节点密码必然对不上。
+		// 与其发一个永远连不上的配置让人排查半天，不如不发。
+		if in.Protocol == "shadowsocks" && !a.isEffectiveSSClient(in.ID, client.ID) {
+			continue
+		}
 		nodes = append(nodes, a.inboundToNode(in, client, host))
 	}
 	// 外部节点是**全局**的：一旦混进订阅，每个用户的订阅里都会冒出这些节点，
@@ -130,8 +137,27 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// externalInSub 外部节点是否混入订阅输出。
+// isEffectiveSSClient 判断该用户是不是这个 shadowsocks 入站真正生效的那个。
 //
+// 判定顺序必须与渲染器一致：渲染器取「首个启用用户」的凭据写入入站级 password，
+// 而它遍历的也是 InboundClientIDs（已按 client_id 排序）。两边取到同一个人，
+// 这个函数才有意义。
+func (a *Server) isEffectiveSSClient(inboundID, clientID int64) bool {
+	ids, err := a.Store.InboundClientIDs(inboundID)
+	if err != nil {
+		return true // 查不到就不下结论，宁可多发一个节点也不要把人整个订阅清空
+	}
+	for _, id := range ids {
+		c, err := a.Store.GetClient(id)
+		if err != nil || !c.Enabled {
+			continue
+		}
+		return c.ID == clientID
+	}
+	return false
+}
+
+// externalInSub 外部节点是否混入订阅输出。
 // 默认关闭：外部节点是全局的，混进去等于给**每个**用户的订阅都塞上
 // 别人的节点，而这些节点既不受本机配额约束、也不经过本机内核。
 // 只有明确做「订阅聚合」时才打开。
