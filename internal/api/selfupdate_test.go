@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,11 @@ func TestStageReplaceCrossDevice(t *testing.T) {
 		shm = "/dev/shm"
 	}
 	if st, err := os.Stat(shm); err != nil || !st.IsDir() {
+		if runtime.GOOS == "linux" {
+			// Linux 一定有 /dev/shm。真找不到就说明这条用例没跑成，
+			// 而它是 EXDEV 唯一的回归保护——静默跳过等于没有。
+			t.Fatalf("Linux 上找不到 %s，跨设备用例没有真正执行", shm)
+		}
 		t.Skipf("没有可用的第二文件系统（%s），跳过跨设备用例；Linux CI 会跑", shm)
 	}
 	src := filepath.Join(shm, fmt.Sprintf("tp-stage-%d", time.Now().UnixNano()))
