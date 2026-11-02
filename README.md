@@ -1469,6 +1469,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v1.1.0 | 修掉「更新完还是运行旧版本」：自更新不再跨文件系统 rename 直搬（容器/独立分区必失败），重启失败不再静默，`/api/version` 与设置页直接给出「磁盘版本 vs 运行版本」 |
 | v1.0.9 | 修掉「点生成、内核回一句看不懂的话」：本地代理协议（mixed/socks/http）不再被静默跳过、订阅的 proxy-group 名单与 proxies 同源、节点重名自动补序号；生成失败的原因留在页面上 |
 | v1.0.8 | 新增只读「出站」页（出站 / 路由 / DNS 三段带来源标注）；外部节点默认不进订阅；mihomo 降为兼容内核、默认不出现在新建入口；修 direct 规则丢 `outboundTag`、Reality 握手检查误报、UDP 入站判定等一批「能存进去但起不来」的问题 |
 | v1.0.7 | JSON 只解析入站并逐项回填「新增入站」表单，缺用户自动生成；同批补齐 socks/http/dokodemo-door/wireguard、h2/httpupgrade/xhttp/kcp/quic、内联 PEM、DNS 与路由导入 |
