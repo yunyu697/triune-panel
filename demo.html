@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.1.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.1.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1235,20 +1235,31 @@ canvas{display:block;width:100%}
       <div class="card" data-sect="maintain">
         <h3>面板自更新</h3>
         <p class="muted" style="margin-bottom:12px">当前版本 <b id="curver"></b>。更新流程：下载 → 可执行验证 → sha256 校验 → 备份旧文件 → 原子替换 → 无缝重启，数据与配置不受影响。</p>
-        <!-- 「二进制换了、进程没换」必须看得见：以前这种情况界面一切正常，
-             只有版本号不动，用户只能自己 readlink /proc/<pid>/exe 去查。 -->
+        <!-- 「二进制换了、进程没换」必须看得见，而且要**自己修**：以前这种情况
+             界面一切正常、只有版本号不动，用户只能自己 readlink /proc/<pid>/exe 去查，
+             查出来还得手动重启。现在守望者会自己切过去，这里只是把过程说清楚。 -->
         <div id="ver_mismatch" class="hide"
              style="margin-bottom:12px;padding:10px 12px;border-radius:9px;font-size:13px;line-height:1.7;
                     background:color-mix(in srgb,var(--warn) 12%,transparent);
                     border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)">
           <b style="color:var(--warn)">磁盘上的二进制已经是 <span id="vm_disk"></span>，但进程仍在运行 <span id="vm_run"></span></b>
           <div id="vm_msg" class="muted" style="margin-top:4px"></div>
-          <div class="muted" style="margin-top:6px">
-            自更新已经替换了文件，但重启这一步没成功（新进程没起来）。手动重启一次即可生效：
+          <div id="vm_auto" class="muted" style="margin-top:6px"></div>
+          <div id="vm_manual" class="hide" style="margin-top:6px">
+            手动重启一次即可生效：
             <code>sudo systemctl restart triune-panel</code>
             <button class="btn sm" style="margin-left:8px" onclick="location.reload()">已重启，刷新</button>
           </div>
         </div>
+        <div class="radio-row" style="margin:12px 0 0">
+          <label><input type="checkbox" id="s_autoswitch" onchange="saveAutoSwitch(this.checked)"> 二进制换了新版本时自动切换（不用手动重启）</label>
+        </div>
+        <p class="muted" style="margin:4px 0 12px">
+          面板会盯着自己的二进制文件：一键脚本 <code>cp</code>、手工 <code>mv</code>、容器里 <code>docker cp</code>、
+          systemd 只换了文件没重启——只要它<b>稳定地</b>变成了另一个版本，几秒内就会自己 exec 过去，监听与数据无缝衔接。
+          同一版本最多试 2 次，失败会留下说明，不会变成重启风暴。
+          容器编排 / supervisor 下想自己决定重启时机时，关掉这个开关。
+        </p>
         <div class="frm">
           <div class="full"><label>新版本二进制 URL</label><input id="up_url" class="input" placeholder="https://.../triune-panel-linux-amd64"></div>
           <div class="full"><label>sha256（可选）</label><input id="up_sha" class="input mono"></div>
@@ -4934,18 +4945,64 @@ async function loadVersion() {
 /* 「磁盘版本 ≠ 运行版本」的提示。
    面板显示的版本号来自**进程**，所以二进制换了但没重启成功时，界面看着一切正常，
    只有版本号不动 —— 这正是「更新完了还是旧版本」的全部观感。
-   两种证据都算：进程自报的重启失败说明，或磁盘二进制版本与运行版本不一致。 */
+   两种证据都算：进程自报的重启失败说明，或磁盘二进制版本与运行版本不一致。
+
+   现在的重点不是「告诉用户去重启」，而是「面板自己会切过去」：
+   后端有一个守望者盯着二进制，几秒内就 exec 过去。所以这里一边说清楚，
+   一边轮询 /api/version —— 版本一变就刷新页面，用户什么都不用做。 */
+let __vmTimer = null, __vmTicks = 0;
+function stopVerPoll() { if (__vmTimer) { clearInterval(__vmTimer); __vmTimer = null; } }
+function startVerPoll(runVer) {
+  if (__vmTimer) return;
+  __vmTicks = 0;
+  __vmTimer = setInterval(async () => {
+    // 30 秒还没切过去就收手，别一直打接口
+    if (++__vmTicks > 15) {
+      stopVerPoll();
+      const el = $("vm_auto");
+      if (el) el.textContent = "自动切换没有在 30 秒内完成，请看下面的手动办法。";
+      const m = $("vm_manual"); if (m) m.classList.remove("hide");
+      return;
+    }
+    try {
+      // 用免认证的 /api/public/info 探版本，而不是 /api/version：
+      // 换进程意味着内存里的会话表被清空（重启即失效是既定设计），
+      // 用带鉴权的接口探，切成功那一刻恰好会 401，反而看不见新版本。
+      const p = await req("/api/public/info");
+      if (normVer(p.version) !== normVer(runVer)) { location.reload(); return; }
+      const j = await req("/api/version");
+      renderVerMismatch(j);
+    } catch(_) {}
+  }, 2000);
+}
 function renderVerMismatch(j) {
   const box = $("ver_mismatch");
   if (!box) return;
   const disk = (j.binary_version || "").trim();
   const same = disk && normVer(disk) === normVer(j.version);
   const failed = (j.restart_failed || "").trim();
-  if (same && !failed) { box.classList.add("hide"); return; }
+  if (same && !failed) { box.classList.add("hide"); stopVerPoll(); return; }
   $("vm_disk").textContent = disk ? shortVer(disk) : "（读不到）";
   $("vm_run").textContent = j.version;
   $("vm_msg").textContent = failed || "";
+  const au = $("vm_auto"), mn = $("vm_manual");
+  // 版本已经对上了、只是留着一条旧的失败记录：不用做任何事
+  if (same) {
+    if (au) au.textContent = "现在运行的已经是这个版本，这条只是上一次失败的记录，可以忽略。";
+    if (mn) mn.classList.add("hide");
+    box.classList.remove("hide");
+    stopVerPoll();
+    return;
+  }
+  // auto_switch 缺省视为开启（后端默认开，只有显式 "0" 才是关）
+  const auto = j.auto_switch !== "0";
+  if (au) au.textContent = auto
+    ? (failed ? "面板会在几秒内再试一次；一直不行就看下面的手动办法。"
+              : "面板正在自动切换到新版本，几秒内完成，页面会自动刷新（换进程会重置登录态，需要重新登录一次）。")
+    : "「自动切换」当前是关的，所以要你手动重启一次；勾上下面这一项，以后换了二进制面板会自己切过去。";
+  if (mn) mn.classList.toggle("hide", auto && !failed);
   box.classList.remove("hide");
+  if (auto) startVerPoll(j.version); else stopVerPoll();
 }
 // 二进制自报的是整行（"triune-panel v1.0.8 (linux/amd64)"），标题里只留版本与平台
 function shortVer(s) {
@@ -9273,6 +9330,18 @@ async function saveExtInSub(on) {
   }
 }
 
+/* 二进制换了要不要自己切过去（后端 watch.go 的守望者）。
+   默认开：用户要的是「升级完成后立刻是最新版」，而不是「面板提示该重启了」。 */
+async function saveAutoSwitch(on) {
+  try {
+    await req("/api/settings", { method:"PUT", body:{ auto_switch_panel: on ? "1" : "0" } });
+    toast(on ? "已开启：磁盘上的二进制换了新版本会自动切过去" : "已关闭：换二进制后需要手动重启");
+  } catch (e) {
+    $("s_autoswitch").checked = !on;
+    toast(e.message, "err");
+  }
+}
+
 async function loadSettings() {
   // 有没保存的改动就别回填：goto 离开设置页再回来会走 loadAll，
   // 这一趟会把用户正在编辑的内容整个冲掉，而且悄无声息。
@@ -9289,6 +9358,8 @@ async function loadSettings() {
     $("s_fwauto").checked = j.fw_auto !== "0";
     $("s_compat").checked = j.show_compat_core === "1";
     __compatCore = j.show_compat_core === "1";
+    // 未设置 = 默认开启，只有显式 "0" 才是关
+    $("s_autoswitch").checked = j.auto_switch_panel !== "0";
     $("s_trusted_proxies").value = j.trusted_proxies || "";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";

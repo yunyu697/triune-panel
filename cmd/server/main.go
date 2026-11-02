@@ -137,6 +137,13 @@ func serve(args []string) {
 	// 现在能走到这里就说明进程是新的——那条记录已经过期，留着只会误导。
 	_ = st.SetSetting(api.SettingRestartFailed, "")
 
+	// 守望者：磁盘上的二进制被换成别的版本就自己 exec 过去。
+	//
+	// 自更新自己会 exec，但「文件换了、进程没换」不止那一条路：一键脚本 cp、
+	// 手工 mv、容器里 docker cp、systemd 只换了文件没重启……用户要的是
+	// 「升级完成后立刻切到最新版」，不是「面板告诉你该重启了」。
+	srv.StartBinaryWatch()
+
 	// ACME 证书管理器：API 查询与后台签发/续期循环必须使用同一实例，
 	// 否则 API 侧永远看不到后台签发的证书状态。
 	certMgr := certmgr.New(*dataDir, st)

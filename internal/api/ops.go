@@ -225,19 +225,27 @@ func (a *Server) handleTrafficLive(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/version
 //
-// 除运行中版本外，还回两样用于排障的东西：
+// 除运行中版本外，还回三样用于排障的东西：
 //   - binary_version：磁盘上那个二进制自报的版本
 //   - restart_failed：上一次自更新「换了文件却没重启成功」的说明
+//   - auto_switch：磁盘上的二进制变了会不会自动切过去（见 watch.go）
 //
 // 为什么需要它们：面板显示的版本号来自**进程**，所以「二进制换了、进程没换」
 // 时界面看起来一切正常、只有版本号不动。以前这种情况只能靠用户自己去
 // `readlink /proc/<pid>/exe` 看有没有 " (deleted)"。两个值一对比就能一眼看出。
 func (a *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	restartFailed, _ := a.Store.GetSetting(SettingRestartFailed)
+	autoSwitch := "0"
+	if a.autoSwitchOn() {
+		autoSwitch = "1"
+	}
 	writeJSON(w, 200, map[string]string{
 		"version":        Version,
 		"binary_version": a.diskBinaryVersion(),
 		"restart_failed": restartFailed,
+		// 界面据此决定「磁盘版本 ≠ 运行版本」时该说什么：
+		// 开着就说「几秒内自动切换」，关着才让用户自己重启。
+		"auto_switch": autoSwitch,
 	})
 }
 
@@ -254,11 +262,11 @@ func (a *Server) diskBinaryVersion() string {
 	}
 	a.diskVerAt = time.Now()
 	a.diskVer = ""
-	exe, err := os.Executable()
+	exe, err := selfExe()
 	if err != nil {
 		return ""
 	}
-	if v, err := update.BinaryVersion(exe, []string{"-version"}); err == nil {
+	if v, err := probeVer(exe); err == nil {
 		a.diskVer = v
 	}
 	return a.diskVer
@@ -292,7 +300,7 @@ func (a *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL = update.ApplyMirror(req.URL, mirror)
-	exe, err := os.Executable()
+	exe, err := selfExe()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -397,6 +405,33 @@ func stageReplace(newBin, exe string) error {
 		return err
 	}
 	return nil
+}
+
+// selfExe 返回当前进程可执行文件的真实路径。
+//
+// 不能直接用 os.Executable()：Linux 上它读 /proc/self/exe，而**文件一旦被替换或
+// 删除，内核会在路径后面补上 " (deleted)"**。自更新恰恰就是「先换文件、再重启」，
+// 所以第一次 exec 失败后进程还活着时，第二次更新拿到的就是
+// `/usr/local/bin/triune-panel (deleted)` —— 拿它去 rename、去 exec 全都失败，
+// 而且错得莫名其妙（目录里还会多出一个带 " (deleted)" 的垃圾文件）。
+// 这里统一剥掉后缀，并确认文件真的还在。
+func selfExe() (string, error) {
+	p, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return selfExeAt(p)
+}
+
+// selfExeAt 是 selfExe 去掉平台调用之后的部分，单独拆出来才能测。
+func selfExeAt(p string) (string, error) {
+	if i := strings.Index(p, " (deleted)"); i > 0 {
+		p = p[:i]
+	}
+	if _, err := os.Stat(p); err != nil {
+		return "", fmt.Errorf("%s 不存在（二进制已被替换？）: %w", p, err)
+	}
+	return p, nil
 }
 
 // restartSelf 用 exec 把当前进程映像换成刚替换好的二进制。what 是给人看的动作描述

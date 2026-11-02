@@ -389,7 +389,7 @@ func (a *Server) backupDirFor(component string) string {
 // GET /api/panel/backups
 func (a *Server) handlePanelBackups(w http.ResponseWriter, r *http.Request) {
 	backups, _ := update.ListBackups(filepath.Join(a.DataDir, "backups", "panel"))
-	exe, _ := os.Executable()
+	exe, _ := selfExe()
 	writeJSON(w, 200, map[string]any{
 		"current_version": Version,
 		"executable":      exe,
@@ -412,7 +412,7 @@ func (a *Server) handlePanelRollback(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "非法备份名")
 		return
 	}
-	exe, err := os.Executable()
+	exe, err := selfExe()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return

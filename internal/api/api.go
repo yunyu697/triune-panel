@@ -1317,7 +1317,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 外部节点是否混进所有用户的订阅（默认关：见 subscription.go 的说明）
 		externalInSubSetting,
 		// 兼容内核（mihomo）是否出现在「新建入站」的内核下拉里（默认关）
-		ShowCompatCoreSetting} {
+		ShowCompatCoreSetting,
+		// 磁盘上的二进制变了是否自动 exec 过去（默认开，见 watch.go）
+		AutoSwitchSetting} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -1374,6 +1376,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		externalInSubSetting: true,
 		// 兼容内核（mihomo）是否出现在「新建入站」的内核下拉里（默认关）
 		ShowCompatCoreSetting: true,
+		// 磁盘上的二进制变了是否自动 exec 过去（默认开）
+		AutoSwitchSetting: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
