@@ -440,52 +440,237 @@ if [[ -n "$OLD_VER" && -n "$GOT_VER" && "$GOT_VER" != "$OLD_VER" ]]; then
   fi
 fi
 
-# ---- 停旧服务（升级场景）----
-# 必须在替换二进制之前确认旧进程真的退出了。
-# 只发 systemctl stop 而不确认的话，旧进程会继续攥着被替换掉的 inode 跑：
-# 磁盘上是新二进制、页面还是旧版本，而脚本后面还会误报「启动成功」。
-UNIT_EXISTS=0
-if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then UNIT_EXISTS=1; fi
-if [[ "$UNIT_EXISTS" -eq 1 ]]; then
-  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    echo "→ 检测到已有安装，停止旧服务（数据目录保留）"
-    $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      systemctl is-active --quiet "$SERVICE" 2>/dev/null || break
-      sleep 1
-    done
-    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-      echo ""
-      echo "✘ 旧服务没停下来，已中止（否则会装上一个不生效的新版本）"
-      echo "  请手动处理后再重跑："
-      echo "    sudo systemctl stop $SERVICE"
-      echo "    sudo systemctl status $SERVICE --no-pager"
-      echo ""
-      rm -f "$TMP_BIN"; exit 1
-    fi
-  fi
+# ---- 停旧实例（升级场景）----
+# 判据是「谁在监听面板端口」，不是「有没有同名 systemd 单元」。
+#
+# 旧实现只在 UNIT_EXISTS=1 时发 systemctl stop，然后立刻采样一次端口。两个坑：
+#   1) 单元不存在（手动 nohup / docker / openrc / 单元名改过 / systemd 不可用）时
+#      它一个进程都不停，紧接着就撞上端口检查。占用者恰恰是面板自己，用户看到的是
+#      「端口仍被占用，新版本不会生效」——而脚本从没说过该杀谁，也没试过自己杀；
+#   2) 单元存在时，systemctl stop 返回后进程可能还在收尾（停内核、刷库），
+#      监听套接字尚未关闭，单次采样会把「正在退出」判成「还在服务」。
+#
+# 所以改成：先按单元停 → 轮询等端口真正释放 → 仍有占用就按 PID 判断
+# 「是不是面板自己」：是就结束它（这是升级，不是重装别人的服务），
+# 不是就带着完整信息中止，绝不替用户杀无关进程。
+# 「装了 systemctl 但 systemd 没在跑」（容器里很常见，镜像带 systemd 却以别的 init 启动）
+# 和「压根没有 systemd」要当成同一种情况处理。/run/systemd/system 是 systemd 运行时
+# 才有的目录，这是判断它真的在管进程的标准做法。
+HAVE_SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  HAVE_SYSTEMD=1
 fi
 
-# 端口仍被占用 = 还有别的进程在服务面板（手动 nohup / screen / 容器 / 别的单元名）。
-# 这种状态下换二进制同样不生效，先把占用者告诉用户，而不是等 systemd 起不来。
-port_listener() {
+UNIT_EXISTS=0
+if [[ "$HAVE_SYSTEMD" -eq 1 ]] && systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE"; then
+  UNIT_EXISTS=1
+fi
+
+# 本次是否「由脚本亲手结束了非 systemd 托管的面板进程」——是的话装完要拉起来
+PANEL_KILLED_MANUAL=0
+PANEL_OLD_ARGS=()
+PANEL_OLD_PID=""
+
+# 给人看的原始行（ss/lsof/netstat 三者取其一）
+port_listener_lines() {
   if command -v ss >/dev/null 2>&1; then
-    $SUDO ss -lptnH "sport = :$PANEL_PORT" 2>/dev/null | head -3
+    $SUDO ss -lptnH "sport = :$PANEL_PORT" 2>/dev/null | head -5
   elif command -v lsof >/dev/null 2>&1; then
-    $SUDO lsof -nP -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -3
+    $SUDO lsof -nP -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -5
   elif command -v netstat >/dev/null 2>&1; then
-    $SUDO netstat -lptn 2>/dev/null | grep -E "[:.]${PANEL_PORT}[[:space:]]" | head -3
+    $SUDO netstat -lptn 2>/dev/null | grep -E "[:.]${PANEL_PORT}[[:space:]]" | head -5
   fi
 }
-LISTENER="$(port_listener || true)"
-if [[ -n "$LISTENER" ]]; then
+
+# 无 ss/lsof 时的兜底：从 /proc 按监听套接字 inode 反查持有者。
+# state 0A = TCP_LISTEN；只看 LISTEN，避免把 TIME_WAIT 的连接当成占用。
+port_pids_from_proc() {
+  local hex inodes pid fd link
+  [[ -r /proc/net/tcp ]] || return 0
+  hex=$(printf '%04X' "$PANEL_PORT")
+  inodes=$(awk -v p=":$hex" 'NR>1 && $2 ~ p"$" && $4=="0A" {print $10}' \
+           /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u)
+  [[ -n "$inodes" ]] || return 0
+  for pid in /proc/[0-9]*; do
+    [[ -d "$pid/fd" ]] || continue
+    for fd in "$pid"/fd/*; do
+      link=$(readlink "$fd" 2>/dev/null) || continue
+      case "$link" in
+        "socket:["*"]")
+          for i in $inodes; do
+            if [[ "$link" == "socket:[$i]" ]]; then printf '%s\n' "${pid#/proc/}"; break; fi
+          done ;;
+      esac
+    done
+  done | sort -u
+}
+
+port_listener_pids() {
+  local pids=""
+  if command -v ss >/dev/null 2>&1; then
+    pids=$($SUDO ss -lptnH "sport = :$PANEL_PORT" 2>/dev/null \
+           | grep -o 'pid=[0-9][0-9]*' | cut -d= -f2 | sort -u)
+  fi
+  if [[ -z "$pids" ]] && command -v lsof >/dev/null 2>&1; then
+    pids=$($SUDO lsof -nP -t -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null | sort -u)
+  fi
+  if [[ -z "$pids" ]]; then pids=$(port_pids_from_proc); fi
+  printf '%s\n' "$pids" | grep -E '^[0-9]+$' | sort -u || true
+}
+
+# 进程的可执行文件路径；Linux 上二进制被替换后 readlink 会带 " (deleted)" 后缀，
+# 不剥掉就认不出「这就是面板自己」——正好是升级场景。
+# 没有 /proc 时用 lsof，但必须限定 -a -d txt（只要可执行文件），
+# 否则第一行拿到的是进程的 cwd，永远匹配不上面板。
+pid_exe() {
+  local p=""
+  p=$(readlink "/proc/$1/exe" 2>/dev/null) || true
+  if [[ -z "$p" ]] && command -v lsof >/dev/null 2>&1; then
+    p=$($SUDO lsof -nP -p "$1" -a -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+  fi
+  printf '%s' "$p" | sed 's/ (deleted)$//'
+}
+
+pid_cmdline() {
+  local c=""
+  if [[ -r "/proc/$1/cmdline" ]]; then
+    c=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null) || true
+  fi
+  # ps 在某些受限环境（容器安全策略、沙箱）里不可用，拿不到就算了，
+  # 调用方只把它当「给人看的补充信息」
+  if [[ -z "$c" ]]; then c=$(ps -o command= -p "$1" 2>/dev/null) || true; fi
+  printf '%s' "$c" | sed 's/[[:space:]]*$//'
+}
+
+# 进程所属的 systemd 单元（拿不到则为空）。用于「单元名不是 triune-panel.service、
+# 或它其实被另一个 unit 托管」时优先走 systemctl，而不是直接 SIGKILL。
+pid_unit() {
+  [[ -r "/proc/$1/cgroup" ]] || return 0
+  sed -n 's|.*/\([^/]*\.service\).*|\1|p' "/proc/$1/cgroup" 2>/dev/null | head -1
+}
+
+is_panel_exe() {
+  case "$(basename "${1:-}" 2>/dev/null)" in
+    triune-panel|triune-panel.exe) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_listener_details() {
+  local pid unit
+  for pid in "$@"; do
+    echo "    PID $pid  可执行: $(pid_exe "$pid")"
+    echo "           命令行: $(pid_cmdline "$pid")"
+    unit=$(pid_unit "$pid")
+    [[ -n "$unit" ]] && echo "           所属单元: $unit"
+  done
+}
+
+# 轮询到端口真正释放（单位：秒）。进程收到 SIGTERM 后会先收尾再关套接字，
+# 单次采样必然误判，必须等。
+wait_port_free() {
+  local max="${1:-10}" i=0
+  while [[ "$i" -lt $((max * 2)) ]]; do
+    if [[ -z "$(port_listener_pids)" && -z "$(port_listener_lines)" ]]; then return 0; fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  [[ -z "$(port_listener_pids)" && -z "$(port_listener_lines)" ]]
+}
+
+stop_existing_panel() {
+  local pids pid exe unit
+  local -a ours=() others=()
+
+  # (1) 优先交给 systemd：它能连子进程一起收，也不会漏掉 ExecStart 里的参数
+  if [[ "$UNIT_EXISTS" -eq 1 ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    echo "→ 检测到已有安装，停止旧服务 ${SERVICE}（数据目录保留）"
+    $SUDO systemctl stop "$SERVICE" 2>/dev/null || true
+    if wait_port_free 10; then return 0; fi
+    echo "  ${SERVICE} 已停止，但 $PANEL_PORT 仍被占用，继续按进程排查"
+  fi
+
+  # (2) 端口上还有监听者吗
+  pids="$(port_listener_pids)"
+  if [[ -z "$pids" ]]; then
+    if [[ -n "$(port_listener_lines)" ]]; then
+      echo ""
+      echo "✘ 端口 $PANEL_PORT 仍被占用，且无法识别占用进程（权限不足或工具缺失）"
+      echo "  占用者："
+      port_listener_lines | sed 's/^/    /'
+      echo "  请用 root 重跑本脚本（sudo bash install.sh），或手动结束该进程后重试"
+      echo ""
+      return 1
+    fi
+    return 0
+  fi
+
+  # (3) 分类：占用者是面板自己，还是别的程序
+  for pid in $pids; do
+    exe="$(pid_exe "$pid")"
+    if is_panel_exe "$exe"; then ours+=("$pid"); else others+=("$pid"); fi
+  done
+
+  if [[ ${#others[@]} -gt 0 ]]; then
+    echo ""
+    echo "✘ 端口 $PANEL_PORT 被非面板进程占用，换二进制也不会生效，已中止"
+    echo "  占用者："
+    print_listener_details "${others[@]}"
+    echo "  处理：先结束上面这些进程（sudo kill <PID>，或停掉它所属的服务），再重跑本脚本。"
+    echo "        若它其实就是面板（改了名字/自编译），请先把 PANEL_PORT 换成别的端口。"
+    echo ""
+    return 1
+  fi
+
+  # (4) 只剩面板自己：手动启动 / docker / openrc / 单元名被改过 / systemd 不可用。
+  #     旧实现在这里一个进程都不停，于是升级永远卡在端口检查。
+  echo "→ 面板进程仍占用 ${PANEL_PORT}（不归 $SERVICE 管），结束它以便替换二进制"
+  for pid in "${ours[@]}"; do
+    echo "    PID $pid  $(pid_exe "$pid")"
+  done
+
+  PANEL_KILLED_MANUAL=1
+  PANEL_OLD_PID="${ours[0]}"
+  # 记下原参数，无 systemd 时按原样拉起（argv[0] 会被新路径替换，这里只留参数）
+  read -r -a PANEL_OLD_ARGS <<< "$(pid_cmdline "${ours[0]}")"
+
+  # 如果它其实属于某个 unit（只是名字不叫 triune-panel.service），先交给 systemd
+  for pid in "${ours[@]}"; do
+    unit=$(pid_unit "$pid")
+    if [[ -n "$unit" ]]; then
+      echo "    它属于 ${unit}，用 systemctl stop 停"
+      $SUDO systemctl stop "$unit" 2>/dev/null || true
+    fi
+  done
+  sleep 0.5
+
+  for pid in "${ours[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then $SUDO kill "$pid" 2>/dev/null || true; fi
+  done
+  if wait_port_free 10; then
+    echo "  ✓ 端口 $PANEL_PORT 已释放"
+    return 0
+  fi
+
+  # 还在活着：SIGKILL 一次（面板自己的进程，不会有未落盘的数据损失——
+  # 配置写盘是同步的，统计口径允许丢最后几秒）
+  for pid in "${ours[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then $SUDO kill -9 "$pid" 2>/dev/null || true; fi
+  done
+  if wait_port_free 5; then
+    echo "  ✓ 端口 $PANEL_PORT 已释放（SIGKILL）"
+    return 0
+  fi
+
   echo ""
-  echo "✘ 端口 $PANEL_PORT 仍被占用，新版本不会生效（旧进程还在服务）"
-  echo "  占用者："
-  printf '%s\n' "$LISTENER" | sed 's/^/    /'
-  echo "  处理：结束该进程后重跑本脚本；若它就是面板本体，"
-  echo "        sudo kill <PID>   或   sudo systemctl stop <它的服务名>"
+  echo "✘ 结束不掉占用 $PANEL_PORT 的进程，已中止（否则会装上一个不生效的新版本）"
+  port_listener_lines | sed 's/^/    /'
+  echo "  可能原因：权限不足（用 root 重跑）、被 docker / supervisor 托管、或处于 D 状态。"
   echo ""
+  return 1
+}
+
+if ! stop_existing_panel; then
   rm -f "$TMP_BIN"; exit 1
 fi
 
@@ -636,17 +821,92 @@ if ! $SUDO tee "${SYSTEMD_DIR%/}/$SERVICE" >/dev/null < "$UNIT_TMP"; then
 fi
 rm -f "$UNIT_TMP"
 
-# ---- 启停服务（无 systemd 的环境跳过，给出手动启动指引）----
-if command -v systemctl >/dev/null 2>&1; then
-  $SUDO systemctl daemon-reload
+# ---- 启停服务（无 systemd 的环境自己拉起）----
+# 无 systemd 时旧实现只打印「跳过服务注册」，什么也不启动。升级流程如果刚结束掉
+# 旧进程（PANEL_KILLED_MANUAL=1），结果就是「二进制换好了、面板没了」——比卡住更糟。
+start_panel_manually() {
+  local bin="$INSTALL_DIR/triune-panel" log="$INSTALL_DIR/data/panel.log"
+  local -a args=()
+  # 路径含空格时 cmdline 反解不可靠（read -a 按空白切分），宁可退回默认参数，
+  # 也别拿一串被切碎的参数去启动一个起不来的进程。
+  if [[ ${#PANEL_OLD_ARGS[@]} -gt 0 && "$INSTALL_DIR" != *" "* ]]; then
+    # 丢掉旧 argv[0]（指向已被替换的 inode），只保留 -addr / -data 这类参数
+    args=("${PANEL_OLD_ARGS[@]:1}")
+  fi
+  [[ ${#args[@]} -gt 0 ]] || args=(-addr ":$PANEL_PORT" -data "$INSTALL_DIR/data")
+
+  # 容器里面板常常就是 PID 1：在本脚本里杀自己等于容器当场消失，没法自动拉起
+  if [[ "$PANEL_OLD_PID" == "1" || -f /.dockerenv || -f /.containerenv \
+        || -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then
+    echo ""
+    echo "→ 容器 / PID 1 环境：旧进程已结束，新二进制已就位"
+    echo "   重启容器即可生效：docker restart <容器名>（或 kubectl rollout restart）"
+    echo "   面板是 PID 1 时，脚本无法在自己的进程里重启自己。"
+    return 0
+  fi
+
+  if [[ ! -d "$INSTALL_DIR/data" ]] && [[ -w "$INSTALL_DIR" ]]; then
+    mkdir -p "$INSTALL_DIR/data" 2>/dev/null || true
+  fi
+  # 能不能拉起，取决于当前用户能否写数据目录（root 或自定义目录安装可以，
+  # 装到 /opt 的普通用户不行——那就把命令原样交给用户，别装作做到了）
+  if [[ ! -w "$INSTALL_DIR/data" ]]; then
+    echo ""
+    echo "→ 旧进程已结束，但当前用户无权写 $INSTALL_DIR/data，无法在后台拉起面板。请手动启动："
+    echo "    sudo -b $bin ${args[*]} >> $log 2>&1 &"
+    return 0
+  fi
+
+  echo "→ 无 systemd，按原参数在后台启动面板"
+  # setsid 只有 Linux（util-linux）才有，macOS 上没有；没有就退回普通 nohup，
+  # 反正脚本退出时 nohup 已经屏蔽了 SIGHUP。
+  # 注意别用「空数组 + ${arr[@]}」：bash 3.2（macOS 自带）在 set -u 下会把它
+  # 当成 unbound variable 直接报错，而这个脚本是要给别人在 mac 上跑得起来的。
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid "$bin" "${args[@]}" >>"$log" 2>&1 </dev/null &
+  else
+    nohup "$bin" "${args[@]}" >>"$log" 2>&1 </dev/null &
+  fi
+  sleep 2
+  if [[ -n "$(port_listener_pids)" ]]; then
+    echo "  ✓ 已在 $PANEL_PORT 上监听（PID $(port_listener_pids | head -1)），日志：$log"
+    return 0
+  fi
+  echo "  ✘ 没能在 $PANEL_PORT 上监听，日志：$log"
+  tail -n 15 "$log" 2>/dev/null | sed 's/^/    /' || true
+  return 1
+}
+
+if [[ "$HAVE_SYSTEMD" -eq 1 ]]; then
+  $SUDO systemctl daemon-reload || true
   $SUDO systemctl enable "$SERVICE" >/dev/null 2>&1 || true
   # 用 restart 而不是 enable --now：后者对「已经在运行」的单元是空操作，
   # 于是升级时会出现「二进制换了、进程没换」。restart 对未运行的单元等价于 start。
-  $SUDO systemctl restart "$SERVICE"
+  if ! $SUDO systemctl restart "$SERVICE"; then
+    echo ""
+    echo "✘ systemctl restart $SERVICE 失败，新版本没有跑起来"
+    echo "  单元状态："
+    systemctl status "$SERVICE" --no-pager -l 2>/dev/null | sed -n '1,12p' | sed 's/^/    /' || true
+    echo "  最近日志："
+    journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    echo "  修掉原因后执行: sudo systemctl restart $SERVICE"
+    echo ""
+    exit 1
+  fi
   SERVICE_STARTED=1
 else
   SERVICE_STARTED=0
   echo "→ 未检测到 systemd，跳过服务注册（当前环境可能使用 openrc 等其他 init）"
+  if [[ "$PANEL_KILLED_MANUAL" -eq 1 ]]; then
+    # 旧进程是我们结束的，拉不起来就必须明说失败——不能让脚本接着打印「安装完成」
+    if ! start_panel_manually; then
+      echo ""
+      echo "✘ 面板没有启动（二进制已就位，但进程没起来）。排查上面日志后手动启动："
+      echo "    $INSTALL_DIR/triune-panel -addr :$PANEL_PORT -data $INSTALL_DIR/data"
+      echo ""
+      exit 1
+    fi
+  fi
 fi
 
 # ---- 卸载脚本落地：卸载从此不依赖网络 ----
@@ -850,23 +1110,36 @@ else
   sleep 1.5
 fi
 
-if [[ "$SERVICE_STARTED" -eq 1 && -n "$GOT_VER" && -n "$RUNNING_VER" && "$RUNNING_VER" != "$GOT_VER" ]]; then
-  PID_NOW=$(systemctl show -p MainPID --value "$SERVICE" 2>/dev/null || true)
-  EXE_NOW=$(readlink "/proc/${PID_NOW}/exe" 2>/dev/null || true)
+if [[ -n "$GOT_VER" && -n "$RUNNING_VER" && "$RUNNING_VER" != "$GOT_VER" ]]; then
+  PID_NOW=""
+  EXE_NOW=""
+  if [[ "$SERVICE_STARTED" -eq 1 ]]; then
+    PID_NOW=$(systemctl show -p MainPID --value "$SERVICE" 2>/dev/null || true)
+    EXE_NOW=$(readlink "/proc/${PID_NOW}/exe" 2>/dev/null || true)
+  else
+    PID_NOW=$(port_listener_pids | head -1)
+    EXE_NOW=$(pid_exe "$PID_NOW")
+  fi
   echo ""
   echo "✘ 版本对不上：已安装 ${GOT_VER}，但正在运行的是 ${RUNNING_VER}"
   echo "  这说明新二进制已落盘，但旧进程没被换掉（页面会一直显示旧版本）。"
   echo "  诊断信息："
-  echo "    服务主进程: PID=${PID_NOW:-未知}"
+  echo "    运行中进程: PID=${PID_NOW:-未知}"
   case "$EXE_NOW" in
     *"(deleted)"*) echo "    实际可执行: ${EXE_NOW}  ← 文件已被替换，进程仍在跑旧 inode" ;;
     "")            echo "    实际可执行: 未知" ;;
     *)             echo "    实际可执行: ${EXE_NOW}" ;;
   esac
+  echo "    命令行: $(pid_cmdline "$PID_NOW")"
   echo "    端口占用:"
-  port_listener | sed 's/^/      /' || true
+  port_listener_lines | sed 's/^/      /' || true
   echo "  处理："
-  echo "    sudo systemctl restart $SERVICE"
+  if [[ "$SERVICE_STARTED" -eq 1 ]]; then
+    echo "    sudo systemctl restart $SERVICE"
+    echo "    journalctl -u $SERVICE -n 30 --no-pager"
+  else
+    echo "    sudo kill -9 ${PID_NOW:-<PID>} 后重跑本脚本"
+  fi
   echo "    curl -s --noproxy '*' http://127.0.0.1:$PANEL_PORT/api/public/info"
   echo "  仍不行请把上面几行贴出来（多半是还有别的进程在服务这个端口）。"
   echo ""
@@ -877,6 +1150,10 @@ if [[ "$SERVICE_STARTED" -eq 1 && -z "$RUNNING_VER" ]] \
    && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
   echo "⚠ 装完了，但没能从 /api/public/info 读到运行中版本（curl 不可用或面板未监听 ${PANEL_PORT}）"
   echo "  请自行核对: curl -s http://127.0.0.1:$PANEL_PORT/api/public/info"
+  echo "  端口占用情况："
+  port_listener_lines | sed 's/^/    /' || true
+  echo "  最近日志："
+  journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
 fi
 
 # 访问地址探测：
