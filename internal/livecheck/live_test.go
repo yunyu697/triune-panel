@@ -112,6 +112,16 @@ func TestXrayRendersValidConfig(t *testing.T) {
 				RouteJSON:    `{"domainStrategy":"IPIfNonMatch","rules":[{"type":"field","ip":["geoip:private"],"outboundTag":"block"}]}`,
 			},
 		},
+		{
+			// 走 importer 的真实转换路径，重点是**指向 direct 的规则**：
+			// 转换时若删掉 outboundTag，xray 会拒绝整份配置
+			// （"neither outboundTag nor balancerTag is specified"）。
+			// 这个坑只在真机上才看得见，所以必须进这组用例。
+			name:    "imported-route-direct-rule",
+			inbound: &model.Inbound{Name: "v", Core: "xray", Protocol: "vmess", Port: 24456, Transport: "tcp", TLS: "none"},
+			clients: []*model.Client{client("c", "99999999-8888-7777-6666-55555555555a")},
+			opts:    importedGlobalOpts(t),
+		},
 	}
 
 	x := &xray.Xray{}
@@ -194,6 +204,36 @@ func TestSingboxRendersValidConfig(t *testing.T) {
 			runValidate(t, bin, "check", "-c", writeCfg(t, "singbox", out))
 		})
 	}
+}
+
+// importedGlobalOpts 走一遍 importer 的真实转换路径产出 RenderOpts。
+//
+// 关键在 direct 规则：xray 拒绝没有 outboundTag 的规则，所以转换后必须
+// 显式写 outboundTag=direct。曾经这里是"删掉字段，靠默认出站兜底"，
+// 结果导入含 direct 规则的配置后内核启动即 FATAL。
+func importedGlobalOpts(t *testing.T) core.RenderOpts {
+	t.Helper()
+	src := `{
+	  "dns": {"servers": ["1.1.1.1"]},
+	  "routing": {"domainStrategy": "IPIfNonMatch", "rules": [
+	    {"type":"field","ip":["10.0.0.0/8","192.168.0.0/16"],"outboundTag":"direct"},
+	    {"type":"field","domain":["ads.example.com"],"outboundTag":"block"}
+	  ]},
+	  "inbounds": [{"port": 1, "protocol": "vless", "settings": "{}", "streamSettings": "{}"}]
+	}`
+	res, err := importer.ParseFull(src)
+	if err != nil {
+		t.Fatalf("解析导入配置: %v", err)
+	}
+	if res.Global == nil || res.Global.Routing == nil {
+		t.Fatal("应解析出 routing 全局段")
+	}
+	route, err := json.Marshal(res.Global.Routing)
+	if err != nil {
+		t.Fatalf("序列化 routing: %v", err)
+	}
+	dns, _ := json.Marshal(res.Global.DNS)
+	return core.RenderOpts{DNSJSON: string(dns), RouteJSON: string(route)}
 }
 
 func writeCfg(t *testing.T, name string, content []byte) string {

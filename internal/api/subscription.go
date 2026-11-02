@@ -51,13 +51,19 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		}
 		nodes = append(nodes, a.inboundToNode(in, client, host))
 	}
-	ext, _ := a.Store.ListExternalNodes()
-	for _, e := range ext {
-		if n, err := link.Parse(e.RawLink); err == nil {
-			if n.Name == "" {
-				n.Name = e.Name
+	// 外部节点是**全局**的：一旦混进订阅，每个用户的订阅里都会冒出这些节点，
+	// 而它们既不受本机配额约束、也不经过本机内核（是别人的服务器）。
+	// 所以默认**不混**——只有明确要"把机场节点并进自己的订阅"时才在
+	// 「外部节点」页打开开关，见 externalInSub。
+	if a.externalInSub() {
+		ext, _ := a.Store.ListExternalNodes()
+		for _, e := range ext {
+			if n, err := link.Parse(e.RawLink); err == nil {
+				if n.Name == "" {
+					n.Name = e.Name
+				}
+				nodes = append(nodes, n)
 			}
-			nodes = append(nodes, n)
 		}
 	}
 
@@ -83,11 +89,11 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		doc := map[string]any{
-			"port":        7890,
-			"socks-port":  7891,
-			"allow-lan":   false,
-			"mode":        "rule",
-			"log-level":   "info",
+			"port":       7890,
+			"socks-port": 7891,
+			"allow-lan":  false,
+			"mode":       "rule",
+			"log-level":  "info",
 			"proxy-groups": []any{map[string]any{
 				"name":    "PROXY",
 				"type":    "select",
@@ -122,6 +128,20 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n")))))
 	}
+}
+
+// externalInSub 外部节点是否混入订阅输出。
+//
+// 默认关闭：外部节点是全局的，混进去等于给**每个**用户的订阅都塞上
+// 别人的节点，而这些节点既不受本机配额约束、也不经过本机内核。
+// 只有明确做「订阅聚合」时才打开。
+func (a *Server) externalInSub() bool {
+	v, _ := a.Store.GetSetting("external_in_sub")
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
 }
 
 // inboundToNode 把“入站+用户”转为可分享的节点（反向出口）。

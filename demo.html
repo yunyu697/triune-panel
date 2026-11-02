@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.0.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.0.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -745,7 +745,7 @@ canvas{display:block;width:100%}
         <div class="quick-grid">
           <button class="quick" onclick="openInboundModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></span>新增入站</button>
           <button class="quick" onclick="openClientModal()"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
-          <button class="quick" onclick="goto('import')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>导入配置</button>
+          <button class="quick" onclick="goto('import')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>外部节点</button>
           <button class="quick" onclick="goto('gen')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
           <button class="quick" onclick="goto('apply')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
           <button class="quick" onclick="goto('settings')"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
@@ -762,6 +762,46 @@ canvas{display:block;width:100%}
           <thead><tr><th>名称</th><th>内核</th><th>协议</th><th>端口</th><th>传输</th><th>TLS</th><th>启用</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="ibtbody"></tbody>
         </table></div>
+      </div>
+    </section>
+
+    <!-- 出站（只读） -->
+    <section id="v-outbounds" class="view">
+      <div class="card">
+        <h3>出站<span class="muted" style="font-weight:400">（只读）</span><span class="spacer"></span>
+          <select id="ob_core" class="input" style="width:130px" onchange="loadOutbounds()">
+            <option value="xray">xray</option>
+            <option value="singbox">sing-box</option>
+            <option value="mihomo">mihomo</option>
+          </select>
+          <button class="btn sm" onclick="loadOutbounds()">刷新</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          面板是<b>服务端</b>：入站是给客户端连的，进来的流量只能从本机网卡出去，所以出站固定是
+          <code>direct</code>——这里没有「选出口」的余地。只有当你导入的路由里有 <code>block</code> 规则时，
+          面板才会补一条 <code>blackhole</code>，否则那条规则会因为找不到出站而让整份配置校验失败。
+          这一页只把<b>实际渲染出来的结果</b>摊开给人看，改不了任何东西。
+        </p>
+        <div id="ob_notes" style="margin-bottom:10px"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>tag</th><th>类型</th><th>来源</th><th>说明</th></tr></thead>
+          <tbody id="obtbody"></tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>路由规则<span class="muted" style="font-weight:400">（按生效顺序，越靠前越优先）</span></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th style="width:52px">#</th><th>匹配条件</th><th>去向</th><th style="width:96px">来源</th></tr></thead>
+          <tbody id="obrbody"></tbody>
+        </table></div>
+        <p class="muted" style="margin-top:10px">
+          面板自己写的统计规则必须排在最前（<code>inboundTag=api</code> 分到 <code>api</code> 出站），
+          否则采样器读不到流量计数；从 3x-ui 导入的规则一律追加在它后面。
+        </p>
+      </div>
+      <div class="card">
+        <h3>DNS<span class="spacer"></span><span class="muted" id="ob_dns_note" style="font-size:12.5px"></span></h3>
+        <pre id="ob_dns" class="mono" style="margin:0;padding:12px;border:1px solid var(--line);border-radius:10px;max-height:320px;overflow:auto;font-size:12px"></pre>
       </div>
     </section>
 
@@ -801,51 +841,45 @@ canvas{display:block;width:100%}
       </div>
     </section>
 
-    <!-- 导入 -->
+    <!-- 外部节点 -->
     <section id="v-import" class="view">
       <div class="card">
-        <h3>建入站：请到「入站 → 新增入站」<span class="muted" style="font-weight:400">（JSON 导入已挪到那里）</span></h3>
+        <h3>订阅输出<span class="spacer"></span><span class="muted" id="ext_sw_state" style="font-size:12.5px"></span></h3>
         <p class="muted" style="margin-bottom:12px">
-          现在建入站只有一条路：<b>入站</b>页点「+ 新增入站」，在弹窗里展开「从 JSON 填入」，
-          粘贴 3x-ui / x-ui 导出的入站 JSON（或 xray 原生入站对象），面板会把协议、端口、传输、
-          TLS / Reality、路径等字段<strong>逐项填进表单</strong>，你核对或改完再保存。
+          外部节点是<strong>全局</strong>的：打开后，<b>每一个用户</b>的订阅里都会带上下面这些节点。
+          它们既不受本机配额约束、也不经过本机内核（是别人的服务器），所以<strong>默认关闭</strong>。
+          自己一个人用请保持关闭；只有做「多订阅合并」——比如把自己的服务器和机场节点并成一个订阅发出去——才需要打开。
         </p>
-        <p class="muted" style="margin-bottom:12px">
-          JSON 里的用户（UUID / 密码 / 用户名:密码）也会一并带出来；如果 JSON 里没有用户，
-          面板会<strong>自动生成一个</strong>，保存时和入站一起创建——否则你建出来的会是一个谁都连不上的空入站。
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn primary" onclick="goto('inbounds');openInboundModal()">去新增入站</button>
+        <div class="radio-row" style="margin:0">
+          <label><input type="checkbox" id="ext_in_sub" onchange="saveExtInSub(this.checked)"> 把外部节点混入所有用户的订阅（立即生效，无需应用配置）</label>
         </div>
-        <p class="muted" style="margin:12px 0 0;font-size:12.5px">
-          支持协议 vless / vmess / trojan / shadowsocks / socks / http / dokodemo-door / wireguard，
-          传输 tcp / ws / grpc / h2 / httpupgrade / xhttp / kcp / quic（不支持的按目标内核自动转换并提示）。
-          内联 PEM 证书会写入 <code>data/certs/</code>。
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">
+          开关只影响订阅输出，不动本机任何内核配置——外部节点从来不会被渲染进服务端配置。
         </p>
       </div>
       <div class="card">
-        <h3>分享链接<span class="muted" style="font-weight:400">（只导入为外部节点，用于订阅聚合）</span></h3>
+        <h3>分享链接<span class="muted" style="font-weight:400">（导入为外部节点）</span></h3>
         <p class="muted" style="margin-bottom:12px">
           粘贴 vless:// vmess:// trojan:// ss:// hysteria2:// tuic:// 链接（可多条，或整段 base64 订阅）。
           分享链接是客户端视角的快照，<strong>没有</strong> Reality 私钥、证书与多用户，反推不出服务端——
-          要建入站请用「入站 → 新增入站」里的 JSON 填入。
+          要建入站请用「入站 → 新增入站」里的「从 JSON 填入」。
         </p>
         <textarea id="im_text" class="input" placeholder="在此粘贴链接..."></textarea>
         <div style="margin-top:12px"><button class="btn primary" onclick="doImport()">解析并导入</button></div>
         <div id="immsg" style="margin-top:8px"></div>
       </div>
-  <div class="card">
-    <h3>订阅 URL 聚合<span class="muted" style="font-weight:400">（多节点聚合：拉取远端订阅并入外部节点，仅聚合进本面板订阅输出）</span></h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input id="iu_url" class="input" style="flex:1;min-width:260px" placeholder="https://provider.example.com/api/v1/client/subscribe?token=...">
-      <input id="iu_prefix" class="input" style="width:140px" placeholder="节点名前缀（可选）">
-      <button class="btn primary" onclick="importSubURL()">拉取并导入</button>
-    </div>
-    <p class="muted" style="margin:8px 0 0;font-size:12.5px">支持 base64 链接列表、明文分享链接与 Clash YAML；已存在的节点自动跳过。外部节点只进订阅，不会改动本机任何内核配置。</p>
-    <div id="iumsg" style="margin-top:8px;font-size:12.5px"></div>
-  </div>
       <div class="card">
-        <h3>外部节点<span class="muted" style="font-weight:400">（仅聚合进订阅，不生成本地配置）</span><span class="spacer"></span><button class="btn sm" onclick="loadExternal()">刷新</button></h3>
+        <h3>订阅 URL 聚合<span class="muted" style="font-weight:400">（拉取远端订阅并入外部节点）</span></h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="iu_url" class="input" style="flex:1;min-width:260px" placeholder="https://provider.example.com/api/v1/client/subscribe?token=...">
+          <input id="iu_prefix" class="input" style="width:140px" placeholder="节点名前缀（可选）">
+          <button class="btn primary" onclick="importSubURL()">拉取并导入</button>
+        </div>
+        <p class="muted" style="margin:8px 0 0;font-size:12.5px">支持 base64 链接列表、明文分享链接与 Clash YAML；已存在的节点自动跳过。</p>
+        <div id="iumsg" style="margin-top:8px;font-size:12.5px"></div>
+      </div>
+      <div class="card">
+        <h3>外部节点<span class="muted" style="font-weight:400">（仅进订阅，不生成本地配置）</span><span class="spacer"></span><button class="btn sm" onclick="loadExternal()">刷新</button></h3>
         <div class="tbl-wrap"><table>
           <thead><tr><th>名称</th><th>协议</th><th>地址</th><th>导入时间</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="extbody"></tbody>
@@ -3967,9 +4001,10 @@ const ICONS = {
 const VIEWS = [
   ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
   ["inbounds","入站","网络服务","管理监听端口、协议、传输与 TLS"],
+  ["outbounds","出站","网络服务","查看当前内核渲染出的出站、路由规则与 DNS（只读）"],
   ["clients","用户","网络服务","账号、凭据、配额与到期时间"],
   ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
-  ["import","导入配置","配置","把分享链接聚合成外部节点；建入站请用「入站 → 新增入站」里的 JSON 填入"],
+  ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出；建入站请用「入站 → 新增入站」"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
   ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
   ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
@@ -4019,6 +4054,7 @@ function goto(v, sect) {
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
   if (v === "overview") setTimeout(loadOverview, 30);
+  if (v === "outbounds") loadOutbounds();
   if (v === "audit") loadAudit();
   if (v === "configs") loadSavedConfigs();
   if (v === "settings") setTimeout(() => {
@@ -4228,7 +4264,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client"},
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0"},
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
       {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
@@ -4358,6 +4394,8 @@ async function mockRoute(path, opts) {
   }
   // 演示模式：JSON → 表单解析（真机由后端 /api/inbounds/parse-json 完成）
   if (api === "inbounds" && rest === "/parse-json") return demoFillInbound(String(opts.body?.text || ""), opts.body?.core || "xray");
+  // 演示模式：出站 / 路由 / DNS 的只读视图（真机由后端渲染当前配置得到）
+  if (api === "outbounds" && m === "GET") return demoOutbounds(q.core || "xray");
   if (api === "inbounds" && m === "GET") return MDB.inbounds;
   if (api === "inbounds" && m === "POST") { const b = Object.assign({}, opts.body); b.id = Math.max(0,...MDB.inbounds.map(x=>x.id))+1; b.enabled=false; b.draft=false; MDB.inbounds.push(b); return b; }
   if (api === "inbounds" && m === "PUT") { const id=+rest.split("/")[1]; const i=MDB.inbounds.findIndex(x=>x.id===id); MDB.inbounds[i]=Object.assign({},MDB.inbounds[i],opts.body,{id}); return MDB.inbounds[i]; }
@@ -4502,6 +4540,52 @@ async function mockRoute(path, opts) {
   if (api === "panel/backups") return {current_version:"v0.5.0-demo",executable:"/opt/triune-panel/triune-panel",backups:["v0.4.0-20261015-090000.bak","v0.3.0-20261002-180000.bak"],bak_exists:true};
   if (api === "panel/rollback") { await new Promise(r=>setTimeout(r,600)); return {ok:1,msg:"回滚完成，正在重启..."}; }
   return {};
+}
+
+/* 演示模式下的出站视图数据（仅 DEMO 生效）。
+   真机上这些字段来自后端把当前入站渲染成配置后抽出来的结果
+   （internal/api/outbounds.go），演示页没有后端，就用一份结构一致的样例。 */
+function demoOutbounds(core) {
+  const common = "服务端出站固定为 direct（freedom）：入站流量只能从本机出去，面板不提供上游代理 / 链式代理。";
+  if (core === "mihomo") return {
+    core, inbound_count: 3,
+    outbounds: [{ tag: "DIRECT", type: "direct（隐式）", source: "builtin",
+      note: "服务端模式不写 proxies，未匹配规则的流量直接走本机网络" }],
+    route_rules: [], dns: null, dns_imported: false, route_imported: false,
+    notes: ["mihomo 用 listeners 做服务端，不写 proxies：所有入站流量直接走本机网络出口。",
+      "没有任何路由规则：全部流量直接出网。",
+      "没有导入 DNS 段，域名解析走内核默认（系统 DNS）。"],
+  };
+  if (core === "singbox") return {
+    core, inbound_count: 3,
+    outbounds: [{ tag: "direct", type: "direct", source: "builtin" }],
+    route_rules: [{ index: 1, source: "imported", outbound: "action=reject",
+      summary: "domain_suffix=ads.example.com → action=reject",
+      raw: { domain_suffix: ["ads.example.com"], action: "reject" } }],
+    dns: { servers: [{ tag: "dns-remote", address: "https://1.1.1.1/dns-query" }] },
+    dns_imported: true, route_imported: true,
+    notes: [common,
+      "路由规则来自导入的 3x-ui / xray 配置，追加在面板统计规则之后——统计规则必须最前，否则读不到流量计数。"],
+  };
+  return {
+    core, inbound_count: 3,
+    outbounds: [
+      { tag: "direct", type: "freedom", source: "builtin" },
+      { tag: "block", type: "blackhole", source: "builtin" },
+    ],
+    route_rules: [
+      { index: 1, source: "panel", outbound: "api", summary: "inboundTag=api → api",
+        raw: { type: "field", inboundTag: ["api"], outboundTag: "api" } },
+      { index: 2, source: "imported", outbound: "block",
+        summary: "domain=ads.example.com,tracker.example.net → block",
+        raw: { type: "field", domain: ["ads.example.com", "tracker.example.net"], outboundTag: "block" } },
+    ],
+    dns: { servers: ["1.1.1.1", "8.8.8.8"] },
+    dns_imported: true, route_imported: true,
+    notes: [common,
+      "路由规则来自导入的 3x-ui / xray 配置，追加在面板统计规则之后——统计规则必须最前，否则读不到流量计数。",
+      "出站多于一条，说明导入的路由里有 block 规则，面板为此补了 blackhole 出站。"],
+  };
 }
 
 /* 演示模式下的「JSON → 入站表单」解析（仅 DEMO 生效）。
@@ -8820,6 +8904,56 @@ async function doImport() {
   } catch (e) { toast(e.message, "err"); }
 }
 
+/* ---- 出站 / 路由 / DNS（只读）---- */
+// 这一页不做任何配置：服务端出站固定 direct，展示的只是"渲染出来是什么"。
+// 价值在排障——「我导入的路由规则到底生效了没」「统计规则的顺序对不对」
+// 这两个问题，看渲染结果最快。
+async function loadOutbounds() {
+  const core = $("ob_core").value;
+  try {
+    const j = await req("/api/outbounds?core=" + core);
+    if (j.render_error) {
+      $("obtbody").innerHTML = `<tr><td colspan="4" style="color:var(--err)">渲染失败：${escHtml(j.render_error)}</td></tr>`;
+      $("obrbody").innerHTML = `<tr><td colspan="4" class="empty">先修掉上面的渲染错误</td></tr>`;
+      $("ob_dns").textContent = "—"; $("ob_dns_note").textContent = "";
+      $("ob_notes").innerHTML = "";
+      return;
+    }
+    $("ob_notes").innerHTML = (j.notes || []).map(n =>
+      `<div class="muted" style="font-size:12.5px;margin-bottom:4px">· ${escHtml(n)}</div>`).join("");
+
+    const outs = j.outbounds || [];
+    $("obtbody").innerHTML = outs.map(o => {
+      const src = o.source === "imported"
+        ? `<span style="color:var(--warn,#c47f17)">导入</span>`
+        : `<span style="color:var(--ok)">内置</span>`;
+      return `<tr><td class="mono">${escHtml(o.tag)}</td><td>${escHtml(o.type)}</td><td>${src}</td>
+        <td class="muted">${escHtml(o.note || "")}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" class="empty">没有任何出站</td></tr>`;
+
+    const rules = j.route_rules || [];
+    $("obrbody").innerHTML = rules.map(r => {
+      const src = r.source === "panel"
+        ? `<span style="color:var(--acc-text)">面板统计</span>`
+        : `<span style="color:var(--warn,#c47f17)">导入</span>`;
+      const raw = escHtml(JSON.stringify(r.raw));
+      return `<tr><td class="muted">${r.index}</td>
+        <td style="max-width:520px" title="${raw}">${escHtml(r.summary)}</td>
+        <td class="mono">${escHtml(r.outbound || "—")}</td><td>${src}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" class="empty">没有路由规则：全部流量直接出网</td></tr>`;
+
+    if (j.dns) {
+      $("ob_dns").textContent = JSON.stringify(j.dns, null, 2);
+      $("ob_dns_note").textContent = j.dns_imported ? "来自导入的 3x-ui / xray 配置" : "";
+    } else {
+      $("ob_dns").textContent = "—（没有 dns 段，域名解析走内核默认）";
+      $("ob_dns_note").textContent = "";
+    }
+  } catch (e) {
+    $("obtbody").innerHTML = `<tr><td colspan="4" style="color:var(--err)">${escHtml(e.message)}</td></tr>`;
+  }
+}
+
 /* ---- 外部节点 ---- */
 let EXT = [];
 async function loadExternal() {
@@ -8990,6 +9124,25 @@ async function selfUpdate() {
     setTimeout(() => location.reload(), 5000);
   } catch (e) { toast(e.message, "err"); }
 }
+/* 外部节点是否混入订阅：开关只影响订阅输出，不动本机内核配置。
+   默认关闭——外部节点是全局的，混进去等于给每个用户都塞上别人的节点。 */
+function extSwitchLabel(on) {
+  const el = $("ext_sw_state");
+  if (el) el.textContent = on ? "已开启：外部节点会进入每个用户的订阅" : "已关闭：订阅只包含本机入站";
+}
+async function saveExtInSub(on) {
+  try {
+    await req("/api/settings", { method:"PUT", body:{ external_in_sub: on ? "1" : "0" } });
+    extSwitchLabel(on);
+    toast(on ? "已开启：外部节点将混入所有用户的订阅" : "已关闭：订阅只含本机节点");
+  } catch (e) {
+    // 保存失败要把勾选状态退回去，否则界面显示"已开启"但实际没生效
+    $("ext_in_sub").checked = !on;
+    extSwitchLabel(!on);
+    toast(e.message, "err");
+  }
+}
+
 async function loadSettings() {
   // 有没保存的改动就别回填：goto 离开设置页再回来会走 loadAll，
   // 这一趟会把用户正在编辑的内容整个冲掉，而且悄无声息。
@@ -9000,6 +9153,7 @@ async function loadSettings() {
     $("s_binsingbox").value = j.bin_singbox || ""; $("s_binxray").value = j.bin_xray || "";
     $("s_binmihomo").value = j.bin_mihomo || ""; $("s_host").value = j.public_host || "";
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
+    $("ext_in_sub").checked = j.external_in_sub === "1"; extSwitchLabel(j.external_in_sub === "1");
     $("s_metrics_token").value = j.metrics_token || "";
     $("s_warn_pct").value = j.quota_warn_pct || 80;
     $("s_fwauto").checked = j.fw_auto !== "0";

@@ -182,10 +182,23 @@ func globalOf(root any) *Global {
 }
 
 // filterRoutingRules 只保留指向内置出站的规则，并把 block 统一成 blackhole 语义。
+//
+// 注意：指向 direct 的规则**必须显式写 outboundTag=direct**，不能删字段。
+// xray 会直接拒绝没有 outboundTag 的规则（实测 26.10.31）：
+//
+//	infra/conf: neither outboundTag nor balancerTag is specified in routing rule
+//
+// 一旦这种规则进了渲染结果，内核启动即 FATAL —— 而这个错误只在真机上才看得见。
 func filterRoutingRules(rules []any) (kept []any, dropped int) {
 	for _, it := range rules {
 		r := asMap(it)
 		if len(r) == 0 {
+			continue
+		}
+		// 用 balancerTag 的规则依赖负载均衡器配置，面板不渲染 balancer，
+		// 照搬会指向一个不存在的 balancer，只能丢掉。
+		if _, ok := r["balancerTag"]; ok {
+			dropped++
 			continue
 		}
 		switch strings.ToLower(asString(r["outboundTag"])) {
@@ -194,7 +207,7 @@ func filterRoutingRules(rules []any) (kept []any, dropped int) {
 			for k, v := range r {
 				cp[k] = v
 			}
-			delete(cp, "outboundTag") // 空 outboundTag = 默认 direct
+			cp["outboundTag"] = "direct"
 			kept = append(kept, cp)
 		case "block", "blocked", "blackhole":
 			cp := map[string]any{}

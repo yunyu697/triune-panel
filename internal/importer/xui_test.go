@@ -352,8 +352,10 @@ func TestParseGlobalDNSAndRouting(t *testing.T) {
 	if len(rules) != 2 {
 		t.Fatalf("应只保留 direct/block 两条规则，实际 %d：%#v", len(rules), rules)
 	}
-	if rules[0].(map[string]any)["outboundTag"] != nil {
-		t.Errorf("direct 规则的 outboundTag 应去掉（默认即 direct）：%#v", rules[0])
+	// 指向 direct 的规则必须显式保留 outboundTag：xray 拒绝没有出站的规则，
+	// 删字段靠"默认出站"兜底会让整份配置启动即 FATAL。
+	if got := rules[0].(map[string]any)["outboundTag"]; got != "direct" {
+		t.Errorf("direct 规则应保留 outboundTag=direct，实际 %#v", rules[0])
 	}
 	if rules[1].(map[string]any)["outboundTag"] != "block" {
 		t.Errorf("block 规则应统一成 block：%#v", rules[1])
@@ -373,5 +375,48 @@ func TestParseSingboxInboundHint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sing-box") {
 		t.Errorf("错误信息应点明这是 sing-box 的入站：%v", err)
+	}
+}
+
+// TestRoutingRulesKeepDirectTag 指向 direct 的规则必须保留 outboundTag。
+//
+// xray 对没有出站的规则是**直接拒绝**整份配置（实测 26.10.31）：
+//
+//	infra/conf: neither outboundTag nor balancerTag is specified in routing rule
+//
+// 所以转换时不能"删掉字段靠默认出站兜底"——那会让导入后的配置一启动就 FATAL。
+// 用 balancerTag 的规则面板没有负载均衡器，照搬会指向不存在的 balancer，只能丢。
+func TestRoutingRulesKeepDirectTag(t *testing.T) {
+	res, err := ParseFull(`{"routing":{"rules":[
+	  {"type":"field","ip":["10.0.0.0/8"],"outboundTag":"direct"},
+	  {"type":"field","domain":["a.com"]},
+	  {"type":"field","domain":["b.com"],"balancerTag":"lb"},
+	  {"type":"field","domain":["c.com"],"outboundTag":"proxy"}
+	]},"inbounds":[{"port":1,"protocol":"vless","settings":"{}","streamSettings":"{}"}]}`)
+	if err != nil {
+		t.Fatalf("解析: %v", err)
+	}
+	if res.Global == nil || res.Global.Routing == nil {
+		t.Fatal("应解析出 routing 段")
+	}
+	rules, _ := res.Global.Routing["rules"].([]any)
+	// 保留 2 条：显式 direct 的、以及没写出站的（补成 direct）；
+	// balancer 与代理出站的各丢 1 条。
+	if len(rules) != 2 {
+		t.Fatalf("应保留 2 条规则，实际 %d: %+v", len(rules), rules)
+	}
+	for i, it := range rules {
+		if got := asString(asMap(it)["outboundTag"]); got != "direct" {
+			t.Errorf("第 %d 条规则的 outboundTag = %q，必须是 direct（xray 拒绝空出站）", i+1, got)
+		}
+	}
+	var warnHit bool
+	for _, w := range res.Global.Warnings {
+		if strings.Contains(w, "指向代理出站") {
+			warnHit = true
+		}
+	}
+	if !warnHit {
+		t.Errorf("丢弃 balancer / 代理规则时应给出提示，实际 %v", res.Global.Warnings)
 	}
 }

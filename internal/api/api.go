@@ -82,6 +82,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
+	// 出站 / 路由 / DNS 的只读视图：渲染当前入站后抽三段出来，不落盘不重启。
+	// 只读角色也能看——里面不含任何凭据，而它本来就是给排障用的。
+	mux.HandleFunc("GET /api/outbounds", a.auth(a.handleOutbounds))
 	mux.HandleFunc("GET /api/inbounds/{id}/check", a.auth(a.checkInbound))
 	mux.HandleFunc("GET /api/external-nodes", a.auth(a.listExternal))
 	mux.HandleFunc("GET /api/revisions", a.auth(a.listRevisions))
@@ -1181,7 +1184,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"smtp_host", "smtp_port", "smtp_user", "smtp_from",
 		// 变更通知：Webhook 地址可能带 token，但它是「自己填给自己看」的配置，
 		// 只读角色拿不到这个接口（write 档），所以照常回显便于核对。
-		NotifyEmailSetting, NotifyWebhookSetting, NotifyEventsSetting} {
+		NotifyEmailSetting, NotifyWebhookSetting, NotifyEventsSetting,
+		// 外部节点是否混进所有用户的订阅（默认关：见 subscription.go 的说明）
+		"external_in_sub"} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -1234,6 +1239,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		"smtp_pass": true, "smtp_from": true,
 		// 变更通知（收件邮箱 / Webhook / 订阅哪些事件）
 		NotifyEmailSetting: true, NotifyWebhookSetting: true, NotifyEventsSetting: true,
+		// 外部节点是否混进所有用户的订阅（默认关）
+		"external_in_sub": true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
