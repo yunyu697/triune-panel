@@ -552,6 +552,36 @@ pid_unit() {
   sed -n 's|.*/\([^/]*\.service\).*|\1|p' "/proc/$1/cgroup" 2>/dev/null | head -1
 }
 
+# 进程是否跑在容器里：看 cgroup 里有没有容器运行时留下的路径片段。
+# 用来避免「在宿主机上把容器里的面板杀了」——那等于停掉整个容器；有 restart 策略的
+# 还会被立刻拉起来，于是端口永远占用，看起来就像「升级不生效」。而且容器内的数据卷
+# 不在宿主机的安装目录里，宿主机脚本既换不了容器里的二进制，也拉不起容器里的进程。
+cgroup_is_container() {
+  case "${1:-}" in
+    *docker*|*kubepods*|*containerd*|*libpod*|*podman*|*lxc*) return 0 ;;
+  esac
+  return 1
+}
+
+pid_in_container() {
+  [[ -r "/proc/$1/cgroup" ]] || return 1
+  cgroup_is_container "$(cat "/proc/$1/cgroup" 2>/dev/null || true)"
+}
+
+# 本脚本自己是否跑在「会随进程一起消失」的容器里：是的话杀面板可能连带容器一起退出，
+# 脚本自己也活不了。
+# 故意不看 lxc / systemd-nspawn：那种「整机容器」（廉价 VPS 常见）里面板只是个普通进程，
+# 结束它不会带走整台环境，照常「杀 + 拉起」才是对的。
+self_in_container() {
+  if [[ -f /.dockerenv || -f /.containerenv ]]; then return 0; fi
+  if [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then return 0; fi
+  [[ -r /proc/self/cgroup ]] || return 1
+  case "$(cat /proc/self/cgroup 2>/dev/null || true)" in
+    *docker*|*kubepods*|*containerd*|*libpod*|*podman*) return 0 ;;
+  esac
+  return 1
+}
+
 is_panel_exe() {
   case "$(basename "${1:-}" 2>/dev/null)" in
     triune-panel|triune-panel.exe) return 0 ;;
@@ -567,6 +597,7 @@ print_listener_details() {
     unit=$(pid_unit "$pid")
     [[ -n "$unit" ]] && echo "           所属单元: $unit"
   done
+  return 0
 }
 
 # 轮询到端口真正释放（单位：秒）。进程收到 SIGTERM 后会先收尾再关套接字，
@@ -625,16 +656,45 @@ stop_existing_panel() {
     return 1
   fi
 
-  # (3.5) 容器里面板常常就是 PID 1。杀掉它 = 杀掉整个容器，脚本自己也会跟着死，
-  #       所以这种情况下不杀，改为「新二进制就位 + 重启容器」，在装完后提示。
+  # (3.4) 容器边界：占着端口的面板跑在容器里，而本脚本在宿主机上。
+  #       杀它 = 停掉整个容器，配了 restart 策略的还会被立刻拉起来（端口继续被占，
+  #       看起来就是「怎么升都不生效」）；而且宿主机的安装目录和容器内的数据卷是
+  #       两回事，就算换了文件也换不到容器里那份。所以不杀、不装，把做法说清楚。
+  if ! self_in_container; then
+    for pid in "${ours[@]}"; do
+      if pid_in_container "$pid"; then
+        echo ""
+        echo "✘ 端口 ${PANEL_PORT} 上的面板跑在容器里，不是本机安装的实例"
+        print_listener_details "$pid"
+        echo "  本脚本在宿主机上改不了容器内的二进制，也不会去杀容器里的进程"
+        echo "  （杀了等于停容器；配了 restart 策略的会被立刻拉起来，端口还是被占）。"
+        echo ""
+        echo "  处理：在容器里升级后重建容器，例如"
+        echo "    docker compose pull && docker compose up -d"
+        echo "  或进入容器执行：docker exec -it <容器名> bash，再在里面跑本脚本"
+        echo ""
+        return 1
+      fi
+    done
+  fi
+
+  # (3.5) 面板就在本容器内（常见于面板是容器主进程 PID 1）。杀掉它 = 杀掉整个容器，
+  #       脚本自己也会跟着死，所以不杀，改为「新二进制就位 + 重启容器」，在装完后提示。
   if [[ " ${ours[*]} " == *" 1 "* ]]; then
     PANEL_IS_INIT=1
     echo "→ 面板在本容器内是 PID 1（pid=1），不停止它（停止会连带容器一起消失）"
     echo "  新二进制放好后重启容器即可生效"
     return 0
   fi
+  if self_in_container; then
+    PANEL_IS_INIT=1
+    echo "→ 本脚本运行在容器内，结束面板会连带容器一起退出（脚本自己也会被带走），不停止它"
+    echo "  新二进制放好后重启容器即可生效"
+    return 0
+  fi
 
-  # (4) 只剩面板自己：手动启动 / docker / openrc / 单元名被改过 / systemd 不可用。
+  # (4) 只剩面板自己：手动启动 / openrc / 单元名被改过 / systemd 不可用
+  #     （容器里的两种情况已在 3.4 / 3.5 处理掉）。
   #     旧实现在这里一个进程都不停，于是升级永远卡在端口检查。
   echo "→ 面板进程仍占用 ${PANEL_PORT}（不归 $SERVICE 管），结束它以便替换二进制"
   for pid in "${ours[@]}"; do
