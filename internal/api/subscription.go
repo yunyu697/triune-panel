@@ -162,7 +162,7 @@ func (a *Server) isEffectiveSSClient(inboundID, clientID int64) bool {
 // 别人的节点，而这些节点既不受本机配额约束、也不经过本机内核。
 // 只有明确做「订阅聚合」时才打开。
 func (a *Server) externalInSub() bool {
-	v, _ := a.Store.GetSetting("external_in_sub")
+	v, _ := a.Store.GetSetting(externalInSubSetting)
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "1", "true", "on", "yes":
 		return true

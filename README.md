@@ -6,6 +6,9 @@
 三内核（**mihomo / sing-box / xray**）统一管理面板 —— Go 单二进制 + 内置 Web UI。
 一条命令装完，不需要另配数据库、反向代理或前端构建。
 
+> mihomo 是**兼容内核**：它的协议是 sing-box 的子集，且缺 vless / reality，所以新建入站时
+> 默认只提供 sing-box / xray（可在「设置 → 常用」里打开）。已存在的 mihomo 入站照常运行。
+
 > **下载** [Releases](https://github.com/yunyu697/triune-panel/releases) ·
 > **离线演示** [`demo.html`](demo.html)（浏览器直接打开，内置模拟数据，所有功能可点） ·
 > **更新日志** [CHANGELOG.md](CHANGELOG.md) ·

@@ -70,6 +70,12 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "目标内核无效: "+err.Error())
 		return
 	}
+	// 切到兼容内核（mihomo）等于主动降级：它的协议是 sing-box 的子集且缺
+	// vless / reality。反方向（mihomo → sing-box / xray）不受影响。
+	if !a.compatCoreAllowed(req.To) {
+		fail(w, 400, "mihomo 是兼容内核，不能作为切换目标。要迁走 mihomo 入站，请选 sing-box 或 xray。")
+		return
+	}
 	// 目标内核必须有可用的二进制：否则预检无从校验、新进程也起不来，
 	// 切过去只会造成服务静默中断 —— 直接拒绝。
 	if bin, _ := a.Pipe.Settings.Get("bin_" + req.To); bin == "" {

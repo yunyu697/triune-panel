@@ -81,6 +81,21 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
    就是连不上。现在订阅只给真正生效的那个用户发。为了让「谁是第一个」在渲染与
    订阅两边一致，`InboundClientIDs` 补了 `ORDER BY client_id`（原来无排序，
    两边各自取第一个可能取到不同的人）。
+10. **mihomo 从「三等分内核」降为「兼容内核」，默认不出现在新建入口**：它支持的协议是
+    sing-box 的**真子集**，还缺 vless / reality / anytls——选它不是「另一种选择」，是纯降级。
+    面板是服务端，mihomo 的强项（分流、proxy-groups、订阅聚合）一个都用不上，它在这里
+    只被当作一堆 listener。所以新建入站与切换目标默认只给 sing-box / xray，要选 mihomo
+    得先到「设置 → 常用 → 显示兼容内核（mihomo）」打开；开关即时生效，不用重启。
+    它没被删，因为还有一个真实用途——**存量接管**：机器上原本就在跑 mihomo 的人可以原地
+    纳管，不必推翻重配。因此**已存在的 mihomo 入站完全不受影响**：照常渲染、照常运行、
+    照常编辑（`updateInbound` 只在「内核被改成 mihomo」时拦，「本来就是 mihomo」放行），
+    老用户升级后连改个名字都不受影响。
+    前端有一处必须守住：已有 mihomo 入站打开编辑弹窗时得把 mihomo 放回 `<select>`，
+    否则 `value` 赋不上、浏览器留空，`ibSpec()` 静默回退成 sing-box，用户点保存就把内核
+    换了、界面上毫无提示。这条写进了 `compatcore_test.go` 的注释里。
+    5 个用例：默认拒绝（且文案说明原因与开关位置）、打开后可建 / 关回去又拦、存量入站
+    仍可改但「singbox → mihomo」被拒、不能把入站切到 mihomo、`compatCoreAllowed` 对
+    非 mihomo 恒为 true（写反了会把用户永久困在降级内核上）。
 
 测试：新增 `deploy/verify-inbounds.py`——对**测试实例**跑一轮真机端到端回归
 （22 个场景：17 个正向协议组合 + 5 个应当被拦下的负向组合），逐条走

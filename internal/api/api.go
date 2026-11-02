@@ -486,6 +486,12 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, msg)
 		return
 	}
+	if !a.compatCoreAllowed(in.Core) {
+		fail(w, 400, "mihomo 是兼容内核：它支持的协议 sing-box 全都支持，且缺少 vless / reality，"+
+			"新建入站请选 sing-box 或 xray。若确实需要（例如接管机器上已有的 mihomo 配置），"+
+			"请到「设置 → 组件更新」打开「显示兼容内核」。")
+		return
+	}
 	// 内联 PEM → 落盘（xray 可内联，sing-box 只认路径，统一转成文件最省事）
 	if err := a.materializeInboundPEM(&in); err != nil {
 		fail(w, 400, "证书落盘失败: "+err.Error())
@@ -637,6 +643,13 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := a.validateInboundInput(&in, old.ID); msg != "" {
 		fail(w, 400, msg)
+		return
+	}
+	// 从别的内核改成 mihomo 等于新建一个降级入站，同样拦下；
+	// 但「本来就是 mihomo」的入站必须放行，否则老用户连改个名字都改不了。
+	if in.Core != old.Core && !a.compatCoreAllowed(in.Core) {
+		fail(w, 400, "mihomo 是兼容内核（协议是 sing-box 的子集，且不支持 vless / reality），不能切过去。"+
+			"若确实需要，请到「设置 → 组件更新」打开「显示兼容内核」。")
 		return
 	}
 	if err := a.materializeInboundPEM(&in); err != nil {
@@ -1246,6 +1259,30 @@ func (a *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // ---- settings ----
 
+// ShowCompatCoreSetting 控制兼容内核（mihomo）是否出现在「新建入站」的内核
+// 下拉里，默认关闭。
+//
+// mihomo 支持的协议是 sing-box 的**真子集**，且缺 vless / reality —— 也就是说
+// 选它不是「另一种选择」，而是纯降级。它在面板里的唯一真实价值是存量接管：
+// 机器上已经在跑 mihomo 的人可以原地纳管，不必推翻重配。
+//
+// 所以默认把它从新建入口里摘掉（避免用户选到一个能力更弱的选项还不知道），
+// 但**不删**：已有 mihomo 入站照常渲染与运行，老用户升级后配置不受影响。
+const ShowCompatCoreSetting = "show_compat_core"
+
+// externalInSubSetting 外部节点是否混入订阅输出（默认关）。
+const externalInSubSetting = "external_in_sub"
+
+// compatCoreAllowed 判断当前设置下能否新建指定内核的入站。
+// 非兼容内核恒为 true；mihomo 只有显式打开开关才允许。
+func (a *Server) compatCoreAllowed(core string) bool {
+	if core != model.CoreMihomo {
+		return true
+	}
+	v, _ := a.Store.GetSetting(ShowCompatCoreSetting)
+	return v == "1"
+}
+
 func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
 	for _, c := range core.All() {
@@ -1267,7 +1304,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 只读角色拿不到这个接口（write 档），所以照常回显便于核对。
 		NotifyEmailSetting, NotifyWebhookSetting, NotifyEventsSetting,
 		// 外部节点是否混进所有用户的订阅（默认关：见 subscription.go 的说明）
-		"external_in_sub"} {
+		externalInSubSetting,
+		// 兼容内核（mihomo）是否出现在「新建入站」的内核下拉里（默认关）
+		ShowCompatCoreSetting} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -1321,7 +1360,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 变更通知（收件邮箱 / Webhook / 订阅哪些事件）
 		NotifyEmailSetting: true, NotifyWebhookSetting: true, NotifyEventsSetting: true,
 		// 外部节点是否混进所有用户的订阅（默认关）
-		"external_in_sub": true,
+		externalInSubSetting: true,
+		// 兼容内核（mihomo）是否出现在「新建入站」的内核下拉里（默认关）
+		ShowCompatCoreSetting: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true

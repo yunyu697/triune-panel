@@ -1142,6 +1142,14 @@ canvas{display:block;width:100%}
         <div class="radio-row" style="margin:0">
           <label><input type="checkbox" id="s_fwauto"> 入站端口自动放行防火墙（新增 / 删除 / 改端口时同步 ufw · firewalld · iptables；本机无防火墙或由云安全组控制时自动跳过）</label>
         </div>
+        <div class="radio-row" style="margin:0">
+          <label><input type="checkbox" id="s_compat" onchange="saveCompatCore(this.checked)"> 显示兼容内核（mihomo）</label>
+        </div>
+        <p class="muted" style="margin:0">
+          mihomo 支持的协议 sing-box <b>全都支持</b>，而且缺少 vless / reality —— 它在面板里的意义只有
+          「接管机器上已经在跑的 mihomo」，选它不是另一种选择、而是纯降级。所以默认不提供，避免新建入站时
+          选到一个能力更弱的内核还不知道。<b>已存在的 mihomo 入站不受这个开关影响</b>，照常渲染与运行。
+        </p>
         <p class="muted" style="margin:0">仅管理本机防火墙，云厂商安全组需在控制台另行放行。iptables 规则重启后不保留，ufw / firewalld 会持久化。</p>
         <div class="card-actions"><button class="btn primary" onclick="saveSettings()">保存设置</button></div>
       </div>
@@ -1430,7 +1438,9 @@ canvas{display:block;width:100%}
         </details>
       </div>
       <div><label>名称 <span class="muted" style="font-weight:400">（自动，可改）</span></label><input id="ib_name" class="input"></div>
-      <div><label>内核</label><select id="ib_core" class="input" onchange="ibOnCore()"><option>singbox</option><option>xray</option><option>mihomo</option></select></div>
+      <div><label>内核</label>
+        <select id="ib_core" class="input" onchange="ibOnCore()"></select>
+        <span class="hint hide" id="ib_core_warn" style="color:var(--warn,#c05621)"></span></div>
       <div><label>协议 <span class="muted" style="font-weight:400">（仅显示当前内核支持的）</span></label>
         <select id="ib_protocol" class="input" onchange="ibOnProto()"></select></div>
       <div><label>端口 <span class="muted" style="font-weight:400">（自动推荐）</span></label><input id="ib_port" class="input" type="number"></div>
@@ -1552,7 +1562,7 @@ canvas{display:block;width:100%}
     <div class="frm">
       <div class="full"><label>切换入站</label><input id="sw_inbound" class="input" disabled></div>
       <div class="full"><label>目标内核</label>
-        <select id="sw_to" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+        <select id="sw_to" class="input"></select>
       </div>
     </div>
     <pre class="log hide" id="sw_preview" style="max-height:200px;overflow:auto"></pre>
@@ -4267,7 +4277,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0"},
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0"},
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
       {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
@@ -7796,6 +7806,41 @@ const IB_PORT_DEFAULT = { vless:443, vmess:10086, trojan:443, shadowsocks:8388,
   hysteria2:36712, tuic:443, anytls:443, mixed:2080, socks:1080, http:8080,
   "dokodemo-door":9000, direct:9000, wireguard:51820 };
 
+// ---- 兼容内核（mihomo）可见性 ----
+// mihomo 的协议是 sing-box 的真子集且缺 vless / reality，选它是纯降级，
+// 所以默认不出现在「新建入站」和「切换目标」里。但两件事必须守住：
+//   1. 已存在的 mihomo 入站要能在下拉里看到自己 —— 否则 select 赋不上值会
+//      静默回落成第一项，用户点保存就把内核换了，界面上毫无提示；
+//   2. 开关改了要立刻生效，不必刷新页面。
+let __compatCore = null;           // null = 还不知道，首用时去拉
+async function compatCoreEnabled() {
+  if (__compatCore !== null) return __compatCore;
+  try {
+    const j = await req("/api/settings");
+    __compatCore = j.show_compat_core === "1";
+  } catch (e) { __compatCore = false; }
+  return __compatCore;
+}
+async function saveCompatCore(on) {
+  try {
+    await req("/api/settings", { method:"PUT", body:{ show_compat_core: on ? "1" : "0" } });
+    __compatCore = on;
+    toast(on ? "已显示 mihomo：新建入站时可选" : "已隐藏 mihomo：新建入站只提供 sing-box / xray");
+  } catch (e) {
+    $("s_compat").checked = !on;   // 存不上就把勾退回去，别让界面撒谎
+    toast(e.message, "err");
+  }
+}
+function coreChoices(allowMihomo) {
+  return allowMihomo ? ["singbox", "xray", "mihomo"] : ["singbox", "xray"];
+}
+// fillCoreSelect 重建选项并尽量保住当前值
+function fillCoreSelect(el, allowMihomo) {
+  const cur = el.value;
+  el.innerHTML = coreChoices(allowMihomo).map(v => `<option value="${v}">${v}</option>`).join("");
+  if (cur && coreChoices(allowMihomo).includes(cur)) el.value = cur;
+}
+
 function ibSpec() { return IB_SPECS[$("ib_core").value] || IB_SPECS.singbox; }
 function ibProto() { return $("ib_protocol").value; }
 function ibGetSettings() { try { return JSON.parse($("ib_settings").value||"{}") || {}; } catch(e){ return {}; } }
@@ -7865,6 +7910,14 @@ const IB_SPIDER = [["", "不指定（默认 /）"], ["/", "/"], ["/x", "/x"], ["
 // ibDynamic 按协议/传输/TLS 渲染需要的动态字段；表单值写回 settings
 function ibDynamic(userTriggered) {
   const core = $("ib_core").value, proto = ibProto(), tr = $("ib_transport").value, tls = $("ib_tls").value;
+  // 兼容内核提示：让人在选的时候就看见代价，而不是建完发现没有 vless
+  const cw = $("ib_core_warn");
+  if (cw) {
+    if (core === "mihomo") {
+      cw.textContent = "mihomo 是兼容内核：不支持 vless / reality / anytls，建议改用 sing-box";
+      cw.classList.remove("hide");
+    } else { cw.textContent = ""; cw.classList.add("hide"); }
+  }
   let s = ibGetSettings();
   if (userTriggered) {
     // 切换走后清理不再适用的键，避免残留脏配置
@@ -8238,6 +8291,9 @@ async function openInboundModal(id) {
   try { window.__ibAll = await req("/api/inbounds"); } catch(e){ window.__ibAll = []; }
   let v = { name:"", core:"singbox", protocol:"vless", listen:"", port:"", transport:"tcp", tls:"none", settings:"{}" };
   if (id) { const i = (window.__ibAll).find(x=>x.id===id); if (i) v = i; }
+  // 已有 mihomo 入站必须把 mihomo 放回下拉：否则 value 赋不上，
+  // 浏览器留空 → ibSpec() 回退 sing-box，用户点保存就把内核静默换了。
+  fillCoreSelect($("ib_core"), (await compatCoreEnabled()) || v.core === "mihomo");
   $("ib_core").value = v.core || "singbox";
   ibFillSelects();
   $("ib_protocol").value = v.protocol || ibSpec().protocols[0];
@@ -8331,8 +8387,10 @@ async function openSwitchModal(id) {
   const i = all.find(x=>x.id===id); if (!i) return;
   swInbound = i;
   $("sw_inbound").value = `#${i.id} ${i.name}（当前 ${i.core}，端口 ${i.port}）`;
-  // 只列出同时支持该协议的内核，避免选完才被后端预检拒绝
-  const opts = ["singbox","xray","mihomo"]
+  // 只列出同时支持该协议的内核，避免选完才被后端预检拒绝。
+  // mihomo 默认不作为切换目标：切过去是降级（缺 vless / reality）。
+  const allowMihomo = await compatCoreEnabled();
+  const opts = coreChoices(allowMihomo)
     .filter(c => c !== i.core && (IB_SPECS[c]||{protocols:[]}).protocols.includes(i.protocol));
   if (!opts.length) {
     toast(`协议 ${i.protocol} 只有 ${i.core} 支持，无法切换内核`, "err");
@@ -9160,6 +9218,8 @@ async function loadSettings() {
     $("s_metrics_token").value = j.metrics_token || "";
     $("s_warn_pct").value = j.quota_warn_pct || 80;
     $("s_fwauto").checked = j.fw_auto !== "0";
+    $("s_compat").checked = j.show_compat_core === "1";
+    __compatCore = j.show_compat_core === "1";
     $("s_trusted_proxies").value = j.trusted_proxies || "";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
