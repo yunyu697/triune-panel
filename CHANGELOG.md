@@ -10,8 +10,8 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ## 未发布（v1.0.8）
 
-**补上出站的可观测性，收掉外部节点的一个安全隐患，并修掉一个会让 xray 起不来的
-导入 bug。**
+**补上出站的可观测性，收掉外部节点的一个安全隐患，并修掉一批「配置能存进去、
+内核起来却不对」的问题。**
 
 1. **新增「出站」页（只读）**：面板是服务端，出站固定 `direct`，没有「选出口」
    这回事，所以不给配置能力——但排障时总得能看见实际渲染出了什么。
@@ -47,8 +47,45 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
    顺带修了 `FieldList` 只认字符串、把数组形式的 `serverNames` 整段丢弃的问题
    （导入的配置常见数组写法，丢掉后只剩 dest 兜底的那一个 SNI）。
    失败文案也分开了：Reality 指向「本机到 dest 不通」，普通 TLS 指向「证书/私钥读不到」。
+5. **修掉「UDP 入站被当成 TCP」**（wireguard、kcp 传输）：
+   判断端口协议的函数只认了 `hysteria2` / `tuic` / `quic`，`wireguard` 和 xray 的
+   `kcp` 传输被当成 TCP，于是两件事同时错——防火墙只放行 tcp（用户连不上），
+   健康检查又用 TCP 拨号去探一个 UDP 端口（必然拨不通）。结果是一份**完全正常**的
+   wireguard / kcp 入站在应用后报「端口没有监听」，把人往改配置的方向带。
+   顺带把 `socks` / `shadowsocks` / `direct` 改成 tcp+udp 双栈放行：
+   只放 tcp 时 UDP ASSOCIATE / UDP relay 是通的不了，而这属于
+   「节点能连上但某些应用不通」，几乎不可能归因到防火墙。
+6. **Reality 的握手目标不再只认 `handshake_server`**：三处字段（`handshake_server`、
+   xray 原生 `dest`、`server_names`）现在归一为同一条推导（`core.RealityDest` /
+   `core.RealityDestParts`），渲染与诊断共用。之前有两种坏法：
+   - settings 里用原生 `dest`（手工贴 xray 片段）→ 渲染出**没有 dest** 的
+     `realitySettings`，xray 报 `non-empty "serverNames", please use "serverName"
+     instead` —— 一句话把排查方向指向 SNI 字段名，跟真实原因（缺 dest）无关；
+   - 只填了 SNI（相对常见）→ xray 侧靠兜底勉强能用，**切到 sing-box 就渲染出
+     `handshake.server: ""`**，而 sing-box 的 `check` 不拦空串，面板显示已启用、
+     客户端却永远握不上手。「先按 xray 配好再一键换内核」正是这个面板的主路径。
+7. **xray 的 TLS 入站必须带证书才算配置完成**：xray 对「TLS 但没证书」是宽容的
+   ——校验通过、进程正常启动，直到第一个客户端握手才失败。于是面板显示已启用、
+   健康检查（只拨端口）也通过，节点却永远连不上。现在渲染期就拦下，
+   并区分「有证书没私钥」。
+8. **保存入站时先校验两条会让内核整份拒收的输入**：
+   - **tag 在同一内核内必须唯一**：重名入站都能建成功，apply 时 xray 报
+     `existing tag found: dup` 并拒绝**整份**配置——界面上只看到一串内核日志，
+     看不出「你有两个入站重名了」；
+   - **端口必须在 1-65535**：`0` / `65536` / 负数原来都能存进去。
 
-测试：`outbounds_test.go` 覆盖三内核的出站视图、导入全局段后的规则顺序与来源标注、
+测试：新增 `deploy/verify-inbounds.py`——对**测试实例**跑一轮真机端到端回归
+（22 个场景：17 个正向协议组合 + 5 个应当被拦下的负向组合），逐条走
+「建入站 → apply → 内核校验 → 进程起来 → 清理」，覆盖
+vless/vmess/trojan/shadowsocks/socks/http/dokodemo-door/wireguard/kcp/
+xhttp/hysteria2/tuic/direct/reality，两个内核各一遍；另实测
+`xray ⇄ sing-box` 双向 `switch-core`。这轮抓出的 4 个问题（UDP 协议判定、
+Reality dest、sing-box 空 handshake、TLS 无证书）全都是纯单测发现不了的。
+用例同步进 `internal/livecheck`（`vless-reality-native-dest`、
+`vless-reality-from-server-names`）与 `firewall_test.go` / `inbound_test.go` /
+`reality_test.go` / 两个渲染器的 `render_test.go`。
+
+单元测试侧：`outbounds_test.go` 覆盖三内核的出站视图、导入全局段后的规则顺序与来源标注、
 外部节点开关对订阅的影响；`xui_test.go` 覆盖 direct 规则保留出站与 balancer 规则丢弃；
 `reality_test.go` 钉住 SNI / dest 的取值顺序，`diagnose_test.go` 用真实 TLS 监听验证
 探测本身能成功、能失败、能指向正确原因。

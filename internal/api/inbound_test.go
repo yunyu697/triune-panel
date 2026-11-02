@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"triune/internal/model"
@@ -160,5 +161,69 @@ func TestUpdateInboundNotFound(t *testing.T) {
 
 	if w := apiReq(t, h, tok, "PUT", "/api/inbounds/999", `{"name":"ghost"}`); w.Code != http.StatusNotFound {
 		t.Fatalf("应 404，实际 %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateInboundRejectsSameTag 同一内核内 tag 重复必须当场拒绝。
+//
+// 曾经两个同名入站都能建成功，apply 时 xray 报
+// `existing tag found: dup` 并拒绝**整份**配置——界面上只看到一串内核日志，
+// 完全看不出「你有两个入站重名了」，而且整个内核都起不来。
+func TestCreateInboundRejectsSameTag(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	mkInbound(t, h, tok, `{"name":"hk","core":"xray","protocol":"vless","port":21001,"tag":"hk01"}`)
+
+	w := apiReq(t, h, tok, "POST", "/api/inbounds",
+		`{"name":"hk2","core":"xray","protocol":"vless","port":21002,"tag":"hk01"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("同内核同名 tag 应 400，实际 %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "唯一") {
+		t.Errorf("错误信息应说明 tag 必须唯一: %s", w.Body.String())
+	}
+
+	// 不同内核可以有同名 tag：三个内核各自一份配置，互不影响
+	if w := apiReq(t, h, tok, "POST", "/api/inbounds",
+		`{"name":"hk3","core":"singbox","protocol":"vless","port":21003,"tag":"hk01"}`); w.Code != http.StatusOK {
+		t.Errorf("跨内核同名 tag 应允许，实际 %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateInboundRejectsBadPort 端口越界必须当场拒绝：存进去会让整份配置
+// 校验失败（0 会拿到随机端口，65536 直接非法）。
+func TestCreateInboundRejectsBadPort(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	for _, port := range []int{0, 65536, -1} {
+		body := `{"name":"bad","core":"xray","protocol":"vless","port":` + strconv.Itoa(port) + `}`
+		w := apiReq(t, h, tok, "POST", "/api/inbounds", body)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("端口 %d 应 400，实际 %d: %s", port, w.Code, w.Body.String())
+		}
+	}
+	// 边界值合法
+	for _, port := range []int{1, 65535} {
+		body := `{"name":"ok","core":"xray","protocol":"vless","port":` + strconv.Itoa(port) + `,"tag":"p` + strconv.Itoa(port) + `"}`
+		if w := apiReq(t, h, tok, "POST", "/api/inbounds", body); w.Code != http.StatusOK {
+			t.Errorf("端口 %d 应允许，实际 %d: %s", port, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestUpdateInboundSelfTagAllowed 更新自己时不带改 tag 不能被「和自己重名」挡下。
+func TestUpdateInboundSelfTagAllowed(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	in := mkInbound(t, h, tok, `{"name":"hk","core":"xray","protocol":"vless","port":21010,"tag":"self01"}`)
+	path := "/api/inbounds/" + strconv.FormatInt(in.ID, 10)
+	if w := apiReq(t, h, tok, "PUT", path, `{"name":"hk-renamed"}`); w.Code != http.StatusOK {
+		t.Fatalf("改自己的名字应 200，实际 %d: %s", w.Code, w.Body.String())
 	}
 }
