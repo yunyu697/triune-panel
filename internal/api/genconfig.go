@@ -605,9 +605,25 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		n.Name = p.in.Name + "-" + p.c.Name
 		nodes = append(nodes, n)
 	}
+	// 入站名 / 用户名都可能重复，节点名撞车会让内核判「重复 tag」，见 dedupeNodeNames
+	dedupeNodeNames(nodes)
 
 	// 解析规则集选择 + 自定义规则集
 	sets, warns := normalizeSets(q)
+
+	// 生成前先确认「至少有一个节点真的能导出」，理由见 exportable.go。
+	// 一个都导不出时**不要**生成——空 proxies 的配置内核只会拒绝，
+	// 用户还得反过来猜是哪一步错了。
+	skipped, exportable := splitExport(nodes, q.Core)
+	if exportable == 0 {
+		fail(w, 422, noExportMsg(skipped, q.Core))
+		return
+	}
+	if len(skipped) > 0 {
+		warns = append(warns, fmt.Sprintf(
+			"以下协议的入站不能导出为 %s 节点，已跳过：%s",
+			coreLabel(q.Core), strings.Join(skipped, "、")))
+	}
 
 	// sing-box 必须先定版本：1.11 与 1.12+ 是两套 JSON。
 	ver := defaultSBVersion

@@ -75,6 +75,9 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := r.URL.Query().Get("target")
+	// 节点名在客户端配置里就是 tag / proxy name，重名会被内核判死。
+	// 入站名不要求唯一，两个「香港-01」就会撞，见 dedupeNodeNames。
+	dedupeNodeNames(nodes)
 	w.Header().Set("profile-update-interval", "12")
 	// 真实用量（流量统计开启时）
 	var up, down int64
@@ -89,11 +92,25 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 
 	switch target {
 	case "clash":
+		// 只把**真正导出成功**的节点写进 proxies，proxy-group 也从同一批里取名字。
+		// 分开算过一次的话，group 里会挂着 proxies 中不存在的名字，
+		// mihomo 直接报 `proxy 'xxx' not found`。
+		var exported []*link.Node
 		proxies := []any{}
 		for _, n := range nodes {
-			if p, err := link.ToClash(n); err == nil {
-				proxies = append(proxies, p)
+			p, err := link.ToClash(n)
+			if err != nil {
+				continue
 			}
+			proxies = append(proxies, p)
+			exported = append(exported, n)
+		}
+		if len(proxies) == 0 {
+			// 返回一份 proxies 为空的 YAML 等于让客户端自己去撞墙，
+			// 不如说清楚：这些协议压根没有 clash 侧的 proxy 类型。
+			skipped, _ := splitExport(nodes, "mihomo")
+			http.Error(w, noExportMsg(skipped, "mihomo"), 422)
+			return
 		}
 		doc := map[string]any{
 			"port":       7890,
@@ -104,7 +121,7 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 			"proxy-groups": []any{map[string]any{
 				"name":    "PROXY",
 				"type":    "select",
-				"proxies": proxyNames(nodes),
+				"proxies": proxyNames(exported),
 			}},
 			"rules":   []any{"MATCH,PROXY"},
 			"proxies": proxies,
@@ -118,6 +135,11 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 			if o, err := link.ToSingboxOutbound(n); err == nil {
 				outbounds = append(outbounds, o)
 			}
+		}
+		if len(outbounds) == 0 {
+			skipped, _ := splitExport(nodes, "singbox")
+			http.Error(w, noExportMsg(skipped, "singbox"), 422)
+			return
 		}
 		doc := map[string]any{
 			"outbounds": append(outbounds, map[string]any{"type": "direct", "tag": "direct"}),

@@ -7078,7 +7078,22 @@ async function genGenerate() {
     }
     (j.warnings || []).forEach(w => toast(w, "warn"));
     if (!(j.warnings || []).length) toast("生成完成：" + j.filename);
-  } catch(e){ toast(e.message, "err"); }
+  } catch(e){
+    toast(e.message, "err");
+    // 失败原因必须**留在页面上**：toast 三秒就没了，而「为什么生成不出来」
+    // 往往要读一会儿（例如「mixed 是本地代理协议，导不出客户端节点」）。
+    // 顺便把上一份成功结果清掉——否则「用本机内核校验」还会去验旧配置，
+    // 用户会以为刚失败的那次其实通过了。
+    genLast = null;
+    $("gen_out").classList.remove("hide");
+    $("gen_out").textContent = "生成失败：" + e.message;
+    $("gen_fn").textContent = "";
+    $("gen_vres").classList.add("hide");
+    $("gen_check").classList.add("hide");
+    $("gen_dl").disabled = true;
+    $("gen_verify").disabled = true;
+    $("gen_save").disabled = true;
+  }
 }
 
 /* 用面板上装的内核跑官方 check。这是唯一能证明「这份配置真的能加载」的办法，

@@ -8,6 +8,54 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## 未发布
+
+**修掉「点生成、内核回一句看不懂的话」这条路上剩下的两个坑。**
+两者症状一模一样（内核拒绝整份配置），根因不同，共同点是面板都在静默丢东西。
+
+1. **本地代理协议不再被静默跳过**：`ToClash` / `ToSingboxOutbound` 只认
+   vless / vmess / trojan / shadowsocks / hysteria2 / tuic。mixed、socks、http、
+   dokodemo-door 是**本地代理协议**——它们监听在本机，客户端配置里没有对应的
+   proxy / outbound 类型，本来就没法拿来连远程服务器。此前生成器是
+   `if p, err := ToClash(n); err == nil { append }`，转换失败就当这个节点不存在，
+   于是一路生成出 `proxies: []` + 空 proxy-group 的配置：
+
+   ```
+   mihomo:  proxy group[0]: Auto: 'use' or 'proxies' missing
+   sing-box: urltest 的 outbounds 为空
+   ```
+
+   用户只看到内核那句话，完全不知道是自己选的协议**根本导不出去**。现在改成：
+   一个都导不出时直接 422 并说明「这类是本地代理协议，请改选 …」；
+   部分导不出时把协议名放进 warnings，不让节点无声消失。
+   生成页的失败原因同时写进结果区，不再只闪三秒 toast。
+
+2. **订阅端点同样两个问题**：`target=clash` 的 `proxies` 由转换成功的节点组成，
+   但 `proxy-group` 的名单取的是**全部**节点——于是 group 里挂着 `proxies` 中不存在的
+   名字，mihomo 报 `proxy 'x' not found`。现在两边同源；全是本地代理协议时
+   返回可读错误，而不是一份空 `proxies` 的 YAML。
+
+3. **节点名撞车时补序号**：节点名是 `入站名-用户名`，在客户端配置里就是 tag。
+   而入站只校验 tag 唯一、用户只校验 ID，**名字都可以重复**——建两个都叫
+   「香港-01」的入站、或者两个同名用户，就会撞成同一个 tag，内核判死：
+
+   ```
+   sing-box: FATAL duplicate outbound/endpoint tag: 香港-01-张三
+   mihomo:   proxy 香港-01-张三 is the duplicate name
+   ```
+
+   重名本身是允许的，所以由生成侧补 `-2` 序号，而不是反过来要求用户改名。
+
+新增 `internal/api/exportable.go`（导出能力判定 + 节点名去重）与
+`internal/api/exportable_test.go`（5 个用例）。四个用例都验证过：把修复回滚后
+它们全部失败，且失败输出正是上面那几条内核报错。
+
+真机验证：sing-box `1.15.0-alpha.13`、mihomo `v1.19.33`，
+「mixed + shadowsocks 混选」与「同名入站 × 同名用户」两种配置均通过官方
+`check`（`configuration file … test is successful`）。
+
+---
+
 ## v1.0.8
 
 **补上出站的可观测性，收掉外部节点的一个安全隐患，并修掉一批「配置能存进去、
