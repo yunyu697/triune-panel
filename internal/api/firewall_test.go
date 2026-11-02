@@ -44,10 +44,10 @@ func TestPortInUseByOthers(t *testing.T) {
 	mk(&model.Inbound{Name: "hy2", Core: "singbox", Protocol: "hysteria2",
 		Port: 8443, Transport: "udp", Enabled: true})
 
-	if !a.portInUseByOthers(self.ID, 8443, "tcp") {
+	if !a.portInUseByOthers(self.ID, 8443, []string{"tcp"}) {
 		t.Error("8443/tcp 仍被 other 占用，应返回 true")
 	}
-	if !a.portInUseByOthers(self.ID, 8443, "udp") {
+	if !a.portInUseByOthers(self.ID, 8443, []string{"udp"}) {
 		t.Error("8443/udp 被 hy2 占用，应返回 true")
 	}
 
@@ -55,13 +55,58 @@ func TestPortInUseByOthers(t *testing.T) {
 	if err := st.DeleteInbound(other.ID); err != nil {
 		t.Fatal(err)
 	}
-	if a.portInUseByOthers(self.ID, 8443, "tcp") {
+	if a.portInUseByOthers(self.ID, 8443, []string{"tcp"}) {
 		t.Error("other 已删除，8443/tcp 不应再被视为占用（停用/草稿不计）")
 	}
 
 	// 从未使用过的端口
-	if a.portInUseByOthers(self.ID, 12345, "tcp") {
+	if a.portInUseByOthers(self.ID, 12345, []string{"tcp"}) {
 		t.Error("12345/tcp 无任何入站，应返回 false")
+	}
+}
+
+// TestPortInUseByOthersWireguard 守住 UDP-only 协议的判定：
+// wireguard / kcp 曾被当成 TCP，导致 udp 端口被误判为空闲而回收。
+func TestPortInUseByOthersWireguard(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := New(st, nil, nil, dir)
+
+	self := &model.Inbound{Name: "self", Core: "xray", Protocol: "vless",
+		Port: 8444, Transport: "tcp", Enabled: true}
+	if err := st.CreateInbound(self); err != nil {
+		t.Fatal(err)
+	}
+	wg := &model.Inbound{Name: "wg", Core: "xray", Protocol: "wireguard",
+		Port: 8444, Transport: "udp", Enabled: true}
+	if err := st.CreateInbound(wg); err != nil {
+		t.Fatal(err)
+	}
+
+	if !a.portInUseByOthers(self.ID, 8444, []string{"udp"}) {
+		t.Error("8444/udp 被 wireguard 占用，应返回 true")
+	}
+	if a.portInUseByOthers(self.ID, 8444, []string{"tcp"}) {
+		t.Error("8444/tcp 只有自身，不应被视为被占用")
+	}
+
+	// 双栈入站（socks）与纯 tcp 入站同端口：tcp 有交集 → 占用
+	ss := &model.Inbound{Name: "socks", Core: "xray", Protocol: "socks",
+		Port: 8445, Transport: "tcp", Enabled: true}
+	if err := st.CreateInbound(ss); err != nil {
+		t.Fatal(err)
+	}
+	other := &model.Inbound{Name: "other", Core: "xray", Protocol: "vless",
+		Port: 8445, Transport: "tcp", Enabled: true}
+	if err := st.CreateInbound(other); err != nil {
+		t.Fatal(err)
+	}
+	if !a.portInUseByOthers(ss.ID, 8445, []string{"tcp", "udp"}) {
+		t.Error("8445 上还有 vless/tcp，tcp 侧应算占用")
 	}
 }
 

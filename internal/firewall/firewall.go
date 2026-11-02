@@ -25,12 +25,45 @@ const (
 	BackendNone      = "none"
 )
 
-// ProtoOf 根据协议/传输推断端口协议：hysteria2、tuic 以及 quic 传输走 UDP，其余 TCP。
+// ProtoOf 根据协议/传输推断端口的**主**协议（端口探测、提示文案用）。
+//
+// 纯 UDP 的三种来源必须都认：
+//   - 协议本身即 UDP：hysteria2 / tuic / wireguard；
+//   - 传输层是 UDP：quic / kcp。
+//
+// 曾经只列了 hysteria2 / tuic / quic，于是 wireguard 与 xray 的 kcp 传输被当成
+// TCP：防火墙只放行 tcp（用户连不上），健康检查又用 TCP 拨号探测（必然拨不通），
+// 于是一份完全正常的配置在 apply 后报「端口没有监听」，把人往改配置的方向带。
 func ProtoOf(protocol, transport string) string {
-	if protocol == "hysteria2" || protocol == "tuic" || transport == "quic" {
+	switch protocol {
+	case "hysteria2", "tuic", "wireguard":
+		return "udp"
+	}
+	switch transport {
+	case "quic", "kcp":
 		return "udp"
 	}
 	return "tcp"
+}
+
+// ProtoList 返回该入站需要放行（或回收）的全部端口协议。
+//
+// 多数协议只有一种，但下面这些是双栈的，只放 TCP 会让其中一半能力不可用：
+//   - socks / mixed：UDP ASSOCIATE；
+//   - shadowsocks：UDP relay（xray 默认 network=tcp,udp）；
+//   - direct（sing-box 端口转发）：未限定 network 时 TCP/UDP 都转发。
+//
+// 多放一个 udp 端口比少放好：漏放的表现是「节点能连上但某些应用不通」，
+// 极难归因到防火墙。
+func ProtoList(protocol, transport string) []string {
+	if ProtoOf(protocol, transport) == "udp" {
+		return []string{"udp"}
+	}
+	switch protocol {
+	case "socks", "mixed", "shadowsocks", "direct":
+		return []string{"tcp", "udp"}
+	}
+	return []string{"tcp"}
 }
 
 // DetectBackend 探测当前系统生效（或最可能生效）的防火墙后端。

@@ -15,11 +15,46 @@ func TestProtoOf(t *testing.T) {
 		{"vless", "quic", "udp"},    // quic 传输 → udp
 		{"hysteria2", "tcp", "udp"}, // 协议本身即 udp
 		{"tuic", "quic", "udp"},
+		{"wireguard", "udp", "udp"}, // WireGuard 只有 udp
+		{"wireguard", "tcp", "udp"}, // 表单里的 transport 填错也不该改变它的本质
+		{"vless", "kcp", "udp"},     // xray 的 kcp 传输跑在 udp 上
+		{"vless", "xhttp", "tcp"},
 		{"", "", "tcp"},
 	}
 	for _, c := range cases {
 		if got := ProtoOf(c.protocol, c.transport); got != c.want {
 			t.Errorf("ProtoOf(%q,%q) = %q, want %q", c.protocol, c.transport, got, c.want)
+		}
+	}
+}
+
+// TestProtoList 双栈协议要两种都放行：漏放 udp 的表现是「能连上但某些应用不通」，
+// 极难归因到防火墙。
+func TestProtoList(t *testing.T) {
+	cases := []struct {
+		protocol, transport string
+		want                []string
+	}{
+		{"vless", "tcp", []string{"tcp"}},
+		{"hysteria2", "udp", []string{"udp"}},
+		{"wireguard", "udp", []string{"udp"}},
+		{"vless", "kcp", []string{"udp"}},
+		{"socks", "tcp", []string{"tcp", "udp"}},
+		{"shadowsocks", "tcp", []string{"tcp", "udp"}},
+		{"direct", "tcp", []string{"tcp", "udp"}},
+		{"", "", []string{"tcp"}},
+	}
+	for _, c := range cases {
+		got := ProtoList(c.protocol, c.transport)
+		if len(got) != len(c.want) {
+			t.Errorf("ProtoList(%q,%q) = %v, want %v", c.protocol, c.transport, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("ProtoList(%q,%q) = %v, want %v", c.protocol, c.transport, got, c.want)
+				break
+			}
 		}
 	}
 }

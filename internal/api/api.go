@@ -482,6 +482,10 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
+	if msg := a.validateInboundInput(&in, 0); msg != "" {
+		fail(w, 400, msg)
+		return
+	}
 	// 内联 PEM → 落盘（xray 可内联，sing-box 只认路径，统一转成文件最省事）
 	if err := a.materializeInboundPEM(&in); err != nil {
 		fail(w, 400, "证书落盘失败: "+err.Error())
@@ -497,9 +501,10 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	// 自动放行防火墙端口：仅非草稿、且开启自动管理时。草稿是导入预览，
 	// 未参与渲染，待「取消草稿」转正时（updateInbound）再放行。
 	if fwAuto(a) && !in.Draft {
-		proto := firewall.ProtoOf(in.Protocol, in.Transport)
-		if err := firewall.OpenPort(in.Port, proto); err != nil {
-			log.Printf("[fw] 开放入站端口 %d/%s 失败: %v", in.Port, proto, err)
+		for _, proto := range firewall.ProtoList(in.Protocol, in.Transport) {
+			if err := firewall.OpenPort(in.Port, proto); err != nil {
+				log.Printf("[fw] 开放入站端口 %d/%s 失败: %v", in.Port, proto, err)
+			}
 		}
 	}
 	detail := fmt.Sprintf("%s/%s 端口 %d", in.Core, in.Protocol, in.Port)
@@ -630,6 +635,10 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
+	if msg := a.validateInboundInput(&in, old.ID); msg != "" {
+		fail(w, 400, msg)
+		return
+	}
 	if err := a.materializeInboundPEM(&in); err != nil {
 		fail(w, 400, "证书落盘失败: "+err.Error())
 		return
@@ -647,24 +656,18 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	// 防火墙端口对账：草稿转正 / 端口或协议变化
 	if fwAuto(a) {
-		oldProto := firewall.ProtoOf(old.Protocol, old.Transport)
-		newProto := firewall.ProtoOf(in.Protocol, in.Transport)
+		oldProtos := firewall.ProtoList(old.Protocol, old.Transport)
+		newProtos := firewall.ProtoList(in.Protocol, in.Transport)
 		// 草稿 → 正式：放行新端口
 		if old.Draft && !in.Draft {
-			if err := firewall.OpenPort(in.Port, newProto); err != nil {
-				log.Printf("[fw] 转正放行端口 %d/%s 失败: %v", in.Port, newProto, err)
-			}
+			a.openPorts(in.Port, newProtos)
 		}
 		// 端口或协议变化：关闭旧（无其他入站占用时）+ 开放新
-		if (old.Port != in.Port || oldProto != newProto) && !in.Draft {
-			if !a.portInUseByOthers(in.ID, old.Port, oldProto) {
-				if err := firewall.ClosePort(old.Port, oldProto); err != nil {
-					log.Printf("[fw] 回收旧端口 %d/%s 失败: %v", old.Port, oldProto, err)
-				}
+		if (old.Port != in.Port || !sameProtos(oldProtos, newProtos)) && !in.Draft {
+			if !a.portInUseByOthers(in.ID, old.Port, oldProtos) {
+				a.closePorts(old.Port, oldProtos)
 			}
-			if err := firewall.OpenPort(in.Port, newProto); err != nil {
-				log.Printf("[fw] 开放新端口 %d/%s 失败: %v", in.Port, newProto, err)
-			}
+			a.openPorts(in.Port, newProtos)
 		}
 	}
 	detail := fmt.Sprintf("%s/%s 端口 %d", in.Core, in.Protocol, in.Port)
@@ -675,6 +678,40 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, in)
 }
 
+// validateInboundInput 校验入站的可提交性，返回空串表示通过。
+//
+// 两条都是「创建成功、应用时才炸」的输入问题，而炸出来的内核报错完全指不到
+// 真因，所以前移到保存时：
+//   - 端口越界：0 / 65536 / 负数都能存进去，直接让整份配置校验失败；
+//   - tag 重复：xray 报 `existing tag found: dup` 并拒绝**整份**配置，用户看到的
+//     是一串内核日志，而不是「你有两个入站重名了」。
+//
+// 注意 tag 只要求在同一内核内唯一：三个内核各有一份独立配置，同名互不影响。
+func (a *Server) validateInboundInput(in *model.Inbound, selfID int64) string {
+	if in.Port < 1 || in.Port > 65535 {
+		return fmt.Sprintf("端口 %d 不合法：必须是 1-65535", in.Port)
+	}
+	if in.Tag == "" || in.Core == "" {
+		// 空 tag 由 TagOf 生成 in-<id>；空 core 的入站本来就渲染不了，
+		// 这里不拿「全内核」去比 tag，否则会把不同内核的同名入站误判成重名。
+		return ""
+	}
+	others, err := a.Store.ListInbounds(in.Core)
+	if err != nil {
+		return ""
+	}
+	for _, o := range others {
+		if o.ID == selfID {
+			continue
+		}
+		if o.Tag == in.Tag {
+			return fmt.Sprintf("入站名 %q 已被 #%d 使用（同一内核内 tag 必须唯一），请换一个名字",
+				in.Tag, o.ID)
+		}
+	}
+	return ""
+}
+
 func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	in, _ := a.Store.GetInbound(id)
@@ -683,11 +720,9 @@ func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	} // 回收防火墙端口：仅当该端口/协议不再被其它启用入站使用时
 	if fwAuto(a) && in != nil && !in.Draft {
-		proto := firewall.ProtoOf(in.Protocol, in.Transport)
-		if !a.portInUseByOthers(id, in.Port, proto) {
-			if err := firewall.ClosePort(in.Port, proto); err != nil {
-				log.Printf("[fw] 回收入站端口 %d/%s 失败: %v", in.Port, proto, err)
-			}
+		protos := firewall.ProtoList(in.Protocol, in.Transport)
+		if !a.portInUseByOthers(id, in.Port, protos) {
+			a.closePorts(in.Port, protos)
 		}
 	}
 	name := fmt.Sprintf("#%d", id)
@@ -721,31 +756,77 @@ func (a *Server) SyncFirewallPorts() {
 		if in.Draft || !in.Enabled {
 			continue
 		}
-		proto := firewall.ProtoOf(in.Protocol, in.Transport)
-		key := fmt.Sprintf("%d/%s", in.Port, proto)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		if err := firewall.OpenPort(in.Port, proto); err != nil {
-			log.Printf("[fw] 启动对账放行 %s 失败: %v", key, err)
+		for _, proto := range firewall.ProtoList(in.Protocol, in.Transport) {
+			key := fmt.Sprintf("%d/%s", in.Port, proto)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if err := firewall.OpenPort(in.Port, proto); err != nil {
+				log.Printf("[fw] 启动对账放行 %s 失败: %v", key, err)
+			}
 		}
 	}
 }
 
-// portInUseByOthers 判断给定端口/协议是否仍被其它「已启用且非草稿」的入站使用，
-// 用于删除/改端口时避免误关仍被占用的端口。
-func (a *Server) portInUseByOthers(selfID int64, port int, proto string) bool {
+// openPorts / closePorts 按协议集合批量操作；单个失败只记日志，不影响主流程
+// （防火墙是尽力而为的辅助，失败不该让一次入站保存整体失败）。
+func (a *Server) openPorts(port int, protos []string) {
+	for _, proto := range protos {
+		if err := firewall.OpenPort(port, proto); err != nil {
+			log.Printf("[fw] 开放端口 %d/%s 失败: %v", port, proto, err)
+		}
+	}
+}
+
+func (a *Server) closePorts(port int, protos []string) {
+	for _, proto := range protos {
+		if err := firewall.ClosePort(port, proto); err != nil {
+			log.Printf("[fw] 回收端口 %d/%s 失败: %v", port, proto, err)
+		}
+	}
+}
+
+func sameProtos(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := map[string]int{}
+	for _, x := range a {
+		m[x]++
+	}
+	for _, y := range b {
+		m[y]--
+		if m[y] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// portInUseByOthers 判断给定端口/协议集合是否仍被其它「已启用且非草稿」的入站使用，
+// 用于删除/改端口时避免误关仍被占用的端口。protos 与对方的端口协议集合有交集
+// 才算占用（例如同一端口上一个是 socks 双栈、另一个是 tcp only，tcp 不能收回）。
+func (a *Server) portInUseByOthers(selfID int64, port int, protos []string) bool {
 	others, err := a.Store.ListInbounds("")
 	if err != nil {
 		return false
+	}
+	want := map[string]bool{}
+	for _, p := range protos {
+		want[p] = true
 	}
 	for _, o := range others {
 		if o.ID == selfID || !o.Enabled || o.Draft {
 			continue
 		}
-		if o.Port == port && firewall.ProtoOf(o.Protocol, o.Transport) == proto {
-			return true
+		if o.Port != port {
+			continue
+		}
+		for _, p := range firewall.ProtoList(o.Protocol, o.Transport) {
+			if want[p] {
+				return true
+			}
 		}
 	}
 	return false
