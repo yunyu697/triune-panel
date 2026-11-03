@@ -175,6 +175,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings", a.write(a.putSettings))
 	mux.HandleFunc("GET /api/audit", a.write(a.handleAuditList))
 	mux.HandleFunc("POST /api/tools/reality-keypair", a.write(a.handleRealityKeypair))
+	// REALITY 握手目标实测：从这台服务器真握手几次，给出延迟 / TLS 版本 /
+	// 证书结论，供用户挑 dest（见 reality.go）。会替用户连外网，按 write 档。
+	mux.HandleFunc("POST /api/tools/reality-dest", a.write(a.handleRealityDestProbe))
 	mux.HandleFunc("POST /api/self-update", a.write(a.handleSelfUpdate))
 	// 变更通知：发一条测试事件，把错误原样返回（配错了要能立刻发现）
 	mux.HandleFunc("POST /api/notify/test", a.write(a.handleNotifyTest))

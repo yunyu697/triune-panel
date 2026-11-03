@@ -268,6 +268,13 @@ func (a *Server) validateInboundInput(in *model.Inbound, selfID int64) string {
 	if msg := a.validatePortConflict(in, selfID); msg != "" {
 		return msg
 	}
+	// REALITY 的 shortIds / spiderX 填错了内核不会在保存期报错，只会让客户端
+	// 连不上（详见 reality.go 顶部）。这里提前拦，错误里点名是第几个、错在哪。
+	if in.TLS == "reality" {
+		if msg := validateRealitySettings(in.Settings); msg != "" {
+			return msg
+		}
+	}
 	if in.Tag == "" || in.Core == "" {
 		// 空 tag 由 TagOf 生成 in-<id>；空 core 的入站本来就渲染不了，
 		// 这里不拿「全内核」去比 tag，否则会把不同内核的同名入站误判成重名。

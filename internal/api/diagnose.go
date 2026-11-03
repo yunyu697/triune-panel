@@ -239,7 +239,8 @@ func probeTLS(in *model.Inbound) checkItem {
 		if in.TLS == "reality" {
 			detail += fmt.Sprintf(" —— Reality 的普通握手要靠把连接转给伪装目标 %s 来完成。"+
 				"失败一般说明本机连不上 dest（被墙 / 目标挂了），或该端口上跑的不是这个入站。"+
-				"客户端带 shortId 的真实握手仍可能正常，请结合「端口监听」一起判断", core.RealityDest(in))
+				"客户端带 shortId 的真实握手仍可能正常，请结合「端口监听」一起判断；"+
+				"也可以在入站编辑里点「目标择优」实测换一个更近的 dest", core.RealityDest(in))
 		} else {
 			detail += " —— 端口能连上却拿不到证书，通常是证书或私钥文件读不到、" +
 				"内核没加载这个入站，或端口被别的服务占着"

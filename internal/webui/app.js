@@ -562,6 +562,23 @@ async function mockRoute(path, opts) {
     return {ok:1, to:b.to, from:["(原内核)"], inbounds:moved, validated:true, hash:"d3m0abcd", revision_id:REV_N, warnings:[]};
   }
   if (api === "tools" && rest === "/reality-keypair") return {private_key:"demo-priv-"+Math.random().toString(16).slice(2,10),public_key:"demo-pub-"+Math.random().toString(16).slice(2,10)};
+  if (api === "tools" && rest === "/reality-dest") {
+    // 演示数据里特意留一个「证书不符」和一个「连不上」，好让人看见三种结论的样子
+    await new Promise(r => setTimeout(r, 600));
+    const cs = (opts.body && opts.body.candidates) || [];
+    const results = cs.map((c, i) => i === 3
+      ? { host:c.host, port:c.port, sni:c.host, ok:false, ms:0, tls:"", alpn:"", h2:false,
+          cert_ok:false, issuer:"", not_after:"", days_left:0,
+          detail:"连接超时（演示数据）", warning:"换一个目标试试" }
+      : { host:c.host, port:c.port, sni:c.host, ok:true, ms:38 + i*27, tls:"1.3", alpn:"h2",
+          h2:true, cert_ok:i !== 2, issuer:"R11", not_after:"2027-02-01", days_left:88,
+          detail:"TLS 1.3 握手成功（演示数据）",
+          warning: i === 2 ? "证书与 SNI 对不上（演示数据）" : "" });
+    results.sort((a,b) => (b.ok-a.ok) || (b.cert_ok-a.cert_ok) || (a.ms-b.ms));
+    const best = results.find(r => r.ok && r.cert_ok);
+    if (best) best.best = true;
+    return {results, best: best ? best.host + ":" + best.port : "", timeout: 14000};
+  }
   if (api === "tools" && rest === "/uuid") return {uuid:crypto.randomUUID()};
   if (api === "import") {
     if ((opts.body.mode||"external") === "external") {
@@ -4197,6 +4214,23 @@ function ibOnProto() {
   ibDynamic(true);
 }
 
+// ibOnTLS 切换 TLS：清掉不再适用的键；新建入站切到 Reality 时把短 ID 补上。
+// 只有「新建」才补：编辑已有入站时，空的 shortIds 可能是用户有意为之
+// （客户端确实不带短 ID），自动填进去会把在用的配置改掉。
+function ibOnTLS() {
+  const tls = $("ib_tls").value;
+  const editing = !!$("ib_name").dataset.editing;
+  if (tls === "reality" && !editing) {
+    const s = ibGetSettings();
+    const cur = Array.isArray(s.short_ids) ? s.short_ids.join("") : String(s.short_ids || s.short_id || "");
+    if (!cur.trim()) {
+      Object.assign(s, realityDefaultSettings());
+      ibPutSettings(s);
+    }
+  }
+  ibDynamic(true);
+}
+
 // ibSuggestNamePort 自动名称与推荐端口（端口冲突自动顺延）
 function ibSuggestNamePort() {
   const used = new Set((window.__ibAll||[]).map(i=>+i.port));
@@ -4222,8 +4256,24 @@ const IB_SS_METHODS = [
 ];
 const IB_SS_NET = [["tcp,udp", "TCP + UDP（默认）"], ["tcp", "仅 TCP"], ["udp", "仅 UDP"]];
 const IB_HANDSHAKE_SITES = ["www.apple.com", "www.microsoft.com", "www.cloudflare.com",
-  "addons.mozilla.org", "www.bing.com", "www.lovelive-anime.jp"];
+  "addons.mozilla.org", "www.bing.com", "www.yahoo.com", "www.samsung.com",
+  "gateway.icloud.com", "www.nvidia.com", "www.amd.com", "www.lovelive-anime.jp"];
 const IB_SPIDER = [["", "不指定（默认 /）"], ["/", "/"], ["/x", "/x"], ["/api/v1", "/api/v1"]];
+
+/* 新建 Reality 入站的默认短 ID 与 spiderX（参考 3x-ui 的做法）。
+   为什么不留空：
+     - 留空时 xray 的 shortIds 就是 [""]，等于放行「不带短 ID」的客户端——
+       新建入站默认开这个口子没有道理，要留空可以自己删掉；
+     - 给多个是为了轮换：一个客户端分一个，泄了只换那一个，不用全员重发配置；
+     - 长度都取偶数（8 或 16 个十六进制字符）：xray 只认十六进制、且必须成对。 */
+function realityRandHex(bytes) {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+}
+function realityDefaultSettings() {
+  return { short_ids: [realityRandHex(8), realityRandHex(8), realityRandHex(4)], spider_x: "/" };
+}
 
 // ibDynamic 按协议/传输/TLS 渲染需要的动态字段；表单值写回 settings
 function ibDynamic(userTriggered) {
@@ -4344,8 +4394,16 @@ function ibDynamic(userTriggered) {
     </details></div>`;
   }
   if (tls === "reality") {
-    tlsRows += `<div><label>握手目标 dest</label><input id="ib_f_handshake" class="input" list="ib_sites" value="${esc(s.handshake_server || "www.apple.com")}" placeholder="www.apple.com">
-      <datalist id="ib_sites">${IB_HANDSHAKE_SITES.map(d=>`<option value="${d}">`).join("")}</datalist></div>`;
+    // 目标择优：dest 决定了「每个客户端每次握手要多花多久」，只能从这台服务器
+    // 实测，所以把测速做进表单，而不是让人凭印象填个大站。
+    tlsRows += `<div class="full"><label>握手目标 dest
+        <span class="muted" style="font-weight:400">（客户端伪装成访问它；越近越快）</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="ib_f_handshake" class="input" list="ib_sites" style="flex:1;min-width:180px" value="${esc(s.handshake_server || "www.apple.com")}" placeholder="www.apple.com">
+        <button class="btn sm" data-act="openDestPick">目标择优</button>
+      </div>
+      <datalist id="ib_sites">${IB_HANDSHAKE_SITES.map(d=>`<option value="${d}">`).join("")}</datalist>
+      <span class="muted" style="font-size:11.5px">实测这台服务器到各目标的 TLS 1.3 握手延迟与证书，挑最快的那个</span></div>`;
     tlsRows += `<div><label>握手端口</label><input id="ib_f_hsport" class="input" type="number" min="1" max="65535" value="${esc(s.handshake_port || 443)}"></div>`;
     tlsRows += `<div><label>SNI serverNames <span class="muted" style="font-weight:400">（逗号分隔多个）</span></label>
       <input id="ib_f_snames" class="input" value="${esc(s.server_names || s.server_name || "www.apple.com")}" placeholder="www.apple.com,apple.com"></div>`;
@@ -4631,6 +4689,9 @@ async function openInboundModal(id) {
     $("ib_tls").value = ibRecommendedTLS($("ib_core").value, ibProto());
     ibSuggestNamePort();
     ibPutSettings({}); // 新增：settings 从零开始，动态字段负责填充
+    // 新建 Reality：短 ID 与 spiderX 一并给好（参考 3x-ui）。否则默认是空
+    // shortIds，等于放行不带短 ID 的客户端，且用户还得自己去凑一串合法的十六进制。
+    if ($("ib_tls").value === "reality") ibPutSettings(realityDefaultSettings());
     ibDynamic(false);
     // 默认组合自动生成 Reality 密钥（失败不阻塞，可后补）
     if ($("ib_tls").value === "reality") genReality().catch(()=>{});
@@ -4780,6 +4841,113 @@ async function ibCopyPub() {
   if (!v) { toast("还没有公钥", "warn"); return; }
   try { await navigator.clipboard.writeText(v); toast("公钥已复制"); }
   catch (e) { toast("复制失败，请手动选中：" + v, "err"); }
+}
+
+/* ---- Reality 握手目标择优 ----
+   测的是「这台服务器 → 目标」的那段网络，这也正是客户端握手时要走的路：
+   REALITY 服务端收到 ClientHello 后会把它转给 dest，dest 慢的话每个客户端
+   每次握手都要多等这么久。所以这个数只能在这里测，在家里测没有意义。 */
+let __destResults = [];
+
+function openDestPick() {
+  const cur = ($("ib_f_handshake") || {}).value || "";
+  const port = +($("ib_f_hsport") || {}).value || 443;
+  const lines = [];
+  const push = v => { if (v && !lines.includes(v)) lines.push(v); };
+  if (cur.trim()) push(cur.trim().includes(":") ? cur.trim() : cur.trim() + ":" + port);
+  IB_HANDSHAKE_SITES.forEach(h => push(h + ":443"));
+  $("dest_list").value = lines.join("\n");
+  $("dest_msg").textContent = "";
+  $("dest_result").innerHTML = `<div class="muted" style="font-size:12.5px">
+    还没测。点「开始测速」会从这台服务器逐个真握手 3 次，按「可用 → 证书对得上 → 快」排序。</div>`;
+  __destResults = [];
+  openModal("mDest");
+}
+
+// parseDestLines 每行一个 host 或 host:port（也认空格分隔）。
+function parseDestLines(text) {
+  const out = [];
+  String(text || "").split(/[\s,]+/).forEach(s => {
+    s = s.trim();
+    if (!s || out.length >= 16) return;
+    let host = s, port = 443;
+    const i = s.lastIndexOf(":");
+    if (i > 0 && /^\d+$/.test(s.slice(i + 1))) {
+      host = s.slice(0, i);
+      port = +s.slice(i + 1) || 443;
+    }
+    out.push({ host, port });
+  });
+  return out;
+}
+
+async function runDestProbe() {
+  const cands = parseDestLines($("dest_list").value);
+  if (!cands.length) { toast("先填至少一个目标", "warn"); return; }
+  $("dest_msg").textContent = `正在实测 ${cands.length} 个目标（每个握手 3 次取中位数）…`;
+  $("dest_result").innerHTML = "";
+  try {
+    const j = await req("/api/tools/reality-dest", { method: "POST", body: { candidates: cands } });
+    __destResults = j.results || [];
+    renderDestResults();
+    const ok = __destResults.filter(r => r.ok).length;
+    $("dest_msg").textContent = `实测完成：${ok} / ${__destResults.length} 个可用` +
+      (j.best ? `，推荐 ${j.best}` : "，没有一个可用——换个目标或确认这台机器能正常出网");
+  } catch (e) {
+    $("dest_msg").textContent = "";
+    $("dest_result").innerHTML = `<div style="color:var(--err);font-size:12.5px">测速失败：${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderDestResults() {
+  // 列数刻意少：说明太长时整张表会横着撑出弹窗，把「使用」按钮推到看不见的地方。
+  // TLS / ALPN / 证书这些次要信息压到目标下面一行，主列只留结论与说明。
+  const rows = (__destResults || []).map((r, i) => {
+    const badge = !r.ok ? `<span class="badge b-err">不可用</span>`
+      : !r.cert_ok ? `<span class="badge b-warn">证书不符</span>`
+      : `<span class="badge b-ok">可用</span>`;
+    const best = r.best ? ` <span class="badge b-acc">推荐</span>` : "";
+    const info = [
+      r.tls ? "TLS " + r.tls : "",
+      r.alpn ? "ALPN " + r.alpn : "无 ALPN",
+      r.issuer || "",
+      r.days_left > 0 ? `证书 ${r.days_left} 天` : ""
+    ].filter(Boolean).join(" · ");
+    return `<tr>
+      <td style="white-space:normal"><b style="font-size:12.5px">${escHtml(r.host)}</b><span class="muted">:${r.port}</span>
+        <div class="muted" style="font-size:11.5px">${escHtml(info)}</div></td>
+      <td class="ta-r num" style="white-space:nowrap">${r.ok ? r.ms + " ms" : "—"}</td>
+      <td style="white-space:nowrap">${badge}${best}</td>
+      <td style="font-size:12px;white-space:normal;word-break:break-word">${escHtml(r.detail || "")}${r.warning ? `<div class="muted" style="margin-top:2px">⚠ ${escHtml(r.warning)}</div>` : ""}</td>
+      <td class="ta-r"><button class="btn sm" data-act="useDest" data-args="${escJson([i])}"${r.ok ? "" : " disabled"}>使用</button></td>
+    </tr>`;
+  }).join("");
+  // table-layout:fixed + 固定列宽：失败行的 warning 是一长句，自动布局会把表格
+  // 撑到弹窗外面，把「使用」按钮推到水平滚动区——用户根本看不见该点哪儿。
+  $("dest_result").innerHTML = `<div class="tbl-wrap" style="margin-top:8px"><table style="table-layout:fixed">
+    <colgroup><col style="width:30%"><col style="width:76px"><col style="width:112px"><col><col style="width:64px"></colgroup>
+    <thead><tr><th>目标</th><th class="ta-r">握手</th><th>结论</th><th>说明</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function useDest(i) {
+  const r = (__destResults || [])[i];
+  if (!r) return;
+  const oldHost = ($("ib_f_handshake").value || "").trim().replace(/:\d+$/, "");
+  $("ib_f_handshake").value = r.host;
+  $("ib_f_hsport").value = r.port;
+  // SNI 要跟着 dest 走：REALITY 只接受 serverNames 里的 SNI，换了目标却留着
+  // 旧 SNI，客户端握手会被直接拒。只在「没自己改过」时同步，用户填的多个
+  // SNI 保持原样，只提示一句。
+  const sn = $("ib_f_snames");
+  const cur = (sn.value || "").trim();
+  if (!cur || cur === oldHost) {
+    sn.value = r.sni || r.host;
+    toast(`已选用 ${r.host}:${r.port}，SNI 同步为 ${sn.value}`);
+  } else {
+    toast(`已选用 ${r.host}:${r.port}；SNI 仍是你填的 ${cur}，请确认它也在这个目标的证书里`, "warn");
+  }
+  closeModal("mDest");
 }
 
 /* ---- 流量 ---- */
