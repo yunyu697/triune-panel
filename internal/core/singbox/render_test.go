@@ -379,3 +379,70 @@ func TestRenderRealityMissingHandshake(t *testing.T) {
 		t.Errorf("错误信息应说明缺握手目标，实际: %v", err)
 	}
 }
+
+// TestRenderRealityWritesServerName 是 v1.1.10 的核心回归。
+//
+// sing-box 的 REALITY 服务端**必须**有 tls.server_name：缺了它内核照样启动、
+// 端口照样监听、`sing-box check` 也过，但每个客户端都在握手阶段被拒
+// （服务端 `REALITY: processed invalid connection`，客户端收到回落目标的真证书）。
+//
+// 实测（sing-box 1.14.4，同一对密钥 / 同一个 short_id / 同一个握手目标）：
+//
+//	不加 server_name → 握手失败
+//	加上 server_name → 立刻 204 通
+//
+// xray 的 REALITY 没有这个字段（它用 serverNames 列表），照着 xray 的字段写
+// 就会漏掉它——所以这条断言必须钉死。
+func TestRenderRealityWritesServerName(t *testing.T) {
+	sb := &SingBox{}
+
+	// 1) server_names 优先（与 xray 的 serverNames 第一个对齐）
+	in := &model.Inbound{
+		Name: "r1", Core: "singbox", Protocol: "vless",
+		Port: 24461, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com",
+			"server_name":"old.example.com","server_names":"www.apple.com,apple.com"}`,
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	tls := obj["tls"].(map[string]any)
+	if got, _ := tls["server_name"].(string); got != "www.apple.com" {
+		t.Errorf("tls.server_name 应取 server_names 第一个 www.apple.com，实际 %q", got)
+	}
+
+	// 2) 只有 server_name 时用它
+	in2 := &model.Inbound{
+		Name: "r2", Core: "singbox", Protocol: "vless",
+		Port: 24462, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.amd.com","server_name":"www.amd.com"}`,
+	}
+	obj2, err := sb.renderInbound(core.InboundWithClients{Inbound: in2, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	if got, _ := obj2["tls"].(map[string]any)["server_name"].(string); got != "www.amd.com" {
+		t.Errorf("tls.server_name 应为 www.amd.com，实际 %q", got)
+	}
+
+	// 3) 都没填时退回握手目标主机名——不能留空，留空等于全拒
+	in3 := &model.Inbound{
+		Name: "r3", Core: "singbox", Protocol: "vless",
+		Port: 24463, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.bing.com:8443"}`,
+	}
+	obj3, err := sb.renderInbound(core.InboundWithClients{Inbound: in3, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	if got, _ := obj3["tls"].(map[string]any)["server_name"].(string); got != "www.bing.com" {
+		t.Errorf("没填 SNI 时应退回握手目标主机名 www.bing.com，实际 %q（空串会让服务端拒绝所有客户端）", got)
+	}
+}

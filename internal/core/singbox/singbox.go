@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"triune/internal/core"
 	"triune/internal/model"
@@ -293,7 +294,32 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		if sids := core.ShortIDs(in.Settings); len(sids) > 0 && !(len(sids) == 1 && sids[0] == "") {
 			reality["short_id"] = sids
 		}
-		obj["tls"] = map[string]any{"enabled": true, "reality": reality}
+		// tls.server_name 在 sing-box 的 REALITY 服务端上是**必填**的，缺了它
+		// 内核照样启动、端口照样监听、`sing-box check` 也过，但**每个客户端都
+		// 在握手阶段被拒**：服务端日志只有一句
+		// `TLS handshake: REALITY: processed invalid connection`，
+		// 客户端收到的是回落目标的真证书（xray 报
+		// `REALITY: received real certificate`）。
+		//
+		// 这一项只在 sing-box 上会漏：xray 的 REALITY 用 serverNames 列表，
+		// 根本没有 tls.server_name 这个字段，所以照着 xray 的字段写就会丢掉它。
+		// 实测（sing-box 1.14.4，同一对密钥、同一个 short_id、同一个握手目标，
+		// 只差这一项）：不加 → 握手失败；加上 → 立刻 204 通。
+		//
+		// 取值与 xray 的 serverNames 对齐：server_names 第一个 → server_name →
+		// 握手目标主机名。客户端发来的 SNI 必须是服务端认得的那个，
+		// 而面板导出的链接取的也是这三个来源里最靠前的同一个。
+		sni := ""
+		if names := core.FieldList(in.Settings, "server_names"); len(names) > 0 {
+			sni = strings.TrimSpace(names[0])
+		}
+		if sni == "" {
+			sni = strings.TrimSpace(core.Field(in.Settings, "server_name"))
+		}
+		if sni == "" {
+			sni = hs
+		}
+		obj["tls"] = map[string]any{"enabled": true, "server_name": sni, "reality": reality}
 	}
 	return obj, nil
 }
