@@ -104,6 +104,22 @@ func (m *Manager) Stop(name string) {
 	m.stopLocked(name)
 }
 
+// StopAll 停掉所有在管的内核。
+//
+// exec 换进程映像前必须调用：exec 只换自己，子进程原样留着，而新进程的
+// Manager 是空的——那些内核会变成没人认领的孤儿，端口一直占着，
+// 之后每次「应用配置」都死在端口预检上（见 reap.go 的说明）。
+func (m *Manager) StopAll() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var names []string
+	for name := range m.procs {
+		names = append(names, name)
+		m.stopLocked(name)
+	}
+	return names
+}
+
 func (m *Manager) Restart(name, binPath, cfgPath, workDir string) error {
 	return m.Start(name, binPath, cfgPath, workDir)
 }

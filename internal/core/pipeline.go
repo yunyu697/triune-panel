@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -175,7 +176,19 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 			// 端口被别的程序占着时，内核往往只记一条日志就"启动成功"
 			// （xray 尤为明显），界面显示已启用但根本连不上。
 			m.ProcMgr.Stop(name)
-			if perr := checkPortsFree(ins); perr != nil {
+			perr := checkPortsFree(ins)
+			if perr != nil {
+				// 端口被占，但很可能就是「上一代面板」留下的自家内核：
+				// exec 换进程映像时子进程不跟着退，崩溃 / 被 SIGKILL 也一样。
+				// 认得出是自己的（二进制与配置路径都对上）就先清掉再试一次；
+				// 认不出才当作别人的程序，如实报错。
+				if killed := proc.ReapOrphans(bin, cfgPath); len(killed) > 0 {
+					log.Printf("[core] 端口 %d 被上一代面板留下的 %s 进程 %v 占着，已清理并重试",
+						ins[0].Inbound.Port, name, killed)
+					perr = checkPortsFree(ins)
+				}
+			}
+			if perr != nil {
 				// 回滚：把刚才备份的运行配置写回并重启旧内核，
 				// 不能让一次失败的应用把线上服务停掉。
 				if len(oldCfg) > 0 {
@@ -266,7 +279,8 @@ func checkPortsFree(ins []InboundWithClients) error {
 			}
 			c, err := net.ListenUDP("udp", ua)
 			if err != nil {
-				return fmt.Errorf("端口 %d/UDP 已被其它程序占用，%s 无法启动（%v）", in.Port, in.Name, err)
+				return fmt.Errorf("端口 %d/UDP 已被其它程序占用，%s 无法启动（%v）。%s",
+					in.Port, in.Name, err, portBusyHint(in.Port))
 			}
 			c.Close()
 			continue
@@ -276,13 +290,25 @@ func checkPortsFree(ins []InboundWithClients) error {
 		// 端口重复 bind，单靠 bind 判不出来）。
 		if c, err := net.DialTimeout("tcp", addr, 700*time.Millisecond); err == nil {
 			c.Close()
-			return fmt.Errorf("端口 %d/TCP 已被其它程序占用（连接成功），%s 无法启动", in.Port, in.Name)
+			return fmt.Errorf("端口 %d/TCP 已被其它程序占用（连接成功），%s 无法启动。%s",
+				in.Port, in.Name, portBusyHint(in.Port))
 		}
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
-			return fmt.Errorf("端口 %d/TCP 已被其它程序占用，%s 无法启动（%v）", in.Port, in.Name, err)
+			return fmt.Errorf("端口 %d/TCP 已被其它程序占用，%s 无法启动（%v）。%s",
+				in.Port, in.Name, err, portBusyHint(in.Port))
 		}
 		ln.Close()
 	}
 	return nil
+}
+
+// portBusyHint 端口被占时告诉用户下一步做什么。
+//
+// 光说「被其它程序占用」会让人卡在这儿：面板刚升级过、界面上也没有任何线索。
+// 实际上最常见的原因是**面板自己上一代留下的内核**——exec 换进程映像时子进程
+// 不跟着退，于是它继续占着端口。这种现在会被自动清掉，所以还报这个错时，
+// 基本就是别人的程序了，直接把查法写出来。
+func portBusyHint(port int) string {
+	return fmt.Sprintf("面板自己残留的内核会被自动清理；仍然占用说明是别的程序，可用 `lsof -i :%d` 查是谁", port)
 }

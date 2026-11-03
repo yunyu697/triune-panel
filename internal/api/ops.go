@@ -447,6 +447,25 @@ func selfExeAt(p string) (string, error) {
 // 自重启手段都不可用，只能明确告诉用户去 `systemctl restart`。
 func (a *Server) restartSelf(exe, what string) {
 	time.Sleep(execSelfWait)
+	// 先把内核停掉再 exec。
+	//
+	// exec 换的只是本进程的映像，**子进程原样留着**；而内核的运行状态只存在
+	// proc.Manager 的内存里，新映像里那张表是空的。不停就切，三个内核会变成
+	// 没人认领的孤儿：它们继续监听入站端口，面板却认为「内核未运行」，
+	// 于是下一次「应用配置」必然死在端口预检上——
+	//
+	//	端口 24443/TCP 已被其它程序占用（连接成功），hk-01 无法启动
+	//
+	// 而面板既停不掉它（内存里没有），也起不来新的。用户看到的就是
+	// 「升级之后入站端口依然被占用」，从界面上完全无解。
+	//
+	// 停掉之后由新进程的 RestoreCores 按磁盘上已渲染的配置拉起来，
+	// 代价是内核跟着重启一次（一两秒），换的是「升级完还能用」。
+	if a.ProcMgr != nil {
+		if names := a.ProcMgr.StopAll(); len(names) > 0 {
+			log.Printf("[update] 切换前先停内核：%v（新进程会按现有配置拉起来）", names)
+		}
+	}
 	err := execSelf(exe, os.Args, os.Environ())
 	if err == nil {
 		return
@@ -454,4 +473,7 @@ func (a *Server) restartSelf(exe, what string) {
 	msg := fmt.Sprintf("二进制已%s，但重启失败（%v）；进程仍在运行 %s", what, err, Version)
 	log.Printf("[update] %s", msg)
 	_ = a.Store.SetSetting(SettingRestartFailed, msg)
+	// 切换没成功，进程还是旧的：把刚才停掉的内核拉回来，
+	// 别让一次失败的升级把正在跑的节点停在那儿。
+	go a.RestoreCores()
 }

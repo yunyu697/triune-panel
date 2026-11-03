@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"triune/internal/core"
+	"triune/internal/proc"
 )
 
 // RestoreCores 启动时把「该跑但没在跑」的内核拉起来。
@@ -66,6 +67,12 @@ func (a *Server) RestoreCores() {
 			continue
 		}
 		workDir := filepath.Join(a.Pipe.DataDir, "cores", name)
+		// 上一代面板留下的内核可能还活着并占着端口：exec 换进程映像时子进程
+		// 不跟着退，崩溃 / 被 SIGKILL 也一样。认得出是自己家的就先清掉，
+		// 否则新进程起得来但绑不上端口，界面显示「已启用」而实际连不上。
+		if killed := proc.ReapOrphans(bin, cfgPath); len(killed) > 0 {
+			log.Printf("[core] 清理 %s 的残留进程 %v（上一代面板留下的，占着入站端口）", name, killed)
+		}
 		if err := a.ProcMgr.Start(name, bin, cfgPath, workDir); err != nil {
 			log.Printf("[core] 启动 %s 失败: %v", name, err)
 			continue
