@@ -66,6 +66,19 @@ func ProtoList(protocol, transport string) []string {
 	return []string{"tcp"}
 }
 
+// ProtoOverlap 两组端口协议是否有交集。
+// 用于判断两个入站是否抢同一个 socket：同端口但一组只有 tcp、另一组只有 udp 时不冲突。
+func ProtoOverlap(a, b []string) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // DetectBackend 探测当前系统生效（或最可能生效）的防火墙后端。
 func DetectBackend() string {
 	if b, err := exec.LookPath("firewall-cmd"); err == nil {

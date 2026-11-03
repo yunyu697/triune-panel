@@ -698,9 +698,10 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 
 // validateInboundInput 校验入站的可提交性，返回空串表示通过。
 //
-// 两条都是「创建成功、应用时才炸」的输入问题，而炸出来的内核报错完全指不到
+// 三条都是「创建成功、应用时才炸」的输入问题，而炸出来的内核报错完全指不到
 // 真因，所以前移到保存时：
 //   - 端口越界：0 / 65536 / 负数都能存进去，直接让整份配置校验失败；
+//   - 端口冲突：同端口同协议族的两个入站，任何一个内核都起不来（见 validatePortConflict）；
 //   - tag 重复：xray 报 `existing tag found: dup` 并拒绝**整份**配置，用户看到的
 //     是一串内核日志，而不是「你有两个入站重名了」。
 //
@@ -708,6 +709,9 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 func (a *Server) validateInboundInput(in *model.Inbound, selfID int64) string {
 	if in.Port < 1 || in.Port > 65535 {
 		return fmt.Sprintf("端口 %d 不合法：必须是 1-65535", in.Port)
+	}
+	if msg := a.validatePortConflict(in, selfID); msg != "" {
+		return msg
 	}
 	if in.Tag == "" || in.Core == "" {
 		// 空 tag 由 TagOf 生成 in-<id>；空 core 的入站本来就渲染不了，
@@ -728,6 +732,59 @@ func (a *Server) validateInboundInput(in *model.Inbound, selfID int64) string {
 		}
 	}
 	return ""
+}
+
+// validatePortConflict 同端口 + 同协议族 → 保存期就拦下，返回空串表示不冲突。
+//
+// 为什么要前移：xray 的 `run -test` 和 sing-box 的 `check` 只校验配置语法，
+// **不 bind socket**，所以两个入站抢同一端口能一路存库、渲染、替换配置，直到
+// 内核启动失败才在健康检查里暴露——而那时配置已经被换掉，该内核下的所有节点
+// 一起断，用户看到的是一句英文内核日志。
+//
+// 判据：
+//   - 只有「已启用且非草稿」的入站才真的占端口，草稿（导入预览）和停用的不参与；
+//   - 端口相同、listen 会抢同一个 socket、协议族有交集才算冲突；
+//   - 一个 TCP 一个 UDP 可以共存（vless 443 + hysteria2 443 是常见搭配），
+//     所以按 ProtoList 求交集，而不是简单比端口。
+func (a *Server) validatePortConflict(in *model.Inbound, selfID int64) string {
+	if !in.Enabled || in.Draft {
+		return ""
+	}
+	all, err := a.Store.ListInbounds("") // 空 core = 全部：不同内核也抢同一个系统端口
+	if err != nil {
+		return ""
+	}
+	protos := firewall.ProtoList(in.Protocol, in.Transport)
+	for _, o := range all {
+		if o.ID == selfID || !o.Enabled || o.Draft || o.Port != in.Port {
+			continue
+		}
+		if !listenOverlap(in.Listen, o.Listen) {
+			continue
+		}
+		other := firewall.ProtoList(o.Protocol, o.Transport)
+		if !firewall.ProtoOverlap(protos, other) {
+			continue
+		}
+		return fmt.Sprintf("端口 %d 已被 #%d「%s」（%s/%s，占用 %s）使用：同一端口上同协议族只能有一个入站。"+
+			"请换一个端口；若要共用这个端口，让其中一个改走另一种协议族（例如 hysteria2 用 UDP）",
+			in.Port, o.ID, o.Name, o.Core, o.Protocol, strings.Join(other, "+"))
+	}
+	return ""
+}
+
+// listenOverlap 两个 listen 是否会抢同一个 socket。
+// 空值 / 0.0.0.0 / :: 都表示「所有地址」，与任何具体地址都冲突。
+func listenOverlap(a, b string) bool {
+	norm := func(s string) string {
+		switch strings.TrimSpace(s) {
+		case "", "0.0.0.0", "::", "[::]", "*":
+			return ""
+		}
+		return strings.TrimSpace(s)
+	}
+	na, nb := norm(a), norm(b)
+	return na == "" || nb == "" || na == nb
 }
 
 func (a *Server) deleteInbound(w http.ResponseWriter, r *http.Request) {

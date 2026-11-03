@@ -73,6 +73,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 | ④ 自动备份 + 回滚 | 每次替换前自动备份到 `data/revisions/<core>/`，一键回滚 |
 | ⑤ 修订审计 | 每次渲染的完整配置作为 `ConfigRevision` 存 DB，任何变更可追溯 |
 | ⑥ 迁移只增不删 | schema 版本化、前向兼容；未知字段以 JSON 原样保留，升级不丢数据 |
+| ⑦ 保存期拦矛盾输入 | 端口越界、同内核 tag 重名、**同端口同协议族冲突**在保存时就 400。内核的 `check` / `-test` 只校验语法、不 bind socket，这类问题原本要等内核起不来才暴露——而那时配置已被替换，该内核下所有节点一起断。同端口一 TCP 一 UDP（如 vless 443 + hysteria2 443）仍允许共存 |
 
 ## 适用边界（先看这几条）
 

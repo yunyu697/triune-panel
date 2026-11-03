@@ -235,6 +235,60 @@ def main():
             call(args.base, "DELETE", f"/api/inbounds/{iid}")
             call(args.base, "POST", "/api/apply", {"core": core, "note": "verify cleanup"})
 
+    # ---- 同端口规则：同协议族必须拦在保存期，TCP+UDP 必须能共存 ----
+    # 以前没有这条校验：两个入站抢同一端口能一路存库、渲染、替换配置，直到内核
+    # 起不来——而那一刻配置已经被换掉，该内核下所有节点一起断。
+    print()
+    same_port = p + 40
+    keep = []
+
+    code, r = call(args.base, "POST", "/api/inbounds",
+                   mk("vf-same-tcp", "xray", "vless", same_port))
+    if code < 300:
+        keep.append(r.get("id"))
+        print(f"[OK     ] 同端口：先建 TCP 入站 create={code}")
+    else:
+        print(f"[FAIL   ] 同端口：先建 TCP 入站 create={code} {r.get('error', '')[:120]}")
+        fails.append(("同端口-基座", "create", code, r))
+
+    code, r = call(args.base, "POST", "/api/inbounds",
+                   mk("vf-same-dup", "xray", "vmess", same_port))
+    if code == 400 and "已被" in (r.get("error") or ""):
+        print(f"[OK     ] 同端口：同协议族第二个被拦下 -> {(r.get('error') or '')[:90]}")
+    else:
+        print(f"[LEAK!!! ] 同端口：同协议族第二个应 400，实际 {code} {(r.get('error') or '')[:120]}")
+        fails.append(("同端口-重复", "create", code, r))
+        if code < 300:
+            keep.append(r.get("id"))
+
+    code, r = call(args.base, "POST", "/api/inbounds",
+                   mk("vf-same-udp", "singbox", "hysteria2", same_port, tls="tls",
+                      settings={"certificate_path": cert, "key_path": key,
+                                "server_name": "test.local"},
+                      clients=[{"name": "hy2", "credential": "hy2-pass"}]))
+    if code < 300:
+        keep.append(r.get("id"))
+        print(f"[OK     ] 同端口：TCP + UDP 共存被允许 create={code}")
+    else:
+        print(f"[FAIL   ] 同端口：TCP + UDP 应允许，实际 {code} {r.get('error', '')[:120]}")
+        fails.append(("同端口-TCP+UDP", "create", code, r))
+
+    # 两个真的能同时跑起来：xray 占 TCP、singbox 占 UDP
+    for c in ("xray", "singbox"):
+        code, r = call(args.base, "POST", "/api/apply", {"core": c, "note": "verify same-port"})
+        applied = code < 300 and r.get("validated") and r.get("restarted")
+        ok = applied
+        print(f"[{'OK     ' if ok else 'FAIL   '}] 同端口：{c} 应用 -> {code} "
+              f"{'' if ok else (r.get('error') or '')[:120]}")
+        if not ok:
+            fails.append((f"同端口-{c}应用", "apply", code, r))
+
+    for iid in keep:
+        if iid:
+            call(args.base, "DELETE", f"/api/inbounds/{iid}")
+    for c in ("xray", "singbox"):
+        call(args.base, "POST", "/api/apply", {"core": c, "note": "verify same-port cleanup"})
+
     print()
     if fails:
         print(f"{len(fails)} 个场景与预期不符：")
