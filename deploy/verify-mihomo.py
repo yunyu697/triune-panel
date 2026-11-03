@@ -29,6 +29,19 @@ authentication failed）单测全都发现不了。
 关于探测目标：默认用 IP 字面量 `https://1.1.1.1/cdn-cgi/trace`。某些网络的
 DNS 会把域名的 AAAA 投毒成 fc00::/ULA，xray 的 freedom 出站会拦私有地址，
 测出来的「不通」是环境不是产品。要换目标用 --probe / --probe-want。
+脚本会先直连探一次：探不通就把出网断言记成 SKIP，不记假红。
+
+关于 REALITY 这一条：xray ≥ 26.7.11 的 REALITY 默认只接受 26.3.27 以上的
+客户端，而 mihomo 把客户端版本写死成 1.8.2，必然被拒。这不是导出配置的问题，
+所以脚本在那种组合下把这一条记成 SKIP 并写明原因，而不是 FAIL。
+
+## 一条踩过的假绿（写在这里，免得再犯）
+
+出网那条断言以前带着 `curl --noproxy '*'`。它会**把命令行上显式给的
+`--socks5-hostname` 一起废掉**，curl 直接连出去——于是「经节点出网」测的其实是
+「本机能不能上网」。实测：`--noproxy '*' --socks5-hostname 127.0.0.1:1`
+（一个必然连不上的代理）访问可达站点仍返回 204。也就是说这个脚本曾经连续
+两个版本报「全绿」，而 REALITY 那条一直是假绿。
 """
 
 import argparse
@@ -45,7 +58,7 @@ import urllib.error
 import urllib.request
 
 TOKEN = {"v": ""}
-PASS = FAIL = 0
+PASS = FAIL = SKIP = 0
 
 
 def ck(name, ok, detail=""):
@@ -56,6 +69,31 @@ def ck(name, ok, detail=""):
     else:
         FAIL += 1
         print(f"  FAIL {name}  {detail}")
+
+
+def skip_case(name, why):
+    global SKIP
+    SKIP += 1
+    print(f"  SKIP {name}（{why}）")
+
+
+def xray_rejects_old_reality_clients(bin_path):
+    """xray ≥ 26.7.11 的 REALITY 默认只接受 26.3.27 以上的客户端。
+
+    这条判定在面板里也有一份（internal/api/diagnose.go，带单测），这里不重写规则、
+    只按同一条版本线判：mihomo 把 REALITY 客户端版本写死成 1.8.2，会被拒，
+    报 `REALITY authentication failed`。脚本要是照旧记一条 FAIL，看起来像导出的
+    配置有问题——其实节点参数是对的，换 xray 内核的客户端就能连。
+    """
+    try:
+        out = subprocess.run([bin_path, "version"], capture_output=True,
+                             text=True, timeout=20).stdout
+    except Exception:
+        return False
+    m = re.search(r"Xray\s+(\d+)\.(\d+)\.(\d+)", out)
+    if not m:
+        return False
+    return tuple(int(x) for x in m.groups()) >= (26, 7, 11)
 
 
 def call(base, method, path, body=None, raw=False):
@@ -95,6 +133,9 @@ def proxies_block(yaml):
 
 def run_case(args, case, idx, work_root):
     print(f"\n=== {case['label']} ===")
+    if case.get("skip"):
+        skip_case("整个用例", case["skip"])
+        return
     st, inb = call(args.base, "POST", "/api/inbounds", case["inbound"])
     if st != 200:
         ck("建入站", False, f"{st} {inb}")
@@ -170,14 +211,23 @@ def run_case(args, case, idx, work_root):
             time.sleep(4)
             ck("mihomo 进程存活", proc.poll() is None, "进程已退出，见 run.log")
             env2 = dict(os.environ, ALL_PROXY="", all_proxy="", NO_PROXY="")
+            # 这里**不能**加 --noproxy：它会把命令行上显式给的 --socks5-hostname
+            # 一起废掉，curl 直接连出去。于是「经节点出网」这条断言测的是本机
+            # 能不能上网，不是节点通不通——一个死代理也能让它绿（实测：
+            # `--noproxy '*' --socks5-hostname 127.0.0.1:1` 访问可达站点仍返回 204）。
             r = subprocess.run([
                 "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "25", "--noproxy", "*",
+                "--max-time", "25",
                 "--socks5-hostname", f"127.0.0.1:{socks}", args.probe,
             ], capture_output=True, text=True, env=env2, timeout=45)
             code = r.stdout.strip()
-            ck(f"经节点出网（期望 {args.probe_want}）", code == args.probe_want,
-               f"HTTP {code or '(无响应)'} {r.stderr[:120]}")
+            if not args.egress_ok:
+                # 探测目标从这台机器都直连不上，经节点当然也不通——这不是产品问题，
+                # 明确跳过而不是记一条假红。
+                skip_case("经节点出网", f"{args.probe} 直连不可达，换 --probe / --probe-want")
+            else:
+                ck(f"经节点出网（期望 {args.probe_want}）", code == args.probe_want,
+                   f"HTTP {code or '(无响应)'} {r.stderr[:120]}")
         finally:
             proc.send_signal(signal.SIGTERM)
             try:
@@ -286,6 +336,25 @@ def main():
     ]
 
     work_root = tempfile.mkdtemp(prefix="verify-mihomo-")
+
+    # 先确认探测目标本身从这台机器可达，否则「经节点出网」这条断言没有意义
+    direct = subprocess.run(
+        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "8",
+         "--noproxy", "*", args.probe],
+        capture_output=True, text=True).stdout.strip()
+    args.egress_ok = direct == args.probe_want
+    if not args.egress_ok:
+        print(f"\n注意：{args.probe} 直连返回 {direct or '(无响应)'}，"
+              f"不是 {args.probe_want}，出网断言将跳过（换 --probe / --probe-want）")
+
+    if xray_rejects_old_reality_clients(args.xray):
+        cases[0]["skip"] = (
+            "服务端 xray ≥ 26.7.11 的 REALITY 默认只接受 26.3.27 以上的客户端，"
+            "而 mihomo 把客户端版本写死成 1.8.2（MetaCubeX/mihomo#3039），"
+            "必然报 REALITY authentication failed——节点参数是对的，不是导出问题；"
+            "换 xray 内核的客户端可连，或把服务端 xray 降到 26.3.27。"
+            "详见面板「自检 → 客户端兼容性」")
+
     try:
         for i, c in enumerate(cases):
             run_case(args, c, i, work_root)
@@ -295,7 +364,8 @@ def main():
         else:
             shutil.rmtree(work_root, ignore_errors=True)
 
-    print(f"\n结果：{PASS} 通过 / {FAIL} 失败")
+    tail = f" / {SKIP} 跳过" if SKIP else ""
+    print(f"\n结果：{PASS} 通过 / {FAIL} 失败{tail}")
     return 0 if FAIL == 0 else 1
 
 
