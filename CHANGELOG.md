@@ -8,6 +8,49 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.2.0
+
+**sing-box 内核的 REALITY 入站，任何客户端都连不上。** 症状是「面板上建好节点、
+导出链接、客户端报 `REALITY: received real certificate`」，而内核正常运行、
+端口正常监听、`sing-box check` 判定配置合法、面板显示「已启用」——所有能看的
+指标全是绿的，于是人只会去反复比对链接里的公钥和短 ID。
+
+根因是渲染器少写了一个字段。sing-box 的 REALITY 服务端**必须**有
+`tls.server_name`，而面板只写了 `tls.reality{enabled, handshake, private_key, short_id}`：
+
+```
+之前:  "tls": { "enabled": true, "reality": { … } }
+现在:  "tls": { "enabled": true, "server_name": "www.apple.com", "reality": { … } }
+```
+
+缺了它的表现极具迷惑性：内核照常启动、端口照常监听、`sing-box check` 也过，
+但**每个客户端都在握手阶段被拒**。服务端日志只有一句
+`TLS handshake: REALITY: processed invalid connection`；xray 系客户端
+（v2rayN / v2rayNG / mihomo）报 `REALITY: received real certificate`，
+sing-box 客户端报 `reality verification failed`。三种客户端、三句不同的话，
+指的是同一件事。
+
+这个字段只在 sing-box 上存在：xray 的 REALITY 用 `serverNames` 列表，
+根本没有 `tls.server_name`，照着 xray 的字段写就会漏掉它。取值顺序与导出链接
+取 SNI 的顺序对齐——`server_names` 第一个 → `server_name` → 握手目标主机名，
+三者皆空才用握手目标，绝不写空串（写空串等于拒绝所有客户端）。
+
+实测（sing-box 1.14.4，同一对密钥、同一个 short_id、同一个握手目标，
+只改这一项）：
+
+| 服务端 | 结果 |
+|---|---|
+| 不写 `server_name` | 握手失败，客户端收到回落目标的真证书 |
+| 写 `server_name` | 204 通 |
+
+新增回归 `TestRenderRealityWritesServerName`，三个子场景（`server_names` 优先 /
+只有 `server_name` / 都没填时退回握手目标主机名），并做变异验证：去掉这一项，
+三条断言全红，还原后全绿。
+
+**顺带记一笔测试缺口**：`deploy/verify-inbounds.py` 对 sing-box REALITY 只验证
+「内核起得来」，不验证「客户端握得上手」，所以这个 bug 一路绿灯。
+启动成功不等于能握手——这一层的回归需要真客户端。
+
 ## v1.1.9
 
 **升级之后，入站端口被「自己上一代的内核」占着。** 面板换进程有两条路：systemd 的
