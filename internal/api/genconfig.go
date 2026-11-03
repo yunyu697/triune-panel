@@ -35,7 +35,7 @@ type setPolicy struct {
 type scenarioDef struct {
 	ID    string      `json:"id"`
 	Name  string      `json:"name"`
-	Tag   string      `json:"tag"`   // 场景分类标签：通用 / 流媒体 / AI / 游戏 ...
+	Tag   string      `json:"tag"` // 场景分类标签：通用 / 流媒体 / AI / 游戏 ...
 	Desc  string      `json:"desc"`
 	Sets  []setPolicy `json:"sets"`
 	Rules []string    `json:"rules"` // 场景内置的自定义规则（clash 语法）
@@ -44,9 +44,11 @@ type scenarioDef struct {
 // ruleCatalog 规则集目录（geosite 类目名与 v2fly domain-list-community / MetaCubeX / SagerNet 对齐）
 // ruleCatalog 规则集目录
 // 所有条目均已对上游真实文件校验：
-//   mihomo   → MetaCubeX/meta-rules-dat  meta/geo/{geosite|geoip}/{name}.mrs
-//   sing-box → SagerNet/sing-geosite      rule-set/geosite-{name}.srs
-//              SagerNet/sing-geoip       rule-set/geoip-{name}.srs
+//
+//	mihomo   → MetaCubeX/meta-rules-dat  meta/geo/{geosite|geoip}/{name}.mrs
+//	sing-box → SagerNet/sing-geosite      rule-set/geosite-{name}.srs
+//	           SagerNet/sing-geoip       rule-set/geoip-{name}.srs
+//
 // Cores 标记该规则集在哪些内核的上游存在（geoip-private / category-porn 仅 mihomo 提供）。
 var ruleCatalog = []ruleSetDef{
 	{ID: "geosite-cn", Name: "中国大陆域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both", Policy: "DIRECT"},
@@ -533,13 +535,33 @@ type genReq struct {
 	Sets        []setPolicy    `json:"sets"`
 	CustomRules []string       `json:"custom_rules"`
 	CustomSets  []customSetReq `json:"custom_sets"`
+	// RuleMirror / RuleMirrorPrefix 规则集下载源（见 rulemirror.go）。
+	// 留空 = 官方直连，与 v1.1.2 及以前的行为一致——不能因为发了新功能
+	// 就让老用户已经跑通的配置悄悄换下载地址。
+	RuleMirror       string `json:"rule_mirror"`
+	RuleMirrorPrefix string `json:"rule_mirror_prefix"`
 }
 
-// handleExportCatalog GET /api/export/catalog：规则集目录 + 场景预设
+// mirror 归一请求里的下载源选择（非法值退回官方，理由见 resolveMirror）。
+func (q genReq) mirror() ruleMirrorSel {
+	s, _ := resolveMirror(q.RuleMirror, q.RuleMirrorPrefix)
+	return s
+}
+
+// handleExportCatalog GET /api/export/catalog：规则集目录 + 场景预设 + 下载源列表
 func (a *Server) handleExportCatalog(w http.ResponseWriter, r *http.Request) {
+	// 默认下载源跟着设置走：用户上次选过镜像，下次打开生成页就还是它，
+	// 不用每次重新选（这个选择在全球网络环境下不会天天变）。
+	defMirror, _ := a.Store.GetSetting(MirrorSetting)
+	if defMirror == "" {
+		defMirror = MirrorOfficial
+	}
+	defPrefix, _ := a.Store.GetSetting(MirrorPrefixSetting)
 	writeJSON(w, 200, map[string]any{
 		"sets":      ruleCatalog,
 		"scenarios": scenarioPresets,
+		"mirrors":   ruleMirrors,
+		"mirror":    map[string]string{"id": defMirror, "prefix": defPrefix},
 	})
 }
 
@@ -611,6 +633,12 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	// 解析规则集选择 + 自定义规则集
 	sets, warns := normalizeSets(q)
 
+	// 下载源：非法值已在 resolveMirror 里退回官方，这里只把原因转成提示
+	mir := q.mirror()
+	if _, warn := resolveMirror(q.RuleMirror, q.RuleMirrorPrefix); warn != "" {
+		warns = append(warns, warn)
+	}
+
 	// 生成前先确认「至少有一个节点真的能导出」，理由见 exportable.go。
 	// 一个都导不出时**不要**生成——空 proxies 的配置内核只会拒绝，
 	// 用户还得反过来猜是哪一步错了。
@@ -646,9 +674,9 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 
 	var g *generator
 	if q.Core == "mihomo" {
-		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns)
+		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, mir)
 	} else {
-		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns)
+		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, mir)
 	}
 
 	var content string
@@ -670,6 +698,10 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		"content":      content,
 		"content_type": ct,
 		"warnings":     warns,
+		// 回传实际生效的下载源：前端要显示「这份配置的规则集走 gh-proxy.com」，
+		// 而不是让用户自己在几百行 YAML 里翻 rule-providers 的 url 才看得出来。
+		"rule_mirror":  mir.ID,
+		"mirror_label": mir.label(),
 	}
 	// 版本信息回传给前端显示：用户得知道这份配置是给哪个版本写的，
 	// 否则拿 1.14 的 JSON 去喂 1.11 只会得到一句看不懂的 FATAL。
@@ -717,6 +749,9 @@ func coreHasSet(core string, def ruleSetDef) bool {
 
 func normalizeSets(q genReq) ([]normSet, []string) {
 	var warns []string
+	// 下载源在这里就定下来：目录规则集与后面 GEOSITE/GEOIP 动态 provider
+	// 必须用同一个源，否则同一份配置里一半走镜像一半直连，排障时看不出规律。
+	mir := q.mirror()
 	seen := map[string]bool{}
 	var out []normSet
 	add := func(s normSet) {
@@ -751,11 +786,16 @@ func normalizeSets(q genReq) ([]normSet, []string) {
 			warns = append(warns, def.Name+" 在 "+q.Core+" 上游没有对应规则集，已跳过")
 			continue
 		}
+		bare := strings.TrimPrefix(strings.TrimPrefix(def.ID, "geosite-"), "geoip-")
+		// 目录内置的规则集一律走当前选中的下载源。自定义规则集的 URL 不动：
+		// 那是用户自己填的地址，可能本来就在用自家镜像，替人改写只会帮倒忙。
 		if q.Core == "mihomo" {
-			add(normSet{Tag: def.ID, URL: mihomoSetURL(def.Dir, strings.TrimPrefix(strings.TrimPrefix(def.ID, "geosite-"), "geoip-")),
+			u, _ := mir.apply(mihomoSetURL(def.Dir, bare))
+			add(normSet{Tag: def.ID, URL: u,
 				Behavior: def.Behavior, Policy: policy(s.Policy, def.Policy), Format: "mrs", Interval: 86400})
 		} else {
-			add(normSet{Tag: def.ID, URL: singboxSetURL(def.Dir, strings.TrimPrefix(strings.TrimPrefix(def.ID, "geosite-"), "geoip-")),
+			u, _ := mir.apply(singboxSetURL(def.Dir, bare))
+			add(normSet{Tag: def.ID, URL: u,
 				Behavior: def.Behavior, Policy: policy(s.Policy, def.Policy), Format: "binary", Interval: 86400})
 		}
 	}
@@ -833,7 +873,7 @@ func parseCustomRule(line string) (typ, val, pol string, ok bool) {
 }
 
 // geoProviderFor GEOSITE/GEOIP 自定义规则需要的动态 provider
-func geoProviderFor(core, typ, val, pol string, sets *[]normSet) {
+func geoProviderFor(core, typ, val, pol string, sets *[]normSet, mir ruleMirrorSel) {
 	tag := strings.ToLower(typ) + "-" + val
 	for _, s := range *sets {
 		if s.Tag == tag {
@@ -847,9 +887,11 @@ func geoProviderFor(core, typ, val, pol string, sets *[]normSet) {
 	var s normSet
 	beh := map[string]string{"geosite": "domain", "geoip": "ipcidr"}[dir]
 	if core == "mihomo" {
-		s = normSet{Tag: tag, URL: mihomoSetURL(dir, val), Behavior: beh, Policy: pol, Format: "mrs", Interval: 86400}
+		u, _ := mir.apply(mihomoSetURL(dir, val))
+		s = normSet{Tag: tag, URL: u, Behavior: beh, Policy: pol, Format: "mrs", Interval: 86400}
 	} else {
-		s = normSet{Tag: tag, URL: singboxSetURL(dir, val), Behavior: beh, Policy: pol, Format: "binary", Interval: 86400}
+		u, _ := mir.apply(singboxSetURL(dir, val))
+		s = normSet{Tag: tag, URL: u, Behavior: beh, Policy: pol, Format: "binary", Interval: 86400}
 	}
 	*sets = append(*sets, s)
 }
@@ -879,7 +921,7 @@ func targetNote(target string) string {
 
 // ==================== mihomo 生成器 ====================
 
-func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string) *generator {
+func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel) *generator {
 	router := target != "client"
 
 	proxies := []any{}
@@ -900,7 +942,7 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 			continue
 		}
 		if typ == "GEOSITE" || typ == "GEOIP" {
-			geoProviderFor("mihomo", typ, val, pol, &sets)
+			geoProviderFor("mihomo", typ, val, pol, &sets, mir)
 			rules = append(rules, fmt.Sprintf("RULE-SET,geosite-%s,%s", val, pol))
 			if typ == "GEOIP" {
 				rules[len(rules)-1] = fmt.Sprintf("RULE-SET,geoip-%s,%s", val, pol)
@@ -926,6 +968,17 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 			"url":      s.URL,
 			"path":     "./rules/" + s.Tag + ".mrs",
 			"interval": s.Interval,
+			// 规则集必须直连下载，不能走代理节点。
+			//
+			// 不写这个字段时 mihomo 会按 rules 匹配出站，而生成的规则最后一条是
+			// MATCH,PROXY——于是「下载规则集」本身要经过节点。首启时节点还没就绪
+			// （或节点本来就坏）就会先失败一轮：日志里是
+			// `initial rule provider xxx error: EOF`，用户看到的是「配置没错但
+			// 分流失效」。选镜像的动机恰恰是「不依赖节点也能把规则集拿到」，
+			// 走节点就把这个前提抵消了。
+			//
+			// 与 sing-box 生成器的 download_detour: "direct" 对齐（那边一直是对的）。
+			"proxy": "DIRECT",
 		}
 	}
 
@@ -985,7 +1038,13 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	}
 
 	note := strings.ReplaceAll(targetNote(target), "\n", "\n# ")
-	header := "# Triune Panel 生成 | mihomo | " + target + "\n# " + note + "\n\n"
+	header := "# Triune Panel 生成 | mihomo | " + target + "\n# " + note + "\n"
+	// 规则集地址是配置里最容易「看着对但拉不到」的一环，把实际用的下载源
+	// 写在头注释里，出问题时一眼能看出是不是镜像挂了。
+	if !mir.direct() {
+		header += "# 规则集下载源：" + mir.label() + "\n"
+	}
+	header += "\n"
 	return &generator{doc: doc, header: header}
 }
 
@@ -1006,7 +1065,7 @@ func sbDNSServers(caps sbCaps) []any {
 	}
 }
 
-func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string) *generator {
+func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel) *generator {
 	router := target != "client"
 	caps := capsFor(ver)
 
@@ -1076,7 +1135,7 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 			}
 			routeRules = append(routeRules, setOut(map[string]any{"ip_cidr": []any{val}}, pol))
 		case "GEOSITE", "GEOIP":
-			geoProviderFor("singbox", typ, val, pol, &sets)
+			geoProviderFor("singbox", typ, val, pol, &sets, mir)
 			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{"geosite-" + val}}, pol))
 		}
 	}

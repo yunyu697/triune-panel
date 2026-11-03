@@ -101,7 +101,7 @@ func genSBRaw(t *testing.T, verStr, target string) []byte {
 		{Tag: "geosite-cn", URL: "https://example.com/cn.srs", Behavior: "domain", Policy: "DIRECT", Format: "binary", Interval: 86400},
 	}
 	var warns []string
-	g := genSingbox(target, ver, nodes, sets, nil, &warns)
+	g := genSingbox(target, ver, nodes, sets, nil, &warns, ruleMirrorSel{})
 	b, err := json.MarshalIndent(g.doc, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestGenSingboxSameAcrossPatchVersions(t *testing.T) {
 //
 // 这条曾经是最容易手滑的地方，钉成测试防止回归。
 func TestUrlTestSpelling(t *testing.T) {
-	mihomo := genMihomo("client", testNodes(), nil, nil, new([]string))
+	mihomo := genMihomo("client", testNodes(), nil, nil, new([]string), ruleMirrorSel{})
 	mhGroups := mihomo.doc["proxy-groups"].([]any)
 	var mhType string
 	for _, g := range mhGroups {

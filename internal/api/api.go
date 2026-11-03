@@ -130,6 +130,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inbounds/{id}/export", a.write(a.handleInboundExport))
 	mux.HandleFunc("GET /api/export/catalog", a.write(a.handleExportCatalog))
 	mux.HandleFunc("POST /api/export/config", a.write(a.handleExportConfig))
+	// 下载源自检会让面板主动发一次外网请求，与自检同一档（write）：
+	// 只读角色不需要它，而它确实消耗面板的出口。
+	mux.HandleFunc("POST /api/export/check-mirror", a.write(a.handleCheckMirror))
 	// 自检会调用本机内核二进制，属于「能让服务器跑东西」的接口，按 write 档
 	mux.HandleFunc("POST /api/export/verify", a.write(a.handleExportVerify))
 

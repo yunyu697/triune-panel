@@ -68,7 +68,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 兼容内核（mihomo）是否出现在「新建入站」的内核下拉里（默认关）
 		ShowCompatCoreSetting,
 		// 磁盘上的二进制变了是否自动 exec 过去（默认开，见 watch.go）
-		AutoSwitchSetting} {
+		AutoSwitchSetting,
+		// 生成客户端配置时规则集的下载源（默认 official，见 rulemirror.go）
+		MirrorSetting, MirrorPrefixSetting} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -127,6 +129,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		ShowCompatCoreSetting: true,
 		// 磁盘上的二进制变了是否自动 exec 过去（默认开）
 		AutoSwitchSetting: true,
+		// 规则集下载源（生成给客户端的配置用）。值必须是表里的 ID，
+		// 允许 custom + 合法前缀；非法值在这里就拒掉，别写进库让生成页读到脏值。
+		MirrorSetting: true, MirrorPrefixSetting: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
@@ -136,6 +141,14 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if v, ok := m[TrustedProxiesSetting]; ok {
 		if _, err := parseTrustedProxies(v); err != nil {
 			fail(w, 400, "可信反向代理填写有误："+err.Error())
+			return
+		}
+	}
+	// 规则集下载源同学校验：库里只留合法值，否则生成页读到一个已下线的
+	// 镜像 ID 时会静默退回官方，用户却以为自己在走镜像。
+	if v, ok := m[MirrorSetting]; ok {
+		if _, warn := resolveMirror(v, m[MirrorPrefixSetting]); warn != "" {
+			fail(w, 400, "规则集下载源："+warn)
 			return
 		}
 	}

@@ -8,6 +8,55 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## 未发布（v1.1.3）
+
+**规则集可以换下载源了（并且能先测一次再决定）。**
+
+规则集是客户端自己下载的，面板不代理。而 `raw.githubusercontent.com` 在部分网络下
+不可达，此时内核只丢一句 `initial rule provider geosite-cn error: EOF`，用户看到的
+却是「节点连上了但不能上网」——问题在规则集，现象在节点，几乎没法归因。
+
+配置生成页的「规则集」卡片多了 **下载源** 下拉，作用于目录内置的全部规则集与
+`GEOSITE` / `GEOIP` 自定义规则动态补出来的 provider；自定义规则集的 URL 不动（那是
+用户自己填的地址，可能本来就在用自家镜像）。默认仍是官方直连，老配置行为不变。
+
+内置的源是**按内容筛的**，不是照抄 install.sh 那份镜像池。2026-11 用
+`geosite/cn.mrs` 逐个比对 sha256：
+
+| 源 | 结果 |
+|---|---|
+| 官方 raw / gh-proxy.com / gh-proxy.org / ghproxy.net / jsDelivr | 200，与官方字节一致 ✅ |
+| ghfast.top | HTTP 403（它对 raw 文件不放行，而它是 install.sh 的首选） |
+| ghproxy.cn / gh-proxy.net / ghproxy.link | HTTP 200，但内容是**HTML 挑战页** |
+| gh.ddlc.top | HTTP 429 |
+
+后一类正是这功能最容易骗人的地方：状态码漂亮，浏览器点开也「正常」，内核拿到 HTML
+只会报格式错误。所以配了一个 **测试** 按钮（`POST /api/export/check-mirror`）：真去拉
+一次规则集，读前 64 KiB，首字节是 `<` 就判失败并直说「拿到的是网页」。实测四种结论
+都对——gh-proxy.com 可用（zstd 帧头）、ghproxy.cn 判为网页、`http://` 前缀 400、
+`https://127.0.0.1/` 被内网检查拦下。
+
+自定义前缀只收 `https://`（明文 http 等于把分流结果交给中间人），并且**拒绝内网地址、
+跳转链逐跳校验**——这个接口会替用户去请求外部地址，不设防就成了内网探针。
+
+**顺带修掉一个 mihomo 侧的缺失：规则集下载没写 `proxy: DIRECT`。**
+
+不写这一项时 mihomo 会按 rules 匹配出站，而生成的最后一条规则是 `MATCH,PROXY`，
+于是「下载规则集」本身要经过节点。真机日志（节点不可用时）：
+`initial rule provider geosite-cn error: EOF`，重试也是一样——首启时节点还没就绪，
+规则集就永远拉不下来。sing-box 那边的 `download_detour: "direct"` 一直都在，是 mihomo
+侧漏了，这次补齐。补上之后同一份配置直接能拉下 532882 字节的 geosite-cn。
+
+**验证**：单测 11 例（各分支 URL 产物、两个内核都走镜像、自定义 URL 不被改写、动态
+provider、探测接口的 HTML/二进制/状态码、内网拦截、`proxy: DIRECT`）。三处变异验证：
+把镜像接入换成零值 → 2 条用例红并打印出「没走镜像」的原始地址；去掉 HTML 判定 →
+「网页」用例红；删掉 `proxy: DIRECT` → 直连断言红。
+真机（darwin-arm64）：面板生成的配置直接喂给 mihomo 1.19.33，gh-proxy 与 jsDelivr 两种源
+各拉下 `geosite-cn.mrs` + `geoip-cn.mrs`，日志 **0 个 error**；playwright 走完
+「选源 → 测试 → 生成 → 刷新后记住选择」，CSP 违规 0、控制台错误 0。
+
+---
+
 ## v1.1.2
 
 **保存入站时拦下「同端口同协议族」的冲突。**
