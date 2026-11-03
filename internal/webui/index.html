@@ -1079,6 +1079,39 @@ canvas{display:block;width:100%}
       </div>
 
       <!-- 登录设备：所有角色都能看，服务端按角色过滤（只读账号只返回自己的会话） -->
+      <!-- 面板 HTTPS：没有域名时的加密方案。
+           自签只保证加密、不保证身份，所以指纹必须摊开给用户核对——
+           那是「人工认证」唯一能落地的地方，藏起来等于没有。 -->
+      <div class="card need-admin" data-sect="security">
+        <h3>面板 HTTPS<span class="spacer"></span>
+          <span class="badge b-idle" id="tls_state">—</span>
+        </h3>
+        <p class="muted" style="margin:0 0 12px">
+          不需要域名：面板自己签一张证书（含本机全部 IP），直接在
+          <code>https://服务器IP:端口</code> 上加密，登录密码与 token 不再明文过网。
+          <b>自签只保证「路上没人看得懂」，不保证「对面就是这台机器」</b>——浏览器会提示「不安全」，
+          需要在设备上手动信任；首次信任前请对照下面的 SHA-256 指纹。
+          想彻底没有警告：把域名证书或商业 IP 证书放到 <code>data/tls/panel.crt</code> 与
+          <code>data/tls/panel.key</code>，面板识别出不是自己签的，重启也不会覆盖。
+        </p>
+        <div class="tbl-wrap"><table>
+          <tbody>
+            <tr><th style="width:140px">实际监听</th><td id="tls_active">—</td></tr>
+            <tr><th>证书来源</th><td id="tls_source">—</td></tr>
+            <tr><th>适用地址</th><td class="mono" id="tls_sans" style="word-break:break-all">—</td></tr>
+            <tr><th>有效期至</th><td id="tls_expire">—</td></tr>
+            <tr><th>SHA-256 指纹</th><td class="mono" id="tls_fp" style="word-break:break-all;font-size:12px">—</td></tr>
+          </tbody>
+        </table></div>
+        <div class="radio-row" style="margin:12px 0 0">
+          <label><input type="checkbox" id="s_panel_https" data-act="savePanelTLS" data-args='[]' data-el="checked"> 启用 HTTPS（保存后需重启面板才生效）</label>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn sm" data-act="downloadPanelCert">下载证书（.crt）</button>
+          <span class="muted" id="tls_msg"></span>
+        </div>
+      </div>
+
       <div class="card" data-sect="security">
         <h3>登录设备<span class="spacer"></span>
           <span class="muted" style="font-weight:400;font-size:12px" id="sess_count"></span>

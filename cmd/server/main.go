@@ -204,7 +204,38 @@ func serve(args []string) {
 	if authn.IsFactoryDefault(st) {
 		log.Printf("管理密码仍为出厂默认，首次登录将要求修改；忘记密码可执行 `triune-panel reset-password`")
 	}
-	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
+
+	handler := srv.Handler()
+	if v, _ := st.GetSetting(api.SettingPanelHTTPS); v == "1" {
+		dataAbs, _ := filepath.Abs(*dataDir)
+		cert, key, err := api.EnsurePanelCert(dataAbs)
+		if err != nil {
+			// 开了 HTTPS 就绝不静默退回明文：用户以为在加密、实际在明文传密码，
+			// 比「起不来」危险得多。这里的报错必须自带走出来的路。
+			log.Fatalf("已开启面板 HTTPS 但证书不可用，拒绝以明文启动: %v\n"+
+				"  恢复：删除 %s/tls/ 下的 panel.crt / panel.key 后重启（会自动重建自签证书），\n"+
+				"        或把设置 panel_https 置 0 关闭 HTTPS。", err, dataAbs)
+			return
+		}
+		srv.TLSActive = true
+		log.Printf("[tls] HTTPS 已启用，证书 %s", cert)
+		log.Printf("[tls] 自签证书浏览器会警告「不安全」——这是预期的：自签只保证加密，不保证身份。")
+		log.Printf("[tls] 首次在设备上信任前，请对照设置 → 安全 → 面板 HTTPS 里显示的 SHA-256 指纹。")
+		s := &http.Server{
+			Addr:              *addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 15 * time.Second,
+		}
+		if err := s.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
+			// 证书/私钥不配对也会走到这里（LoadX509KeyPair 在监听前就失败）。
+			// 同样不能退回明文，把走出来的路一并说清。
+			log.Fatalf("HTTPS 监听失败: %v\n"+
+				"  恢复：检查 %s 与 %s 是否配对；或删掉这两个文件让面板重建自签证书；\n"+
+				"        也可以把设置 panel_https 置 0 关闭 HTTPS。", err, cert, key)
+		}
+		return
+	}
+	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatal(err)
 	}
 }

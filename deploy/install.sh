@@ -1185,6 +1185,23 @@ else
   echo "→ 未检测到 systemd，跳过每日自动备份（可手动: tar czf backup.tar.gz -C $INSTALL_DIR data）"
 fi
 
+# panel_info：向运行中的面板要 /api/public/info。
+# 面板可以只以 HTTPS 监听（设置 → 安全 → 面板 HTTPS），只试 http 会一直拿不到
+# 版本，于是「装好了」被误报成「读不到运行中版本」。自签证书用 -k 跳过校验：
+# 这里只关心它是谁、什么版本，不传任何凭据。
+panel_info() {
+  local body=""
+  command -v curl >/dev/null 2>&1 || { printf ''; return 0; }
+  body=$(curl -sk --noproxy '*' --connect-timeout 2 --max-time 3 \
+    "https://127.0.0.1:$PANEL_PORT/api/public/info" 2>/dev/null) || true
+  case "$body" in
+    *'"version"'*) printf '%s' "$body"; return 0 ;;
+  esac
+  body=$(curl -s --noproxy '*' --connect-timeout 2 --max-time 3 \
+    "http://127.0.0.1:$PANEL_PORT/api/public/info" 2>/dev/null) || true
+  printf '%s' "$body"
+}
+
 # ---- 健康检查：确认「跑起来的」就是刚装的那个版本 ----
 # 光看 systemd 说 active 不够——单元可能是旧进程在撑着（这正是
 # 「更新完打开还是旧版本」的成因）。直接问面板自己：/api/public/info
@@ -1193,13 +1210,10 @@ RUNNING_VER=""
 if [[ "$SERVICE_STARTED" -eq 1 ]]; then
   _try=0
   while [[ "$_try" -lt 24 ]]; do
-    if command -v curl >/dev/null 2>&1; then
-      RUNNING_VER=$(curl -s --noproxy '*' --connect-timeout 2 --max-time 3 \
-        "http://127.0.0.1:$PANEL_PORT/api/public/info" 2>/dev/null \
-        | sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1) || true
-      # 没解析出 JSON 字段就当作「还没起来」（返回的是错误页/空串）
-      case "$RUNNING_VER" in ""|*'{'*|*'"'*) RUNNING_VER="" ;; esac
-    fi
+    RUNNING_VER=$(panel_info \
+      | sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1) || true
+    # 没解析出 JSON 字段就当作「还没起来」（返回的是错误页/空串）
+    case "$RUNNING_VER" in ""|*'{'*|*'"'*) RUNNING_VER="" ;; esac
     if [[ -n "$RUNNING_VER" ]]; then break; fi
     sleep 0.5
     _try=$((_try + 1))
@@ -1238,7 +1252,8 @@ if [[ -n "$GOT_VER" && -n "$RUNNING_VER" && "$RUNNING_VER" != "$GOT_VER" ]]; the
   else
     echo "    sudo kill -9 ${PID_NOW:-<PID>} 后重跑本脚本"
   fi
-  echo "    curl -s --noproxy '*' http://127.0.0.1:$PANEL_PORT/api/public/info"
+  echo "    curl -sk --noproxy '*' https://127.0.0.1:$PANEL_PORT/api/public/info  # 开了 HTTPS 时"
+  echo "    curl -s  --noproxy '*' http://127.0.0.1:$PANEL_PORT/api/public/info   # 明文时"
   echo "  仍不行请把上面几行贴出来（多半是还有别的进程在服务这个端口）。"
   echo ""
   exit 1
@@ -1247,7 +1262,7 @@ fi
 if [[ "$SERVICE_STARTED" -eq 1 && -z "$RUNNING_VER" ]] \
    && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
   echo "⚠ 装完了，但没能从 /api/public/info 读到运行中版本（curl 不可用或面板未监听 ${PANEL_PORT}）"
-  echo "  请自行核对: curl -s http://127.0.0.1:$PANEL_PORT/api/public/info"
+  echo "  请自行核对: curl -sk https://127.0.0.1:$PANEL_PORT/api/public/info （开了 HTTPS 时）"
   echo "  端口占用情况："
   port_listener_lines | sed 's/^/    /' || true
   echo "  最近日志："

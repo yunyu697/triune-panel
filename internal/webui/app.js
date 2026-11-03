@@ -184,6 +184,7 @@ function goto(v, sect) {
     syncTopbarH();     // 进页面时补量一次：登录前量到的是 0
     if (sect && SET_SECTS[sect]) setSect(sect, true);   // 深链接：用户点的，记住它
     else setSectSaved();
+    loadPanelTLS();
   }, 30);
 }
 
@@ -3422,6 +3423,9 @@ async function genVerify() {
         ` <span class="muted">· 只验证能否加载，不联网、不校验节点凭据是否有效</span>`;
     } else {
       box.innerHTML = `<span style="color:var(--err)">✗ 内核拒绝这份配置</span>${who}`;
+      if (j.hint) {
+        box.innerHTML += `<div class="muted" style="margin-top:4px">${escHtml(j.hint)}</div>`;
+      }
       $("gen_out").classList.remove("hide");
       $("gen_out").textContent = (genLast.content || "") +
         "\n\n──────── 校验输出 ────────\n" + (j.output || "（无输出）");
@@ -5531,6 +5535,90 @@ async function saveAutoSwitch(on) {
     $("s_autoswitch").checked = !on;
     toast(e.message, "err");
   }
+}
+
+/* ---- 面板 HTTPS ----
+   自签证书能加密、不能证明身份，所以这里必须把指纹摊开：
+   「首次信任时人工比对指纹」是自签唯一能落地的认证手段。
+   只显示一个绿色「已加密」会让人以为有了证书就等于安全。 */
+async function loadPanelTLS() {
+  const badge = $("tls_state");
+  if (!badge) return;
+  if (DEMO) {
+    $("s_panel_https").checked = false;
+    badge.className = "badge b-idle"; badge.textContent = "演示";
+    $("tls_active").textContent = "HTTP（明文，演示数据）";
+    $("tls_source").textContent = "—";
+    $("tls_sans").textContent = "127.0.0.1 / 10.0.0.2";
+    $("tls_expire").textContent = "—";
+    $("tls_fp").textContent = "—";
+    return;
+  }
+  try {
+    const j = await req("/api/panel/tls");
+    $("s_panel_https").checked = !!j.enabled;
+    if (j.active) {
+      badge.className = "badge b-ok"; badge.textContent = "HTTPS 运行中";
+      $("tls_active").textContent = "HTTPS（TLS）";
+    } else if (j.enabled) {
+      // 开了但没生效：最可能是刚保存还没重启。必须说清楚，
+      // 否则用户会以为已经在加密连接上，实际还在明文传密码。
+      badge.className = "badge b-warn"; badge.textContent = "已开启，待重启";
+      $("tls_active").textContent = "HTTP（明文）— 设置已开启，重启面板后生效";
+    } else {
+      badge.className = "badge b-idle"; badge.textContent = "未启用";
+      $("tls_active").textContent = "HTTP（明文）";
+    }
+    if (!j.cert_ready) {
+      $("tls_source").textContent = "尚未生成（启用后首次启动自动生成自签证书）";
+      $("tls_expire").textContent = "—";
+      $("tls_fp").textContent = "—";
+      $("tls_sans").textContent = "—";
+      return;
+    }
+    $("tls_source").textContent = j.source === "user"
+      ? "用户提供（面板不会覆盖，升级/重启都不动它）"
+      : "面板自签（浏览器会警告，需在设备上手动信任）";
+    $("tls_sans").textContent = (j.sans || []).join("  ") || "—";
+    const days = j.days_left;
+    $("tls_expire").textContent = (j.not_after || "").slice(0, 10) +
+      (j.expired ? "（已过期！）" : days != null ? `（剩 ${days} 天）` : "");
+    $("tls_expire").style.color = j.expired ? "var(--err)" : days != null && days < 15 ? "var(--warn)" : "";
+    $("tls_fp").textContent = j.fingerprint || "—";
+  } catch(e){
+    badge.className = "badge b-idle"; badge.textContent = "未知";
+  }
+}
+
+async function savePanelTLS(on) {
+  try {
+    await req("/api/settings", { method:"PUT", body:{ panel_https: on ? "1" : "0" } });
+    // 重启后加密方式会变，当前页面还在旧协议上——旧页面的请求会失效，
+    // 所以只提示怎么做，不假装「已生效」。
+    $("tls_msg").textContent = on
+      ? "已保存。执行 sudo systemctl restart triune-panel 后生效，之后请用 https:// 访问（浏览器会提示证书不受信任，属正常）。"
+      : "已保存。重启面板后恢复 http:// 访问。";
+    toast(on ? "已开启 HTTPS，重启面板后生效" : "已关闭 HTTPS，重启面板后生效");
+    loadPanelTLS();
+  } catch(e){
+    $("s_panel_https").checked = !on;
+    toast(e.message, "err");
+  }
+}
+
+async function downloadPanelCert() {
+  if (DEMO) { toast("演示模式不提供下载", "info"); return; }
+  try {
+    // 下载接口要带 Bearer，不能直接 location.href（那样会 401 到登录页）
+    const r = await fetch("/api/panel/tls/cert", { headers: { Authorization: "Bearer " + TOKEN } });
+    if (!r.ok) {
+      let msg = "下载失败（" + r.status + "）";
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch(_) {}
+      throw new Error(msg);
+    }
+    saveBlob(await r.blob(), "triune-panel.crt");
+    toast("已下载公钥证书；私钥留在服务器上，不会外传");
+  } catch(e){ toast(e.message, "err"); }
 }
 
 async function loadSettings() {

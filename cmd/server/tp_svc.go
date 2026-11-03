@@ -6,6 +6,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,7 +24,7 @@ const defaultUnit = "triune-panel"
 // systemdAvailable 判断这台机器上有没有可用的 systemd 单元。
 //
 // 三层判断缺一不可：systemctl 存在（容器里可能装了但没跑）、PID 1 是 systemd
-//（/run/systemd/system 存在）、单元文件确实注册了。只看第一层会在容器里
+// （/run/systemd/system 存在）、单元文件确实注册了。只看第一层会在容器里
 // 给出误导性的报错。
 func systemdAvailable(unit string) bool {
 	if _, err := exec.LookPath("systemctl"); err != nil {
@@ -100,20 +101,46 @@ func panelAddr(unit string) string {
 	return ":10010"
 }
 
-// healthURL 把监听地址转成探活 URL。":10010" / "0.0.0.0:10010" 一律走回环。
-func healthURL(unit string) string {
+// panelHostPort 把监听地址转成探活用的 host:port。
+// ":10010" / "0.0.0.0:10010" / "[::]:10010" 一律走回环。
+func panelHostPort(unit string) string {
 	addr := panelAddr(unit)
 	if strings.HasPrefix(addr, ":") {
 		addr = "127.0.0.1" + addr
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "http://127.0.0.1:10010/healthz"
+		return "127.0.0.1:10010"
 	}
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	return "http://" + net.JoinHostPort(host, port) + "/healthz"
+	return net.JoinHostPort(host, port)
+}
+
+// healthURL 探活用 URL（仅用于错误提示，实际探测见 probeURLs）。
+func healthURL(unit string) string {
+	return "http://" + panelHostPort(unit) + "/healthz"
+}
+
+// probeURLs 返回某路径的候选 URL：先 https 再 http。
+//
+// 面板可以只以 TLS 监听（设置 → 安全 → 面板 HTTPS），此时只用 http 探活
+// 会一直拿到 400，tp start / 自更新就会把「其实已经起来了」判成「没就绪」，
+// 甚至触发一次完全不必要的回滚。
+func probeURLs(unit, path string) []string {
+	hp := panelHostPort(unit)
+	return []string{"https://" + hp + path, "http://" + hp + path}
+}
+
+// probeClient 探活用客户端。
+// 跳过证书校验是有意的：自签证书本来就无法验证，而这里只确认「端口在不在」，
+// 不传任何凭据、不读任何业务数据。真正的鉴权在登录与 Bearer token 上。
+var probeClient = &http.Client{
+	Timeout: 1500 * time.Millisecond,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
 }
 
 // waitReady 轮询 /healthz 直到就绪或超时。
@@ -122,12 +149,14 @@ func healthURL(unit string) string {
 // 往往还没开始监听。不等待的话，用户敲完 restart 立刻敲 status，看到的
 // 还是"未运行"，然后以为命令失败了。
 func waitReady(unit string, timeout time.Duration) (time.Duration, bool) {
-	url := healthURL(unit)
-	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	urls := probeURLs(unit, "/healthz")
 	start := time.Now()
 	for time.Since(start) < timeout {
-		resp, err := client.Get(url)
-		if err == nil {
+		for _, u := range urls {
+			resp, err := probeClient.Get(u)
+			if err != nil {
+				continue
+			}
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return time.Since(start), true
@@ -206,20 +235,21 @@ func printReady(unit string) {
 // panelVersion 从 /api/public/info 取版本号（免认证）。
 // 取不到不算失败——服务可能在但接口变了，不该让 tp start 因此报错。
 func panelVersion(unit string) string {
-	url := strings.Replace(healthURL(unit), "/healthz", "/api/public/info", 1)
-	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	resp, err := client.Get(url)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
 	var v struct {
 		Version string `json:"version"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return ""
+	for _, url := range probeURLs(unit, "/api/public/info") {
+		resp, err := probeClient.Get(url)
+		if err != nil {
+			continue
+		}
+		err = json.NewDecoder(resp.Body).Decode(&v)
+		resp.Body.Close()
+		if err == nil && v.Version != "" {
+			return v.Version
+		}
 	}
-	return v.Version
+	return ""
 }
 
 func cmdLogs(args []string) {

@@ -30,16 +30,44 @@ type verifyReq struct {
 }
 
 // verifyCmd 各内核的官方配置校验命令。
-func verifyCmd(core, bin, file string) *exec.Cmd {
+//
+// dir 是本函数选定的可写工作目录：mihomo 在解析配置前会先初始化 home
+// （缺省 $HOME/.config/mihomo），rootfs 只读时会在这一步失败，报出来的
+// 却是「配置文件有问题」。显式 -d 把 home 钉在临时目录里，校验结果才只
+// 反映配置本身。sing-box / xray 同样把 HOME 指过去：它们不写 home 是常态，
+// 但真写的时候不该因为 /root 只读而误判。
+func verifyCmd(core, bin, file, dir string) *exec.Cmd {
+	var cmd *exec.Cmd
 	switch core {
 	case "singbox":
-		return exec.Command(bin, "check", "-c", file)
+		cmd = exec.Command(bin, "check", "-c", file)
 	case "mihomo":
-		return exec.Command(bin, "-t", "-f", file)
+		cmd = exec.Command(bin, "-t", "-d", dir, "-f", file)
 	case "xray":
-		return exec.Command(bin, "-test", "-config", file)
+		cmd = exec.Command(bin, "-test", "-config", file)
 	}
-	return nil
+	if cmd != nil {
+		cmd.Env = envWithHome(dir)
+	}
+	return cmd
+}
+
+// envWithHome 覆盖 HOME / XDG_CACHE_HOME 到可写目录。
+// 保留其余环境（路径、代理变量对内核自检仍有意义）。
+func envWithHome(dir string) []string {
+	drop := map[string]bool{"HOME": true, "XDG_CACHE_HOME": true, "XDG_CONFIG_HOME": true}
+	out := make([]string, 0, len(os.Environ())+3)
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i > 0 && drop[kv[:i]] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out,
+		"HOME="+dir,
+		"XDG_CACHE_HOME="+filepath.Join(dir, ".cache"),
+		"XDG_CONFIG_HOME="+filepath.Join(dir, ".config"),
+	)
 }
 
 func verifyExt(core string) string {
@@ -95,21 +123,36 @@ func (a *Server) handleExportVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir, err := os.MkdirTemp("", "triune-verify-*")
+	// 配置文件写在 cores/<内核> 下而不是系统临时目录：mihomo 的 home 就是
+	// 这个目录，缺 GeoSite.dat / MMDB 时会联网下载并缓存到这里。
+	// 用一次性临时目录的话每次校验都要重下一遍（实测 9 秒，且断网即失败）。
+	dir := filepath.Join(a.Pipe.DataDir, "cores", q.Core)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	f, err := os.CreateTemp(dir, ".verify-*"+verifyExt(q.Core))
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "config"+verifyExt(q.Core))
-	if err := os.WriteFile(file, []byte(q.Content), 0o600); err != nil {
-		fail(w, 500, err.Error())
+	file := f.Name()
+	defer os.Remove(file)
+	_, werr := f.WriteString(q.Content)
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		if werr == nil {
+			werr = cerr
+		}
+		fail(w, 500, werr.Error())
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	// 30s：首次校验若缺 GeoSite.dat / MMDB，内核会当场下载（实测约 9s）。
+	// 给 10s 会把「网慢」误报成「配置有问题」。
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	cmd := verifyCmd(q.Core, bin, file)
+	cmd := verifyCmd(q.Core, bin, file, dir)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if len(text) > 4000 {
@@ -125,7 +168,31 @@ func (a *Server) handleExportVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	if ctx.Err() == context.DeadlineExceeded {
 		resp["ok"] = false
-		resp["output"] = "校验超时（10s），内核可能卡在加载阶段。"
+		resp["output"] = "校验超时（30s），内核可能卡在加载阶段或正在下载 geo 数据。"
+	}
+	// 失败时区分「环境问题」与「配置问题」：把只读文件系统/权限报成
+	// 「内核拒绝这份配置」，会让人去改一份本来没问题的配置。
+	if err != nil {
+		if h := envHint(text); h != "" {
+			resp["hint"] = h
+		}
 	}
 	writeJSON(w, 200, resp)
+}
+
+// envHint 识别「内核没跑起来」类错误，返回一句人话。
+func envHint(text string) string {
+	low := strings.ToLower(text)
+	switch {
+	case strings.Contains(low, "read-only file system"):
+		return "这是执行环境问题，不是配置内容错误：内核要写的工作目录在只读文件系统上。" +
+			"面板已把内核 home 指到数据目录下的 cores/<内核>；若仍报错，说明数据目录本身是只读挂载，" +
+			"请把 --data 指到可写位置（如 /opt/triune-panel/data）。"
+	case strings.Contains(low, "permission denied"):
+		return "这是权限问题，不是配置内容错误：内核无法写入自己的工作目录。" +
+			"检查数据目录 cores/<内核> 的属主与权限，或面板是否以无写权限的用户运行。"
+	case strings.Contains(low, "no space left on device"):
+		return "磁盘已满，内核无法创建缓存文件。清出空间后重试。"
+	}
+	return ""
 }

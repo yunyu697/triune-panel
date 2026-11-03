@@ -70,7 +70,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 磁盘上的二进制变了是否自动 exec 过去（默认开，见 watch.go）
 		AutoSwitchSetting,
 		// 生成客户端配置时规则集的下载源（默认 official，见 rulemirror.go）
-		MirrorSetting, MirrorPrefixSetting} {
+		MirrorSetting, MirrorPrefixSetting,
+		// 面板是否用 TLS 监听（"1" 开，改了要重启；见 paneltls.go）
+		SettingPanelHTTPS} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -132,6 +134,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 规则集下载源（生成给客户端的配置用）。值必须是表里的 ID，
 		// 允许 custom + 合法前缀；非法值在这里就拒掉，别写进库让生成页读到脏值。
 		MirrorSetting: true, MirrorPrefixSetting: true,
+		// 面板 HTTPS 开关：只落库，真正生效在下次启动（certmgr 不管面板自己）
+		SettingPanelHTTPS: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
@@ -151,6 +155,12 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "规则集下载源："+warn)
 			return
 		}
+	}
+	// HTTPS 开关只认 "0"/"1"/空：写进别的值会让下次启动既不建证书也不报错，
+	// 变成一个「开了但没生效」的静默状态。
+	if v, ok := m[SettingPanelHTTPS]; ok && v != "" && v != "0" && v != "1" {
+		fail(w, 400, "panel_https 只能是 1 或 0")
+		return
 	}
 	var changedKeys []string
 	var diff []string

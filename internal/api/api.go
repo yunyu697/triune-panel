@@ -35,12 +35,15 @@ import (
 )
 
 type Server struct {
-	Store      *store.Store
-	Pipe       *core.PipelineManager
-	ProcMgr    *proc.Manager
-	DataDir    string
-	CertMgr    CertManager    // 可为 nil（未启用 ACME）
-	Coll       *ops.Collector // 流量采样器（实时速率查询用），可为 nil
+	Store   *store.Store
+	Pipe    *core.PipelineManager
+	ProcMgr *proc.Manager
+	DataDir string
+	CertMgr CertManager    // 可为 nil（未启用 ACME）
+	Coll    *ops.Collector // 流量采样器（实时速率查询用），可为 nil
+	// TLSActive 表示当前进程**实际**用 TLS 监听。由 cmd/server 在启动时设置：
+	// 库里开启了 HTTPS 但证书生成失败会退回明文，界面必须能看出这个差别。
+	TLSActive  bool
 	sessions   *sessionStore  // 登录会话表（见 sessions.go）
 	loginFails sync.Map       // ip -> *loginFail（防爆破）
 	totpStaged sync.Map       // uid -> 待绑定的 TOTP 密钥（每账号一份，重启即丢）
@@ -181,6 +184,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mirrors", a.write(a.handleMirrors))
 	mux.HandleFunc("POST /api/mirrors/test", a.write(a.handleMirrorTest))
 	mux.HandleFunc("GET /api/panel/backups", a.write(a.handlePanelBackups))
+	// 面板自身 HTTPS：没有域名时用自签证书（见 paneltls.go 的诚实边界）
+	mux.HandleFunc("GET /api/panel/tls", a.write(a.handlePanelTLS))
+	mux.HandleFunc("GET /api/panel/tls/cert", a.write(a.handlePanelCertDownload))
 	mux.HandleFunc("POST /api/certs/issue", a.write(a.handleCertsIssue))
 
 	// ---- 仅超级管理员：账号管理、销毁审计、整面板回滚 ----

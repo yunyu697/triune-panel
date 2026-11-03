@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"triune/internal/core"
 	"triune/internal/model"
@@ -26,8 +27,35 @@ func (m *Mihomo) Name() string     { return model.CoreMihomo }
 func (m *Mihomo) Ext() string      { return "yaml" }
 func (m *Mihomo) FileName() string { return "config.yaml" }
 
+// ValidateCmd 构造 mihomo 的配置自检命令。
+//
+// 必须显式给 -d：mihomo 在解析配置之前会先初始化 home 目录，缺省值是
+// $HOME/.config/mihomo。以 root 跑在只读 rootfs 上时（只读容器、
+// immutable 系统、systemd 的 ProtectHome=read-only），这一步直接失败：
+//
+//	Initial configuration directory error: can't create config directory
+//	/root/.config/mihomo: mkdir /root/.config: read-only file system
+//
+// 于是「配置完全正确」被判成「内核拒绝这份配置」——错的是执行环境，
+// 不是配置。把 home 指到配置文件所在目录（面板的 cores/<内核>，必然可写），
+// 校验才只反映配置本身。
+//
+// 这里刻意复用运行目录而不是另开临时 home：mihomo 缺 GeoSite.dat / MMDB 时
+// 会**当场联网下载**（实测一次 9 秒），临时目录每次都从零下，
+// 既拖慢校验又容易把「网络慢」误报成「配置错」。共用运行目录，
+// geo 缓存下过一次就一直命中（实测 229ms）。
 func (m *Mihomo) ValidateCmd(bin, cfg string) *exec.Cmd {
-	return exec.Command(bin, "-t", "-f", cfg)
+	return exec.Command(bin, "-t", "-d", verifyHome(cfg), "-f", cfg)
+}
+
+// verifyHome 返回 mihomo 自检用的 home 目录：配置文件所在目录。
+// 建不出来也照常返回，让内核把真实错误说出来，而不是我们提前编一个。
+func verifyHome(cfg string) string {
+	if d := filepath.Dir(cfg); d != "" && d != "." {
+		_ = os.MkdirAll(d, 0o755)
+		return d
+	}
+	return os.TempDir()
 }
 
 func (m *Mihomo) Render(ins []core.InboundWithClients, opts core.RenderOpts) ([]byte, error) {
@@ -67,8 +95,8 @@ func (m *Mihomo) Render(ins []core.InboundWithClients, opts core.RenderOpts) ([]
 func (m *Mihomo) renderListener(iw core.InboundWithClients) (map[string]any, error) {
 	in := iw.Inbound
 	l := map[string]any{
-		"name":  core.TagOf(in),
-		"port":  in.Port,
+		"name": core.TagOf(in),
+		"port": in.Port,
 	}
 	if in.Listen != "" {
 		l["listen"] = in.Listen
