@@ -154,10 +154,19 @@ a:hover{text-decoration:underline}
 .demo-tag{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:99px;padding:1px 10px;font-size:12px;margin-left:6px}
 
 /* ============ 布局 ============ */
-.shell{display:flex;height:100vh;overflow:hidden}
+/* 100dvh：手机浏览器的 100vh 是「地址栏收起时」的高度，竖屏下比可视区高出一截，
+   底部内容（设置页的常驻操作条、最后一张卡片）会落在地址栏后面，滑不到也点不到。
+   dvh 跟着可视区变；不认 dvh 的老浏览器仍取上一行的 100vh。 */
+.shell{display:flex;height:100vh;height:100dvh;overflow:hidden}
 .side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;
+  display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;min-height:0;
   transition:background var(--t),border-color var(--t)}
+/* 导航区自己滚。窗口高度不够时（笔记本半屏、横屏手机、浏览器控制台占了下半屏）
+   11 个入口加起来比视口高，而 .shell 是 overflow:hidden——溢出的入口被裁掉又滑不到，
+   表现就是「导航滚不动、下面几个页面进不去」。
+   min-height:0 必须给：flex 子项的 min-height 默认是 auto，不归零它不会收缩，
+   只会把 .side 撑破。 */
+#nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .side::after{content:"";position:absolute;inset:0;pointer-events:none;
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
 .logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
@@ -370,6 +379,11 @@ label{font-size:12.5px;color:var(--muted);display:block;margin-bottom:5px}
 textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertical}
 .frm{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:16px}
 .frm .full{grid-column:1/-1}
+/* 明确要两列的表单：窄屏必须退回一列。
+   以前这里在 HTML 上写内联 style="grid-template-columns:1fr 1fr"，媒体查询盖不掉，
+   手机上两列各 ~150px，里面的 .seg（三个按钮）撑破列宽、把整个页面顶出横向滚动条。 */
+.frm.frm-2{grid-template-columns:1fr 1fr}
+@media (max-width:760px){.frm.frm-2{grid-template-columns:1fr}}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:500}
 .b-ok{background:var(--ok-soft);color:var(--ok)} .b-err{background:var(--err-soft);color:var(--err)}
 .b-warn{background:var(--warn-soft);color:var(--warn)} .b-idle{background:var(--hover);color:var(--muted)}
@@ -383,7 +397,7 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .sw input:checked+i::after{transform:translateX(17px)}
 
 /* 分段控件 */
-.seg{display:inline-flex;padding:3px;gap:3px;background:var(--hover);border:1px solid var(--line);border-radius:var(--r)}
+.seg{display:inline-flex;flex-wrap:wrap;max-width:100%;padding:3px;gap:3px;background:var(--hover);border:1px solid var(--line);border-radius:var(--r)}
 .seg button{border:none;background:none;color:var(--muted);font-size:13px;font-family:var(--font);cursor:pointer;
   padding:6px 14px;border-radius:7px;transition:all var(--t-fast);white-space:nowrap}
 .seg button:hover{color:var(--text)}
@@ -431,11 +445,28 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
    内容区几乎不剩地方。这里把说明文字让位、按钮收窄，条高压到 70px 上下。
    说明文字本来只是辅助，按钮上的字已经说清是哪一组。 */
 @media (max-width:640px){
+  /* 顶栏：副标题在手机上要占两行，把右侧的胶囊和版本号挤成「内 / 核」「v0.8.9- / demo」
+     这种断字。手机上收掉副标题（标题本身已经说明是哪一页），其余强制单行。 */
+  .topbar{gap:8px}
+  .topbar .sub{display:none}
+  .topbar h2{font-size:16px}
+  .top-pill{white-space:nowrap;padding:4px 10px;font-size:11.5px}
+  #verinfo{white-space:nowrap;font-size:11px}
+  /* 卡片标题里的灰色说明文字在窄屏会跟标题抢宽度，把「目标与内核」挤成
+     「目标与内 / 核」。让它整段换到下一行，标题保持一行。 */
+  .card h3{flex-wrap:wrap;row-gap:4px}
+  .card h3 .hint{flex:1 1 100%}
   .set-tabs{gap:10px;padding:8px 0 10px}
   .set-tabs-hint{display:none}
   .seg-lg{padding:4px;gap:4px;border-radius:13px}
   .seg-lg button{font-size:14px;padding:9px 15px;gap:7px;border-radius:9px}
   .seg-lg button svg{width:15px;height:15px}
+}
+/* 320–380px（小屏安卓 / iPhone SE 一代）连版本号都放不下，标题会被折成
+   「配置 / 生成」。版本号在设置 → 运维里仍有，这里让位给标题。 */
+@media (max-width:380px){
+  #verinfo{display:none}
+  .topbar h2{white-space:nowrap}
 }
 
 /* 表格里的小下拉（选安装分支）：外观贴近旁边的 .btn.sm，别做成一个突兀的表单控件 */
@@ -896,7 +927,7 @@ canvas{display:block;width:100%}
     <section id="v-gen" class="view">
       <div class="card">
         <h3>目标与内核<span class="spacer"></span><span class="hint">决定 TUN / DNS 劫持 / 嗅探等模板</span></h3>
-        <div class="frm" style="grid-template-columns:1fr 1fr">
+        <div class="frm frm-2">
           <div><label>配置内核</label>
             <div class="seg" id="g_core_seg">
               <button data-v="mihomo" class="on">mihomo / Clash.Meta</button>
@@ -935,7 +966,7 @@ canvas{display:block;width:100%}
           <button class="btn sm" data-act="selectSets" data-args='[true]' title="勾选当前筛选下所有可用规则集">全选</button>
           <button class="btn sm" data-act="selectSets" data-args='[false]' title="取消勾选当前筛选下的规则集">清空</button>
           <span class="hint" id="gen_sets_count"></span>
-          <input id="gen_set_search" class="input" style="width:180px;padding:5px 10px;font-size:12.5px"
+          <input id="gen_set_search" class="input" style="width:180px;min-width:0;max-width:100%;flex:0 1 180px;padding:5px 10px;font-size:12.5px"
                  placeholder="搜索规则集…" data-act="filterSets">
         </h3>
         <p class="muted" style="margin-bottom:12px">勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
