@@ -8,7 +8,7 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
-## 未发布（v1.1.4）
+## v1.1.4
 
 **新建 Reality 入站自动给好几个 shortId 和 spiderX。**
 
