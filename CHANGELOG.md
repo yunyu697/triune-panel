@@ -99,7 +99,8 @@ README 里也一直承认这一点。这版把它收掉：
 - **脚本搬出 HTML**：`qr.js`（二维码编码器）与 `app.js`（全部界面逻辑）成为
   `internal/webui/` 下的独立文件，`go:embed` 进二进制，经 `GET /assets/qr.js`、
   `/assets/app.js` 同源下发（带 ETag、`no-cache`、`text/javascript; charset=utf-8`）。
-- **内联事件全部换掉**：184 处 `onclick` / `onchange` / `oninput` / `onkeydown` 改成
+- **内联事件全部换掉**：179 处 `onclick` / `onchange` / `oninput` / `onkeydown`
+  （137 处直接写在 HTML 里，其余藏在 JS 模板字符串拼出来的 DOM 里）改成
   `data-act="fn"`（参数放 `data-args='[...]'`，JSON 数组）、`data-enter="fn"`（回车）、
   `data-el="1|checked|value|num"`（把元素自身/状态作为末参）、`data-self="1"`
   （遮罩只点自身才算）。`app.js` 顶部挂四个 document 级监听器统一分派——
