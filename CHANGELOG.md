@@ -8,7 +8,7 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
-## 未发布
+## v1.1.9
 
 **升级之后，入站端口被「自己上一代的内核」占着。** 面板换进程有两条路：systemd 的
 `restart` 默认 `KillMode=control-group`，内核跟着一起死；但**自更新、二进制守望者、
