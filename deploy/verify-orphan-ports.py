@@ -115,7 +115,6 @@ def core_pids(xray, data):
                        capture_output=True, text=True)
     return [int(x) for x in r.stdout.split() if x.strip()]
 
-
 def main():
     ap = argparse.ArgumentParser(description="验证面板重启后能自己清掉残留内核、夺回入站端口")
     ap.add_argument("--bin", default="./triune-panel", help="要测的面板二进制")
@@ -132,6 +131,10 @@ def main():
         return 2
     if not (os.path.isfile(a.xray) and os.access(a.xray, os.X_OK)):
         print(f"xray 不可执行: {a.xray}")
+        return 2
+    # 枚举内核进程要靠 pgrep；没有它的话「只有 1 个内核进程」这类断言会假红
+    if shutil.which("pgrep") is None:
+        print("找不到 pgrep（procps / busybox），无法枚举内核进程")
         return 2
 
     data = tempfile.mkdtemp(prefix="verify-orphan-")
