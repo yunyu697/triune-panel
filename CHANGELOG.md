@@ -29,11 +29,23 @@ X25519 的公钥由私钥唯一确定，私钥本来就存在库里（服务端�
 现在生成页会给出「请到设置 → 公网地址填公网 IP 或域名」的提示。只提示不阻断
 （面板和客户端同机确实能这么用），`main-router` 不提示（那边本来就是本机部署）。
 
-**验证**：新增真内核端到端回归 `.e2e/mihomo_e2e.py` 与 `.e2e/matrix_e2e.py`——
-面板建入站 → 建用户 → 应用（真 xray）→ 导出 mihomo 客户端配置 → `mihomo -t` →
-真跑 mihomo → 经它的 socks 端口访问外网。已覆盖 vless+REALITY、vless+ws、vmess+ws、
-shadowsocks、vless+grpc 五种组合，全部实连通过（5 组共 41 项断言）。
-公钥与回环提示各配一条单测，都做过变异验证（退回修复即红并点名原因）。
+**gRPC 入站导出的节点丢服务名。** settings 里存的是 `service_name`，转换时读的却是
+`serviceName`，取不到就当没有——导出的 proxy 只有 `network: grpc`、没有 `grpc-opts`，
+而服务端照常按 `grpcSettings.serviceName` 分流。现在两种写法都认。
+
+**h2 / httpupgrade / xhttp 传输被静默降级成 tcp。** 客户端侧的传输映射以前只认
+ws 与 grpc，其它传输什么都不写——不写 `network` 等于 tcp，而服务端明明在用 xhttp。
+用户拿到的是「能加载、一连就不通」的配置，面板上还没有任何提示。现在：h2 落到
+mihomo 的 `h2-opts`（`host` 必须是数组），sing-box 侧补上 httpupgrade / h2 / quic；
+表示不出来的（mihomo 的 httpupgrade、xhttp、kcp、quic，sing-box 的 xhttp、kcp）
+不再静默跳过，而是明确报「这个传输在客户端里没有对应类型」并给出可行选项。
+文案刻意区分「协议不支持」与「传输不支持」——前者会把人引去换协议，其实换传输就行。
+
+**验证**：新增 `deploy/verify-mihomo.py`（真内核端到端回归）——面板建入站 → 建用户 →
+应用（真 xray）→ 导出 mihomo 客户端配置 → `mihomo -t` → 真跑 mihomo → 经它的 socks
+端口访问外网。覆盖 vless+REALITY、vless+ws、vmess+ws、shadowsocks、vless+grpc
+五种组合，35 项断言全绿。公钥、回环提示、gRPC 服务名、传输映射各配单测，
+公钥与回环两条做过变异验证（退回修复即红并点名原因）。
 
 ---
 
