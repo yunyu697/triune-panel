@@ -14,11 +14,18 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"triune/internal/core"
 	"triune/internal/model"
+	"triune/internal/update"
 )
+
+// semverRe 取版本号里的 x.y.z（xray / sing-box / mihomo 的输出都是这个形状）。
+var semverRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
 type checkItem struct {
 	Name   string `json:"name"`
@@ -110,7 +117,93 @@ func (a *Server) diagnoseInbound(in *model.Inbound) []checkItem {
 			Detail: "UDP 端口无法从本机验证公网放行，请在云厂商安全组确认已放行 UDP " + fmt.Sprint(in.Port)})
 	}
 
+	// 6. 客户端兼容性：REALITY + 新版 xray 会拒绝老客户端（mihomo 等）
+	if c, ok := a.realityClientCompat(in); ok {
+		checks = append(checks, c)
+	}
+
 	return checks
+}
+
+// xrayRealityBreakVer 是「REALITY 开始拒绝老客户端」的起始 xray 版本。
+//
+// 背景（2026-11 实测 + 上游 issue）：
+//   - xray 自 26.7.11 起，realitySettings 不写 minClientVer 时默认按 26.3.27 判定；
+//   - mihomo 的 REALITY 实现把客户端版本**硬编码**成 1.8.2（MetaCubeX/mihomo#3039）；
+//   - 于是 xray ≥26.7.11 + mihomo = `REALITY authentication failed`。
+//
+// 实测矩阵（同一份订阅配置、同一台机器、同一组 uuid/pbk/sid/sni，2026-11）：
+//
+//	xray 1.8.24    + mihomo 1.19.33   → 通（362ms）
+//	xray 26.3.27   + mihomo 1.19.33   → 通（352ms）
+//	xray 26.10.31  + mihomo 1.19.33   → REALITY authentication failed
+//	xray 26.10.31  + xray 1.8 客户端  → 同样失败（不是 mihomo 独有的）
+//	xray 26.10.31  + xray 26 客户端   → 通
+//	xray 26.10.31  + minClientVer=1.8.2 → 仍然失败（26.7.11 上加这一条能救）
+//
+// 这就是「同一个 VPS，3x-ui 的节点通、面板的不通」最常见的一种成因：3x-ui
+// 往往还跑着老版 xray，而面板「一键装最新」会拿到 26.7.11 以上。它和节点参数
+// 一点关系都没有，所以对着链接逐字比对永远查不出来。
+var xrayRealityBreakVer = [3]int{26, 7, 11}
+
+// xrayVersionNums 从 `xray version` 的输出里取版本号。
+// 形如 "Xray 26.10.31 (Xray, Penetrates Everything.) a4a3dff (go1.27.3 darwin/arm64)"。
+func xrayVersionNums(v string) ([3]int, bool) {
+	m := semverRe.FindStringSubmatch(v)
+	if m == nil {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i := 0; i < 3; i++ {
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return [3]int{}, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+// xrayTooNewForOldRealityClients 判断这个版本的服务端会不会拒绝老客户端。
+func xrayTooNewForOldRealityClients(v string) bool {
+	cur, ok := xrayVersionNums(v)
+	if !ok {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if cur[i] != xrayRealityBreakVer[i] {
+			return cur[i] > xrayRealityBreakVer[i]
+		}
+	}
+	return true
+}
+
+// realityClientCompat 只对「xray + reality」给出客户端兼容性结论。
+//
+// 拿不到内核路径或版本号时返回 ok=false（不猜、不误报）。
+func (a *Server) realityClientCompat(in *model.Inbound) (checkItem, bool) {
+	if in.Core != model.CoreXray || in.TLS != "reality" {
+		return checkItem{}, false
+	}
+	bin, _ := a.Store.GetSetting("bin_xray")
+	if bin == "" {
+		return checkItem{}, false
+	}
+	v, err := update.BinaryVersion(bin, update.VersionArgs["xray"])
+	if err != nil || strings.TrimSpace(v) == "" {
+		return checkItem{}, false
+	}
+	if !xrayTooNewForOldRealityClients(v) {
+		return checkItem{Name: "客户端兼容性", OK: true,
+			Detail: fmt.Sprintf("%s 的 REALITY 仍接受老客户端（mihomo / v2rayN 等）", v)}, true
+	}
+	return checkItem{Name: "客户端兼容性", OK: false, Warn: true,
+		Detail: fmt.Sprintf("%s 的 REALITY 默认只接受 xray 26.3.27 以上的客户端："+
+			"mihomo / Clash（以及 xray 1.8 内核的 v2rayN）会报 `REALITY authentication failed`，"+
+			"而服务端日志只说 `authentication failed or validation criteria not met`。"+
+			"节点参数是对的，别再去比对链接。两条出路：① 到「组件更新 → 版本列表」把 xray 降到 26.3.27"+
+			"（实测可用；1.8.x 也可以）；② 客户端换用 xray 内核（v2rayN / Shadowrocket / NekoBox）。"+
+			"mihomo 侧目前无解：它把 REALITY 客户端版本写死在 1.8.2（MetaCubeX/mihomo#3039）", v)}, true
 }
 
 // probeTLS 对 TLS / Reality 入站做一次真实的 TLS 握手探测。

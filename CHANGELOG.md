@@ -133,6 +133,68 @@ README 里也一直承认这一点。这版把它收掉：
 所以它不再是对 `index.html` 的逐字节拷贝，改由 `python3 deploy/build-demo.py` 从
 `index.html` + 两个 `.js` 生成，`TestDemoHTMLMatchesIndex` 守着生成结果的一致性。
 
+**订阅里 REALITY 节点的参数是空着的，mihomo 拿到也连不上。**
+
+现场：面板建完 vless+REALITY 入站，mihomo 连不上；同一台机器上 3x-ui 的节点通。
+根因在导出侧——表单/导入写进 settings 的是 `server_names`（复数）和 `short_ids`
+（数组），而 `inboundToNode` 只读单数的 `server_name` / `sid`：
+
+实际导出的链接（修复前）：
+
+```
+vless://uuid@host:24443?flow=xtls-rprx-vision&pbk=...&security=reality#hk-01
+```
+
+3x-ui 的链接长这样：
+
+```
+vless://uuid@ip:443?encryption=none&flow=xtls-rprx-vision&security=reality
+  &sni=www.apple.com&fp=chrome&pbk=...&sid=ab12cd34&type=tcp#name
+```
+
+缺 `sni`、缺 `sid`、缺 `fp`；clash YAML 里对应缺 `servername`、`short-id` 为空、
+缺 `client-fingerprint`。服务端 `shortIds=["ab12cd34"]` 只认 ab12cd34，客户端发空
+short-id → REALITY 握手必然失败。三项缺任何一个都是同一个现象，客户端侧完全看不出
+是哪一项的问题。
+
+现在导出侧补齐，并且**尽量自己推**而不是要求用户重填：
+
+- SNI：`server_name` → `server_names` 第一个 → 握手目标的主机名（与渲染器的兜底对称）；
+- 短 ID：`sid` → `short_ids` 里第一个非空的 → 空串（服务端 shortIds 含 `""` 时合法）；
+- 公钥：`pbk` / `public_key` → **由 `private_key` 现算**（X25519 公钥由私钥唯一确定，
+  所以「只填了私钥、没点生成公钥」的入站也能导出可用节点）；
+- 指纹：链接补 `fp=chrome`，clash 补 `client-fingerprint: chrome`（mihomo 用 REALITY
+  必须走 uTLS，否则它发的是普通 Go TLS 握手，服务端直接拒）；
+- 链路：链接补 `encryption=none`（vless 的标准参数，缺了有的客户端判链接非法）；
+- ws：`ws_host` 现在会带进链接的 `host=` 与 clash 的 `ws-opts.headers.Host`——
+  前置 CDN 时丢了 Host 头，握手带的是 IP，CDN 直接回 404。
+
+**订阅格式按 User-Agent 分流——这件事以前只写在 README 里，代码没做。**
+面板界面上给的订阅地址不带参数，mihomo 拿到 base64 链接列表会「拉取失败」，
+用户看到的现象又是「节点不通」。现在按 UA 判断：Clash / mihomo / FlClash / Stash
+给 YAML，sing-box 给 outbounds JSON，其它（v2rayN、Shadowrocket、浏览器）仍是
+base64 列表；`?target=` 显式参数优先。猜错方向比不猜更糟，所以只认这几个明确信号。
+
+**入站自检新增「客户端兼容性」一项**（`internal/api/diagnose.go`）。
+xray ≥ 26.7.11 的 REALITY 默认只接受 26.3.27 以上的客户端，而 mihomo 把客户端
+版本硬编码成 1.8.2（MetaCubeX/mihomo#3039）——于是「面板的节点不通、3x-ui 的通」
+还有一个与参数无关的成因：3x-ui 往往还跑着老版 xray。自检会在这种组合下明确
+提示并给出两条出路（把 xray 降到 26.3.27 / 1.8.x，或客户端换 xray 内核）。
+
+实测矩阵（同一份订阅配置、同一台机器、同一组 uuid/pbk/sid/sni）：
+
+| 服务端 | mihomo 1.19.33 | xray 1.8 客户端 | xray 26 客户端 |
+|---|---|---|---|
+| xray 1.8.24 | ✅ 362ms | — | — |
+| xray 26.3.27 | ✅ 352ms | — | — |
+| xray 26.10.31 | ❌ auth failed | ❌ | ✅ |
+| 26.10.31 + `minClientVer: 1.8.2` | ❌（26.7.11 上加这条能救） | — | ✅ |
+
+服务端渲染出来的配置经 xray 26 / 1.8 双版本 `run -test` 通过；客户端的握手成败
+用真客户端跑延迟测试判定（mihomo 1.19.0 / 1.19.33，xray 26.10.31 / 26.3.27 / 1.8.24）。
+新增用例做过变异验证：把补齐逻辑与 `fp` / `client-fingerprint` 去掉后，
+4 条用例全红并打印出上面那条「缺 sni/sid/pbk/fp」的坏链接。
+
 ---
 
 ## v1.1.1

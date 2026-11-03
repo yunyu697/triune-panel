@@ -74,7 +74,16 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 输出格式：显式 target 优先，没给就按 User-Agent 猜。
+	//
+	// 只给 base64 链接列表时，Clash/mihomo 系客户端会**整条订阅都拉不动**
+	// （它只吃 YAML），而面板界面上给出的订阅地址就是这个不带参数的 URL。
+	// 于是「把订阅地址填进 Clash Verge → 拉取失败 → 看起来像节点不通」。
+	// 猜 UA 是各家订阅服务的通行做法，也让那一个地址对所有客户端都可用。
 	target := r.URL.Query().Get("target")
+	if target == "" {
+		target = targetFromUA(r.UserAgent())
+	}
 	// 节点名在客户端配置里就是 tag / proxy name，重名会被内核判死。
 	// 入站名不要求唯一，两个「香港-01」就会撞，见 dedupeNodeNames。
 	dedupeNodeNames(nodes)
@@ -159,6 +168,24 @@ func (a *Server) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// targetFromUA 按 User-Agent 判断客户端想要的订阅格式。
+//
+// 只认「确定要 YAML / JSON」的客户端，其它（浏览器、v2rayN、Shadowrocket、
+// NekoBox 这些吃 base64 链接列表的）一律返回空串，走默认的链接列表——
+// 猜错方向比不猜更糟：给 v2rayN 塞一份 YAML，它同样拉不动。
+func targetFromUA(ua string) string {
+	s := strings.ToLower(ua)
+	switch {
+	// sing-box 内核自身与使用它的图形客户端
+	case strings.Contains(s, "sing-box"), strings.Contains(s, "singbox"):
+		return "singbox"
+	// Clash / mihomo 系：clash-verge、clashx、FlClash、mihomo 本体、stash
+	case strings.Contains(s, "clash"), strings.Contains(s, "mihomo"), strings.Contains(s, "stash"):
+		return "clash"
+	}
+	return ""
+}
+
 // isEffectiveSSClient 判断该用户是不是这个 shadowsocks 入站真正生效的那个。
 //
 // 判定顺序必须与渲染器一致：渲染器取「首个启用用户」的凭据写入入站级 password，
@@ -193,6 +220,13 @@ func (a *Server) externalInSub() bool {
 }
 
 // inboundToNode 把“入站+用户”转为可分享的节点（反向出口）。
+//
+// 这里最容易错的地方是**键名与渲染器不对称**：表单/导入写进 settings 的是
+// `short_ids`（数组）和 `server_names`（可能是数组也可能是逗号串），而分享链接
+// 要的是单值 `sid` / `sni`。以前只读 `sid` / `server_name`，于是面板上明明填了
+// 短 ID 和 SNI，导出的节点里两者都是空的——服务端 shortIds=["ab12"] 只认 ab12，
+// 客户端发空 short-id，REALITY 握手必然失败。表现就是"建完节点连不上"，
+// 而同机器上 3x-ui 的节点（链接里 sid/sni 齐全）是通的。
 func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) *link.Node {
 	n := &link.Node{
 		Protocol: in.Protocol,
@@ -206,13 +240,17 @@ func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) 
 		Path:     core.Field(in.Settings, "path"),
 		Extra:    map[string]any{},
 	}
-	for _, k := range []string{"flow", "pbk", "sid", "serviceName", "method"} {
+	for _, k := range []string{"flow", "pbk", "sid", "serviceName", "method", "fp"} {
 		if v := core.Field(in.Settings, k); v != "" {
 			n.Extra[k] = v
 		}
 	}
-	// Reality 公钥兼容多种写法：pbk / public_key / publicKey
-	// 注意：Extra 取不到时是 nil（interface），不能直接与 "" 比较
+	// ws 的 Host 头（CDN 前置时必须原样带给客户端）
+	if h := core.Field(in.Settings, "ws_host"); h != "" {
+		n.Extra["host"] = h
+	}
+	// REALITY 公钥兼容多种写法：pbk / public_key / publicKey。
+	// 注意：Extra 取不到时是 nil（interface），不能直接与 "" 比较。
 	if pbk, _ := n.Extra["pbk"].(string); pbk == "" && in.TLS == "reality" {
 		for _, k := range []string{"public_key", "publicKey", "pbk"} {
 			if v := core.Field(in.Settings, k); v != "" {
@@ -221,10 +259,58 @@ func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) 
 			}
 		}
 	}
+	if in.TLS == "reality" {
+		a.completeRealityNode(n, in)
+	}
 	if n.Security == "" {
 		n.Security = "none"
 	}
 	return n
+}
+
+// completeRealityNode 把 REALITY 入站缺的客户端参数补齐。
+//
+// 三个来源与三个兜底，缺任何一个客户端都连不上，而失败现象完全一样
+// （握手超时 / 连接被重置），在客户端侧看不出是哪一项的问题：
+//
+//	SNI    : server_name → server_names 第一个  → 握手目标的主机名
+//	短 ID  : sid → short_ids 里第一个非空的      → 空串（服务端 shortIds 含 "" 时合法）
+//	公钥   : pbk / public_key → 由 private_key 现算
+//
+// 公钥现算是关键：私钥本来就在库里（服务端要用），X25519 的公钥由私钥唯一确定，
+// 所以"只填了私钥、没点生成公钥"的入站也能导出可用的节点，而不是发一个
+// 永远握不上手的链接出去。
+func (a *Server) completeRealityNode(n *link.Node, in *model.Inbound) {
+	if n.SNI == "" {
+		if names := core.FieldList(in.Settings, "server_names"); len(names) > 0 {
+			n.SNI = names[0]
+		}
+	}
+	if n.SNI == "" {
+		// 与渲染器的兜底对称：缺 serverNames 时 xray 用 dest 的主机名
+		if dest := core.RealityDest(in); dest != "" {
+			if h, _, err := net.SplitHostPort(dest); err == nil {
+				n.SNI = h
+			} else {
+				n.SNI = dest
+			}
+		}
+	}
+	if sid, _ := n.Extra["sid"].(string); sid == "" {
+		for _, s := range core.ShortIDs(in.Settings) {
+			if s != "" {
+				n.Extra["sid"] = s
+				break
+			}
+		}
+	}
+	if pbk, _ := n.Extra["pbk"].(string); pbk == "" {
+		if priv := core.Field(in.Settings, "private_key"); priv != "" {
+			if pub, err := realityPubFromPriv(priv); err == nil {
+				n.Extra["pbk"] = pub
+			}
+		}
+	}
 }
 
 func (a *Server) publicHost(r *http.Request) string {

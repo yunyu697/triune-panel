@@ -85,6 +85,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 - **会话只存在内存**：面板重启后所有设备要重新登录。这是刻意的——换来「旧 token 不可能残留」。
 - **订阅与导出依赖 `public_host`**：没填就回退成请求的 Host，所以用内网 IP / localhost 访问面板时，生成的节点地址不可用。
 - **样式仍靠 `'unsafe-inline'` 放行**：脚本已经全部外置、`script-src` 收到 `'self'`，但界面有 300 多处 `style="..."`，`style-src` 还留着 `'unsafe-inline'`。样式注入的危害远低于脚本执行。
+- **xray ≥ 26.7.11 的 REALITY 不接受 mihomo / 旧客户端**：这是上游的版本策略（mihomo 把客户端版本硬编码成 1.8.2），不是节点配错。面板自检会明确提示；两条出路见[组件更新](#xray--26711-的-reality-不接受老客户端)。
 - **下载镜像与主题列表都会过期**：镜像还可能返回被替换过的文件，要求强保证就填 `sha256` 或干脆走官方地址。
 
 ## 目录
@@ -714,11 +715,24 @@ mihomo 内核的 DNS/路由（结构完全不同，请手工配）、
 
 ## 订阅输出
 
-`GET /sub/<token>`（按 User-Agent 或 `?target=` 参数）：
+`GET /sub/<token>`，格式按 `?target=` 参数或 **User-Agent** 自动判断：
 
-- 默认：base64 节点列表
-- `?target=clash`：Clash/mihomo YAML（含 proxy-groups）
-- `?target=singbox`：sing-box outbounds JSON
+| 客户端 | 拿到的东西 |
+|---|---|
+| Clash Verge / mihomo / FlClash / Stash | Clash/mihomo YAML（含 proxy-groups） |
+| sing-box | sing-box outbounds JSON |
+| 其它（v2rayN、Shadowrocket、NekoBox、浏览器） | base64 节点列表 |
+
+也可以强制：`?target=clash` / `?target=singbox`，显式参数优先于 UA。
+
+**同一个地址对所有客户端都可用**——面板界面上给的订阅地址不带参数，靠 UA 分流。
+只给 base64 列表时，Clash 系客户端会「拉取失败」，而用户看到的现象是「节点不通」。
+
+**REALITY 节点的导出会补齐四件套**：`sni`（取 `server_names` 第一个）、
+`sid`（取 `short_ids` 里第一个非空的）、`fp=chrome`（uTLS 指纹，mihomo 的
+`client-fingerprint`）、`pbk`（没填公钥时由 `private_key` 现算）。
+缺任何一个都握不上手，而且失败现象完全一样（超时 / 连接重置 / `REALITY
+authentication failed`），在客户端侧看不出是哪一项。
 
 订阅内容的构成：**只有本机已启用的入站**（按用户绑定的入站逐个生成）。
 外部节点仅在「外部节点」页的开关打开时才追加，见上一节。
@@ -1082,6 +1096,40 @@ service worker 与图标都由二进制内嵌（`internal/webui/pwa/`），`/man
 `""` = 本次强制走官方，`"https://..."` = 用这个。三者语义不同，不能用空串兼职。
 测速接口只接受 `https://github.com/` 开头的地址——它会把 URL 交给十几个第三方
 站点去请求，放开任意地址等于把面板变成公开的探活器。
+
+### xray ≥ 26.7.11 的 REALITY 不接受老客户端
+
+**症状**：面板上建好 vless + REALITY 入站，用 mihomo / Clash Verge 连不上，
+日志里是 `REALITY authentication failed`；同一台 VPS 上 3x-ui 的节点却是通的；
+换成 xray 内核的客户端（v2rayN / Shadowrocket）也连不上，但面板自检、
+端口监听、TLS 握手全都正常。
+
+**原因不在节点参数上**，在版本线上：
+
+- xray 从 **26.7.11** 起，`realitySettings` 不写 `minClientVer` 时**默认按 26.3.27 判定**；
+- 而 mihomo 的 REALITY 实现把客户端版本**硬编码成 1.8.2**（MetaCubeX/mihomo#3039）；
+- 服务端于是直接判握手失败，日志只有一句
+  `REALITY: processed invalid connection ...: authentication failed or validation criteria not met`。
+
+实测矩阵（同一份订阅配置、同一台机器、同一组 uuid/pbk/sid/sni，2026-11）：
+
+| 服务端 | mihomo 1.19.33 | xray 1.8 客户端 | xray 26 客户端 |
+|---|---|---|---|
+| xray 1.8.24 | ✅ 362ms | — | — |
+| xray 26.3.27 | ✅ 352ms | — | — |
+| xray 26.10.31 | ❌ auth failed | ❌ | ✅ |
+| xray 26.10.31 + `minClientVer: 1.8.2` | ❌（26.7.11 上加这条能救） | — | ✅ |
+
+**两条出路**（任选其一）：
+
+1. **把 xray 降到 26.3.27 或 1.8.x**：「组件更新 → 版本列表」里选具体版本安装，
+   面板会照常做备份与校验；降级后 mihomo 与 xray 客户端都能连。
+2. **客户端换 xray 内核**：v2rayN、Shadowrocket、NekoBox 都行——它们上报的版本是真的。
+   mihomo 侧目前无解，只能等上游改。
+
+面板的「入站自检」新增了**客户端兼容性**一项：当入站是 xray + REALITY、且磁盘上的
+xray ≥ 26.7.11 时会明确提示，并给出上面两条出路——这一类问题最容易把人带进
+「反复比对链接参数」的死胡同。
 
 ## 管理员与角色
 

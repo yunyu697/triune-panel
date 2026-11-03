@@ -14,8 +14,21 @@ func GenLink(n *Node) string {
 	switch n.Protocol {
 	case "vless", "trojan", "tuic":
 		q := urlValues(n)
-		if n.Protocol == "vless" && n.Extra["flow"] != nil {
-			q.Set("flow", fmt.Sprint(n.Extra["flow"]))
+		if n.Protocol == "vless" {
+			// encryption 是 vless 链接的标准参数。3x-ui / v2rayN 生成的都是
+			// `encryption=none`，缺了它有些客户端直接判链接非法（NekoBox 报
+			// "invalid vless link"），而它对我们永远只能是 none。
+			if q.Get("encryption") == "" {
+				q.Set("encryption", "none")
+			}
+			if n.Extra["flow"] != nil {
+				q.Set("flow", fmt.Sprint(n.Extra["flow"]))
+			}
+		}
+		// REALITY 必须带 uTLS 指纹：服务端按 ClientHello 的指纹判定，
+		// 不带 fp 的客户端（尤其 mihomo）发出去的是普通 Go TLS 握手，直接被拒。
+		if n.Security == "reality" && q.Get("fp") == "" {
+			q.Set("fp", "chrome")
 		}
 		cred := n.Cred
 		if n.Protocol == "tuic" && strings.Contains(n.Cred, ":") {
@@ -118,10 +131,6 @@ func ToClash(n *Node) (map[string]any, error) {
 		applyNet(p, n)
 		if f, ok := n.Extra["flow"].(string); ok && f != "" {
 			p["flow"] = f
-		}
-		if n.Security == "reality" {
-			p["tls"] = true
-			p["reality-opts"] = map[string]any{"public-key": str(n.Extra["pbk"]), "short-id": str(n.Extra["sid"])}
 		}
 		return p, nil
 	case "vmess":
@@ -253,6 +262,17 @@ func applyTLS(p map[string]any, n *Node) {
 				"public-key": str(n.Extra["pbk"]),
 				"short-id":   str(n.Extra["sid"]),
 			}
+			// REALITY 必须走 uTLS：服务端按 ClientHello 的指纹判定客户端
+			// 是不是"真的浏览器"。mihomo 不写这一项时用的是普通 Go TLS，
+			// 握手会直接被服务端丢掉——表现就是节点能加载、一连就超时/重置，
+			// 而同一条链接用 v2rayN（默认 fp=chrome）却是通的。
+			// 这是「mihomo 不通、3x-ui 的节点通」最典型的成因：3x-ui 生成的
+			// 客户端配置里永远带着 client-fingerprint。
+			fp := str(n.Extra["fp"])
+			if fp == "" {
+				fp = "chrome"
+			}
+			p["client-fingerprint"] = fp
 		}
 	}
 }
@@ -264,6 +284,11 @@ func applyNet(p map[string]any, n *Node) {
 		ws := map[string]any{}
 		if n.Path != "" {
 			ws["path"] = n.Path
+		}
+		// 前置 CDN 时服务端按 Host 头分流（入站的 ws_host）。丢了它，
+		// 客户端握手带的是 IP，CDN 直接回 404，看起来像"节点不通"。
+		if h := str(n.Extra["host"]); h != "" {
+			ws["headers"] = map[string]any{"Host": h}
 		}
 		p["ws-opts"] = ws
 	case "grpc":
@@ -299,6 +324,9 @@ func applyNetOut(o map[string]any, n *Node) {
 		tr := map[string]any{"type": "ws"}
 		if n.Path != "" {
 			tr["path"] = n.Path
+		}
+		if h := str(n.Extra["host"]); h != "" {
+			tr["headers"] = map[string]any{"Host": h}
 		}
 		o["transport"] = tr
 	case "grpc":
