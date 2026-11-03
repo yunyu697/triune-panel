@@ -240,9 +240,19 @@ func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) 
 		Path:     core.Field(in.Settings, "path"),
 		Extra:    map[string]any{},
 	}
-	for _, k := range []string{"flow", "pbk", "sid", "serviceName", "method", "fp"} {
+	for _, k := range []string{"flow", "pbk", "sid", "method", "fp"} {
 		if v := core.Field(in.Settings, k); v != "" {
 			n.Extra[k] = v
+		}
+	}
+	// 传输参数在表单与导入器里是 snake_case，而 link.Node 的 Extra 用 camelCase。
+	// 这里以前只列了 serviceName，于是 gRPC 入站导出的节点没有 grpc-opts：
+	// 服务端按 grpcSettings.serviceName 分流，客户端按空服务名握手，两端不一致。
+	// 新增传输参数时注意两种写法都要认。
+	for _, k := range []string{"service_name", "serviceName"} {
+		if v := core.Field(in.Settings, k); v != "" {
+			n.Extra["serviceName"] = v
+			break
 		}
 	}
 	// ws 的 Host 头（CDN 前置时必须原样带给客户端）

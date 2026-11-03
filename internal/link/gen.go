@@ -3,11 +3,19 @@ package link
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+// ErrTransport 表示协议本身能导出，只是这个传输在目标内核的客户端里没有
+// 对应表示（mihomo 没有 httpupgrade/xhttp，sing-box 没有 xhttp）。
+//
+// 单独分出来是为了让上层能给出准确的话：说成「协议不支持」会把用户引到
+// 换协议上去，实际只要换传输就行。
+var ErrTransport = errors.New("传输无法导出为客户端节点")
 
 // GenLink 由节点结构生成分享链接（订阅输出用）。
 func GenLink(n *Node) string {
@@ -128,7 +136,9 @@ func ToClash(n *Node) (map[string]any, error) {
 			"uuid": n.Cred, "udp": true,
 		}
 		applyTLS(p, n)
-		applyNet(p, n)
+		if err := applyNet(p, n); err != nil {
+			return nil, err
+		}
 		if f, ok := n.Extra["flow"].(string); ok && f != "" {
 			p["flow"] = f
 		}
@@ -139,7 +149,9 @@ func ToClash(n *Node) (map[string]any, error) {
 			"uuid": n.Cred, "alterId": 0, "cipher": "auto", "udp": true,
 		}
 		applyTLS(p, n)
-		applyNet(p, n)
+		if err := applyNet(p, n); err != nil {
+			return nil, err
+		}
 		return p, nil
 	case "trojan":
 		p := map[string]any{
@@ -149,7 +161,9 @@ func ToClash(n *Node) (map[string]any, error) {
 		if n.SNI != "" {
 			p["sni"] = n.SNI
 		}
-		applyNet(p, n)
+		if err := applyNet(p, n); err != nil {
+			return nil, err
+		}
 		return p, nil
 	case "shadowsocks":
 		method := str(n.Extra["method"])
@@ -199,7 +213,9 @@ func ToSingboxOutbound(n *Node) (map[string]any, error) {
 			"uuid": n.Cred,
 		}
 		applyTLSOut(o, n)
-		applyNetOut(o, n)
+		if err := applyNetOut(o, n); err != nil {
+			return nil, err
+		}
 		if f, ok := n.Extra["flow"].(string); ok && f != "" {
 			o["flow"] = f
 		}
@@ -210,7 +226,9 @@ func ToSingboxOutbound(n *Node) (map[string]any, error) {
 			"uuid": n.Cred, "security": "auto",
 		}
 		applyTLSOut(o, n)
-		applyNetOut(o, n)
+		if err := applyNetOut(o, n); err != nil {
+			return nil, err
+		}
 		return o, nil
 	case "trojan":
 		o := map[string]any{
@@ -218,7 +236,9 @@ func ToSingboxOutbound(n *Node) (map[string]any, error) {
 			"password": n.Cred,
 		}
 		applyTLSOut(o, n)
-		applyNetOut(o, n)
+		if err := applyNetOut(o, n); err != nil {
+			return nil, err
+		}
 		return o, nil
 	case "shadowsocks":
 		method := str(n.Extra["method"])
@@ -277,8 +297,16 @@ func applyTLS(p map[string]any, n *Node) {
 	}
 }
 
-func applyNet(p map[string]any, n *Node) {
+// applyNet 写入 clash/mihomo 侧的传输字段。
+//
+// 返回 error 表示这个传输在 mihomo 的客户端里没有对应表示。**不要**在那种
+// 情况下静默地什么都不写——不写 network 等于 tcp，而服务端明明在用 xhttp /
+// httpupgrade，客户端按 tcp 连过去必然握手失败，表现是「节点能加载、一连就不通」，
+// 且客户端和服务端日志都不指向真正的原因。宁可让调用方跳过这个节点并告诉用户。
+func applyNet(p map[string]any, n *Node) error {
 	switch n.Network {
+	case "", "tcp", "raw":
+		return nil
 	case "ws":
 		p["network"] = "ws"
 		ws := map[string]any{}
@@ -291,12 +319,27 @@ func applyNet(p map[string]any, n *Node) {
 			ws["headers"] = map[string]any{"Host": h}
 		}
 		p["ws-opts"] = ws
+		return nil
 	case "grpc":
 		p["network"] = "grpc"
 		if sn := str(n.Extra["serviceName"]); sn != "" {
 			p["grpc-opts"] = map[string]any{"grpc-service-name": sn}
 		}
+		return nil
+	case "h2", "http":
+		// mihomo 的 h2 是「HTTP/2 承载」，host 必须是数组
+		p["network"] = "h2"
+		h2 := map[string]any{}
+		if n.Path != "" {
+			h2["path"] = n.Path
+		}
+		if h := str(n.Extra["host"]); h != "" {
+			h2["host"] = []any{h}
+		}
+		p["h2-opts"] = h2
+		return nil
 	}
+	return fmt.Errorf("%w: mihomo 不支持 %s 传输的客户端节点", ErrTransport, n.Network)
 }
 
 func applyTLSOut(o map[string]any, n *Node) {
@@ -318,8 +361,12 @@ func applyTLSOut(o map[string]any, n *Node) {
 	}
 }
 
-func applyNetOut(o map[string]any, n *Node) {
+// applyNetOut 写入 sing-box 侧的 transport 字段，约定同 applyNet：
+// 表示不出来的传输必须报错，不能退化成 tcp。
+func applyNetOut(o map[string]any, n *Node) error {
 	switch n.Network {
+	case "", "tcp", "raw":
+		return nil
 	case "ws":
 		tr := map[string]any{"type": "ws"}
 		if n.Path != "" {
@@ -329,13 +376,40 @@ func applyNetOut(o map[string]any, n *Node) {
 			tr["headers"] = map[string]any{"Host": h}
 		}
 		o["transport"] = tr
+		return nil
 	case "grpc":
 		tr := map[string]any{"type": "grpc"}
 		if sn := str(n.Extra["serviceName"]); sn != "" {
 			tr["service_name"] = sn
 		}
 		o["transport"] = tr
+		return nil
+	case "httpupgrade":
+		tr := map[string]any{"type": "httpupgrade"}
+		if n.Path != "" {
+			tr["path"] = n.Path
+		}
+		if h := str(n.Extra["host"]); h != "" {
+			tr["host"] = h
+		}
+		o["transport"] = tr
+		return nil
+	case "h2", "http":
+		// sing-box 的 http 传输在配了 TLS 时就是 h2
+		tr := map[string]any{"type": "http"}
+		if n.Path != "" {
+			tr["path"] = n.Path
+		}
+		if h := str(n.Extra["host"]); h != "" {
+			tr["host"] = []any{h}
+		}
+		o["transport"] = tr
+		return nil
+	case "quic":
+		o["transport"] = map[string]any{"type": "quic"}
+		return nil
 	}
+	return fmt.Errorf("%w: sing-box 不支持 %s 传输的客户端节点", ErrTransport, n.Network)
 }
 
 func str(v any) string {

@@ -659,7 +659,7 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(skipped) > 0 {
 		warns = append(warns, fmt.Sprintf(
-			"以下协议的入站不能导出为 %s 节点，已跳过：%s",
+			"以下入站不能导出为 %s 节点，已跳过：%s",
 			coreLabel(q.Core), strings.Join(skipped, "、")))
 	}
 
