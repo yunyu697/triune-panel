@@ -633,6 +633,16 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	// 解析规则集选择 + 自定义规则集
 	sets, warns := normalizeSets(q)
 
+	// 客户端配置里的 server 就是 publicHost 的结果。没填「公网地址」而管理员又是
+	// 用 127.0.0.1 / localhost 打开的面板时，导出的节点会指向回环地址——拿到
+	// 另一台机器上永远连不上，而配置本身每一项都是对的，用户只能反复怀疑节点。
+	// 这里只提示不阻断：面板和客户端同机（本机测试、内网中转）确实能这么用。
+	if q.Target == "client" && isLoopbackHost(host) {
+		warns = append(warns, fmt.Sprintf(
+			"导出的节点地址是 %s（本机回环），只有客户端和面板在同一台机器上才连得通。"+
+				"请到「设置 → 公网地址」填服务器的公网 IP 或域名后重新导出。", host))
+	}
+
 	// 下载源：非法值已在 resolveMirror 里退回官方，这里只把原因转成提示
 	mir := q.mirror()
 	if _, warn := resolveMirror(q.RuleMirror, q.RuleMirrorPrefix); warn != "" {

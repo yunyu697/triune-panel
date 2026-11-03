@@ -275,7 +275,7 @@ func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) 
 //
 //	SNI    : server_name → server_names 第一个  → 握手目标的主机名
 //	短 ID  : sid → short_ids 里第一个非空的      → 空串（服务端 shortIds 含 "" 时合法）
-//	公钥   : pbk / public_key → 由 private_key 现算
+//	公钥   : 一律由 private_key 现算（settings 里的 pbk 可能是旧值，不采信）
 //
 // 公钥现算是关键：私钥本来就在库里（服务端要用），X25519 的公钥由私钥唯一确定，
 // 所以"只填了私钥、没点生成公钥"的入站也能导出可用的节点，而不是发一个
@@ -304,11 +304,17 @@ func (a *Server) completeRealityNode(n *link.Node, in *model.Inbound) {
 			}
 		}
 	}
-	if pbk, _ := n.Extra["pbk"].(string); pbk == "" {
-		if priv := core.Field(in.Settings, "private_key"); priv != "" {
-			if pub, err := realityPubFromPriv(priv); err == nil {
-				n.Extra["pbk"] = pub
-			}
+	// 公钥一律以私钥为准，**不用** settings 里存的 pbk。
+	//
+	// X25519 的公钥由私钥唯一确定，而存下来的 pbk 可能是上一代密钥的残留：
+	// 换过密钥对没同步、从 3x-ui 导入时带了别的公钥、或先填 pbk 后改私钥。
+	// 以前只在 pbk 为空时才现算，于是「私钥换了、pbk 没跟着换」的入站会导出
+	// 一份 SNI/短 ID 全对、只有公钥是错的配置——客户端报
+	// REALITY authentication failed，服务端日志一切正常，两边都看不出问题。
+	// 私钥本来就存在库里（服务端要用），以它为准不可能更差。
+	if priv := core.Field(in.Settings, "private_key"); priv != "" {
+		if pub, err := realityPubFromPriv(priv); err == nil {
+			n.Extra["pbk"] = pub
 		}
 	}
 }
@@ -323,6 +329,19 @@ func (a *Server) publicHost(r *http.Request) string {
 		h = host
 	}
 	return h
+}
+
+// isLoopbackHost 判断导出的节点地址是不是「只有本机能用」。
+// 空串、localhost、127.0.0.0/8、::1、0.0.0.0 都算——拿到别的机器上必然连不通。
+func isLoopbackHost(h string) bool {
+	h = strings.TrimSpace(h)
+	if h == "" || strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil {
+		return ip.IsLoopback() || ip.IsUnspecified()
+	}
+	return false
 }
 
 func proxyNames(nodes []*link.Node) []string {

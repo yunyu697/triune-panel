@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"triune/internal/link"
 	"triune/internal/model"
 
 	"gopkg.in/yaml.v3"
@@ -133,6 +134,47 @@ func TestRealitySubscriptionEmptyShortIDStaysEmpty(t *testing.T) {
 	}
 	if pbk, _ := node.Extra["pbk"].(string); pbk == "" {
 		t.Fatal("公钥应由 private_key 推导出来")
+	}
+}
+
+// settings 里的 pbk 可能是上一代密钥的残留（换密钥没同步、从 3x-ui 导入时带了
+// 别的公钥、先填 pbk 后改私钥）。导出一律以 private_key 为准：
+//
+//	X25519 的公钥由私钥唯一确定，采信存下来的 pbk 只可能出错。
+//
+// 现场表现和「短 ID 没带上」完全一样：客户端报 REALITY authentication failed，
+// 服务端日志一切正常，SNI 和短 ID 看着都对，只有公钥是错的。
+func TestRealityStalePbkIsOverriddenByPrivateKey(t *testing.T) {
+	a := newAuthTestServer(t)
+	priv, pub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 另造一对，把它的公钥当成"旧 pbk"塞进 settings
+	_, stalePub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stalePub == pub {
+		t.Fatal("两对密钥的公钥不应相同，随机源有问题")
+	}
+	in := &model.Inbound{
+		Name: "r-stale", Protocol: "vless", Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"handshake_server":"www.apple.com","server_names":"www.apple.com",` +
+			`"short_ids":["ab12cd34"],"private_key":"` + priv + `","pbk":"` + stalePub + `"}`,
+	}
+	node := a.inboundToNode(in, &model.Client{Name: "u1", Credential: "uuid-1"}, "1.2.3.4")
+	if got, _ := node.Extra["pbk"].(string); got != pub {
+		t.Fatalf("公钥应由 private_key 推导为 %s，实际 %s（旧 pbk 被采信了）", pub, got)
+	}
+	// 端到端再确认一次：clash 节点里的 public-key 也必须是推导出来的那个
+	p, err := link.ToClash(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro, _ := p["reality-opts"].(map[string]any)
+	if ro["public-key"] != pub {
+		t.Fatalf("clash public-key = %v，期望 %s", ro["public-key"], pub)
 	}
 }
 
