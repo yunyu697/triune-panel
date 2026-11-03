@@ -521,6 +521,18 @@ port_listener_pids() {
   printf '%s\n' "$pids" | grep -E '^[0-9]+$' | sort -u || true
 }
 
+# 端口上有没有人在应答：纯 TCP 连接，不需要任何权限，也不需要 ss/lsof。
+# 用来兜住「枚举不到占用者」这种情况——枚举为空可能只是没权限，不是没人监听。
+port_answers() {
+  local h=127.0.0.1
+  if (exec 3<>"/dev/tcp/$h/$PANEL_PORT") 2>/dev/null; then return 0; fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -o /dev/null --noproxy '*' --connect-timeout 1 --max-time 2 \
+      "http://$h:$PANEL_PORT/" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
 # 进程的可执行文件路径；Linux 上二进制被替换后 readlink 会带 " (deleted)" 后缀，
 # 不剥掉就认不出「这就是面板自己」——正好是升级场景。
 # 没有 /proc 时用 lsof，但必须限定 -a -d txt（只要可执行文件），
@@ -633,6 +645,18 @@ stop_existing_panel() {
       echo "  占用者："
       port_listener_lines | sed 's/^/    /'
       echo "  请用 root 重跑本脚本（sudo bash install.sh），或手动结束该进程后重试"
+      echo ""
+      return 1
+    fi
+    # 看不到占用者 ≠ 没人占。非 root 且没装 ss/lsof 时枚举会全空（/proc/<pid>/fd
+    # 也读不到别人的），这时若直接往下走，就会把二进制换掉、旧进程继续用旧 inode
+    # 服务——用户看到的是「装完了，页面还是旧版本」。所以这里做一个不需要权限的
+    # 连通性探测：有人在应答就停下来说清楚，别装作端口是空的。
+    if port_answers; then
+      echo ""
+      echo "✘ 端口 $PANEL_PORT 有服务在应答，但看不到是哪个进程（权限不足或缺少 ss/lsof）"
+      echo "  这种情况下换二进制不会生效：旧进程会继续用旧文件服务，页面仍显示旧版本。"
+      echo "  处理：用 root 重跑（curl … | sudo bash），或先装 iproute2 / lsof 再重试"
       echo ""
       return 1
     fi
