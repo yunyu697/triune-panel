@@ -8,7 +8,7 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
-## 未发布
+## v1.1.7
 
 **通知连弹三次。** 同一个控件会连发多个事件：`select` 与 `checkbox` 是
 `click → input → change`，文本框是 `input →（失焦时）change`。三个委托监听器都派发，
