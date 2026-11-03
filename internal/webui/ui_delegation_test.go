@@ -35,38 +35,44 @@ func TestDelegatedEventsGuardSelf(t *testing.T) {
 		t.Error("actFrom() 里没有 data-self 判断：遮罩内部控件的事件会被当成点击空白区")
 	}
 
-	// 每个「派发 data-act 动作」的委托注册都要走 actFrom。
-	// 只认派发 runAction(el, el.dataset.act…) 的那几个——像「点空白处关主题面板」
-	// 那种自己干活的 click 监听不算委托，不该被这条规则约束。
-	dispatch := "runAction(el, el.dataset.act"
+	// 三个事件必须共用同一个派发函数，且这个函数里同时有 actFrom 与 eventOf。
+	// 各写一份的结果就是「漏守卫」（v1.1.5）或「同一控件派发三次」（通知连弹三条）。
+	h := strings.Index(src, "function onDelegated(")
+	if h < 0 {
+		t.Fatal("app.js 里找不到 onDelegated()——委托事件的统一入口没了")
+	}
+	hbody := src[h:]
+	if j := strings.Index(hbody, "\n}"); j > 0 {
+		hbody = hbody[:j]
+	}
+	for _, need := range []struct{ name, why string }{
+		{"actFrom(", "没有走 actFrom：弹窗里的输入/选择会冒泡到遮罩并关掉弹窗"},
+		{"eventOf(", "没有走 eventOf：select / checkbox 会连发 click+input+change，动作执行三次"},
+	} {
+		if !strings.Contains(hbody, need.name) {
+			t.Errorf("onDelegated() %s", need.why)
+		}
+	}
+
 	for _, evt := range []string{"click", "change", "input"} {
-		needle := `document.addEventListener("` + evt + `"`
-		found, guarded := 0, 0
-		for rest := src; ; {
-			k := strings.Index(rest, needle)
-			if k < 0 {
-				break
-			}
-			rest = rest[k:]
-			chunk := rest
-			if end := strings.Index(chunk, "\n});"); end > 0 {
-				chunk = chunk[:end]
-			}
-			if strings.Contains(chunk, dispatch) {
-				found++
-				if !strings.Contains(chunk, "actFrom(") {
-					t.Errorf("%s 的委托没有走 actFrom()——弹窗里的输入/选择会冒泡到遮罩并关掉弹窗", evt)
-				} else {
-					guarded++
-				}
-			}
-			rest = rest[len(needle):]
+		reg := `document.addEventListener("` + evt + `", onDelegated)`
+		if !strings.Contains(src, reg) {
+			t.Errorf("app.js 里没有统一的 %s 委托注册（应为 %s）", evt, reg)
 		}
-		if found == 0 {
-			t.Errorf("app.js 里没有 %s 的 data-act 委托注册（改名或删掉了吗）", evt)
-		}
-		if guarded != found {
-			t.Errorf("%s 有 %d/%d 个委托走 actFrom()，必须全部", evt, guarded, found)
+	}
+
+	// eventOf 必须按控件类型分流，否则 select/checkbox 会被派发三次。
+	e := strings.Index(src, "function eventOf(")
+	if e < 0 {
+		t.Fatal("app.js 里找不到 eventOf()——同一控件会派发三次")
+	}
+	ebody := src[e:]
+	if j := strings.Index(ebody, "\n}"); j > 0 {
+		ebody = ebody[:j]
+	}
+	for _, need := range []string{`"SELECT"`, `"change"`, `"input"`} {
+		if !strings.Contains(ebody, need) {
+			t.Errorf("eventOf() 缺少 %s 分支：select / 输入框会被派发多次或一次都不派发", need)
 		}
 	}
 }

@@ -57,20 +57,39 @@ function actFrom(e) {
   if (el.dataset.self === "1" && e.target !== el) return null;
   return el;
 }
-/* 三个事件都必须走 actFrom()，不能各写一份 closestAct ——漏一个就是这次的
+/* 同一个控件会连发多个事件：select 与 checkbox 是 click → input → change，
+   text 输入框是 input →（失焦时）change。三个监听器都派发，动作就会执行三次
+   ——「通知连弹三次」，写库也写三次。所以按事件源控件只认一种事件：
+
+     select / checkbox / radio / file / range / color → change
+     其它 input、textarea                            → input（边打边算，搜索框要这个）
+     其余（按钮、div、svg 之类）                      → click
+
+   判据用 e.target 而不是取到的动作元素：data-act 可能挂在包着控件的容器上，
+   那种情况也要按里面控件的事件来派发，否则一次都不会触发。 */
+const CHANGE_TYPES = ["checkbox", "radio", "file", "range", "color"];
+function eventOf(target) {
+  const tag = target.tagName;
+  if (tag === "SELECT") return "change";
+  if (tag === "TEXTAREA") return "input";
+  if (tag === "INPUT") {
+    const t = (target.type || "text").toLowerCase();
+    return CHANGE_TYPES.includes(t) ? "change" : "input";
+  }
+  return "click";
+}
+
+/* 三个事件都必须走 actFrom()，不能各写一份 closestAct ——漏一个就是
    「一编辑就退出」。新增委托事件时照抄下面三行即可。 */
-document.addEventListener("click", e => {
+function onDelegated(e) {
   const el = actFrom(e);
-  if (el) runAction(el, el.dataset.act, e);
-});
-document.addEventListener("change", e => {
-  const el = actFrom(e);
-  if (el) runAction(el, el.dataset.act, e);
-});
-document.addEventListener("input", e => {
-  const el = actFrom(e);
-  if (el) runAction(el, el.dataset.act, e);
-});
+  if (!el) return;
+  if (e.type !== eventOf(e.target)) return;   // 同一控件只认一个事件，避免重复派发
+  runAction(el, el.dataset.act, e);
+}
+document.addEventListener("click", onDelegated);
+document.addEventListener("change", onDelegated);
+document.addEventListener("input", onDelegated);
 document.addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
   const el = e.target && e.target.closest ? e.target.closest("[data-enter]") : null;
