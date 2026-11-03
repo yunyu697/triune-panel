@@ -8,6 +8,38 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## 未发布
+
+**REALITY 入站在 v2rayN 里报「收到真证书」。** 报错原文是
+
+```
+transport/internet/reality: REALITY: received real certificate (potential MITM or redirection)
+```
+
+这句话的字面意思是「客户端拿到的证书是真的」，而它真正想说的是**服务端没认出这个客户端**：
+REALITY 对认不出的连接不拒绝、而是原样转发给 `dest`（比如 `www.apple.com:443`），
+客户端于是真的收到了 apple 的证书。所以服务端日志看起来一切正常——
+`received request … accepted … email: u1`，回落也正常，两边都看不出问题在哪。
+
+能让服务端「认不出」的只有三个字段：公钥、短 ID、SNI。v1.1.7 已经保证导出时公钥由私钥现算，
+这次把剩下两条路一起堵掉：
+
+- **保存入站时就把 `pbk` 归一化成私钥推导值。** 导出侧早就不采信这个字段了，但表单里那一栏
+  是给人看的——用户会点「复制」把公钥拿去手填 v2rayN。只要它可能过时，就还有一条通往这个
+  报错的路。私钥解不开时不动它（交给校验去报），已经正确时逐字节不改写（否则每次保存都会
+  重排 settings 的 JSON，变更对比里冒出假 diff）。
+- **短 ID 以 `short_ids` 为准。** 以前是「settings 里有单数 `sid` 就用它」，于是同时留着
+  旧 `sid` 和新 `short_ids` 的入站会导出一个服务端不认的短 ID——症状与公钥不配对完全一样，
+  但原因在另一个字段上。现在只在 `short_ids` 里确实有非空值时才覆盖。
+
+**验证**：两条各配单测，都做过变异验证——退回修复即红，且报错点名原因
+（`保存后 pbk 应被改写成 …（旧公钥还留着）` / `sid 应取 short_ids 第一个 aabbccdd，实际 "deadbeef"`）。
+另用 `Xray 26.10.31` 真二进制复现过：把客户端公钥改错一个字符，得到的就是用户那条报错原文；
+用面板导出的链接建客户端，服务端日志出现 `received request … accepted … email: u1`，
+说明公钥 / 短 ID / SNI / 指纹四项全部对得上。
+
+---
+
 ## v1.1.7
 
 **通知连弹三次。** 同一个控件会连发多个事件：`select` 与 `checkbox` 是

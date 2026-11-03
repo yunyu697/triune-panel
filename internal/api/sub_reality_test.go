@@ -178,6 +178,134 @@ func TestRealityStalePbkIsOverriddenByPrivateKey(t *testing.T) {
 	}
 }
 
+// 保存入站时就要把 pbk 归一化成「私钥推导出来的那个」。
+//
+// 导出侧早就不采信这个字段，但**表单里那一栏是给人看的**：用户会点「复制」
+// 把公钥拿去手填 v2rayN。只要它可能过时，就还有一条通往
+//
+//	REALITY: received real certificate (potential MITM or redirection)
+//
+// 的路——服务端用私钥、客户端用旧公钥，每次都判成「不是自己人」，于是回落给
+// dest，客户端收到真证书，而服务端日志一切正常。
+func TestSaveNormalizesStaleRealityPbk(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	priv, pub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stalePub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, _ := json.Marshal(map[string]any{
+		"handshake_server": "www.apple.com",
+		"server_names":     "www.apple.com",
+		"short_ids":        []string{"ab12cd34"},
+		"private_key":      priv,
+		"pbk":              stalePub, // 上一代密钥留下的
+	})
+	body, _ := json.Marshal(map[string]any{
+		"name": "r-stale", "core": "xray", "protocol": "vless",
+		"listen": "127.0.0.1", "port": 24461, "tag": "r-stale",
+		"transport": "tcp", "tls": "reality", "enabled": true, "draft": false,
+		"settings": string(settings),
+	})
+	in := mkInbound(t, h, tok, string(body))
+
+	var stored struct {
+		Settings string `json:"settings"`
+	}
+	w := apiReq(t, h, tok, "GET", "/api/inbounds", "")
+	if w.Code != 200 {
+		t.Fatalf("列表应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	var list []struct {
+		ID       int64  `json:"id"`
+		Settings string `json:"settings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range list {
+		if it.ID == in.ID {
+			stored.Settings = it.Settings
+		}
+	}
+	if stored.Settings == "" {
+		t.Fatalf("没找到刚建的入站 %d", in.ID)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stored.Settings), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["pbk"] != pub {
+		t.Fatalf("保存后 pbk 应被改写成 %s，实际 %v（旧公钥还留着）", pub, got["pbk"])
+	}
+	// 其它字段不能被归一化顺手改掉
+	if got["private_key"] != priv || got["handshake_server"] != "www.apple.com" {
+		t.Fatalf("归一化不该动别的字段: %#v", got)
+	}
+}
+
+// 已经正确的 pbk 不做改写：否则每次保存都会重排 settings 的 JSON，
+// 变更对比里会冒出一条「settings 变了」的假 diff。
+func TestSaveKeepsCorrectRealityPbkByteIdentical(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	priv, pub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"handshake_server":"www.apple.com","private_key":"` + priv +
+		`","pbk":"` + pub + `","short_ids":["ab12cd34"]}`
+	body, _ := json.Marshal(map[string]any{
+		"name": "r-ok", "core": "xray", "protocol": "vless",
+		"listen": "127.0.0.1", "port": 24462, "tag": "r-ok",
+		"transport": "tcp", "tls": "reality", "enabled": true, "draft": false,
+		"settings": settings,
+	})
+	in := mkInbound(t, h, tok, string(body))
+	if in.Settings != settings {
+		t.Fatalf("pbk 已经正确时不该改写 settings\n期望: %s\n实际: %s", settings, in.Settings)
+	}
+}
+
+// 短 ID 必须跟服务端渲染用的 short_ids 一致，不能被 settings 里残留的单数 sid 顶掉。
+//
+// 服务端只认 shortIds 里列出来的值。客户端要是拿了一个不在列表里的短 ID，
+// 服务端同样判成「不是自己人」→ 转给 dest → 客户端收到真证书，报
+//
+//	REALITY: received real certificate (potential MITM or redirection)
+//
+// 与公钥不配对的现象一模一样，但原因在另一个字段上。
+func TestRealitySidFollowsShortIDs(t *testing.T) {
+	a := newAuthTestServer(t)
+	in := &model.Inbound{
+		Name: "r-sid", Protocol: "vless", Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"handshake_server":"www.apple.com","server_names":"www.apple.com",` +
+			`"short_ids":["aabbccdd","11223344"],"sid":"deadbeef"}`,
+	}
+	node := a.inboundToNode(in, &model.Client{Name: "u1", Credential: "uuid-1"}, "1.2.3.4")
+	if sid, _ := node.Extra["sid"].(string); sid != "aabbccdd" {
+		t.Fatalf("sid 应取 short_ids 第一个 aabbccdd，实际 %q（残留的旧 sid 顶掉了它）", sid)
+	}
+
+	// 没有 short_ids 时才退回单数 sid
+	in2 := &model.Inbound{
+		Name: "r-sid2", Protocol: "vless", Port: 443, Transport: "tcp", TLS: "reality",
+		Settings: `{"handshake_server":"www.apple.com","sid":"deadbeef"}`,
+	}
+	n2 := a.inboundToNode(in2, &model.Client{Name: "u1", Credential: "uuid-1"}, "1.2.3.4")
+	if sid, _ := n2.Extra["sid"].(string); sid != "deadbeef" {
+		t.Fatalf("没有 short_ids 时应保留 sid=deadbeef，实际 %q", sid)
+	}
+}
+
 // subWithUA 带指定 User-Agent 拉订阅。
 func subWithUA(t *testing.T, h http.Handler, path, ua string) *httptest.ResponseRecorder {
 	t.Helper()

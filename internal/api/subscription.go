@@ -306,12 +306,15 @@ func (a *Server) completeRealityNode(n *link.Node, in *model.Inbound) {
 			}
 		}
 	}
-	if sid, _ := n.Extra["sid"].(string); sid == "" {
-		for _, s := range core.ShortIDs(in.Settings) {
-			if s != "" {
-				n.Extra["sid"] = s
-				break
-			}
+	// 短 ID 以 short_ids 为准：服务端就是按它渲染的，客户端必须用其中一个。
+	// 反过来（先看 settings 里的单数 sid）会让「同时留着旧 sid 和新的 short_ids」
+	// 的入站导出一个服务端不认的短 ID，症状与公钥不配对完全一样——
+	// 服务端把连接当陌生人转给 dest，客户端收到真证书。
+	// 只有在 short_ids 里确实有非空值时才能覆盖，否则保留已有的 sid。
+	for _, s := range core.ShortIDs(in.Settings) {
+		if s != "" {
+			n.Extra["sid"] = s
+			break
 		}
 	}
 	// 公钥一律以私钥为准，**不用** settings 里存的 pbk。

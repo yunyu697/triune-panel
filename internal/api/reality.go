@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"triune/internal/core"
+	"triune/internal/model"
 )
 
 // ==================== REALITY 的短 ID 与握手目标 ====================
@@ -57,6 +58,45 @@ func validateRealitySettings(settings string) string {
 
 func isHexRune(r rune) bool {
 	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// normalizeRealitySettings 让存下来的 pbk 永远等于 private_key 推导出的公钥。
+//
+// 为什么要在保存期改：公钥是私钥的纯函数，两者一旦不一致，服务端用的是私钥、
+// 客户端用的是公钥，**每一次握手都会被服务端判成「不是自己人」**，于是转给
+// dest，客户端收到的是真证书，报
+//
+//	REALITY: received real certificate (potential MITM or redirection)
+//
+// 而服务端日志一切正常（连接被正常接受、正常回落），两边都看不出问题在哪。
+//
+// 导出侧早就不采信这个字段了（见 completeRealityNode），但**表单里那一栏是给人
+// 看的**：用户会点「复制」把公钥拿去手填 v2rayN。只要它可能过时，就还有一条
+// 通往这个报错的路。与其到处兜底，不如在入口把它归一化掉。
+func normalizeRealitySettings(in *model.Inbound) {
+	if in.TLS != "reality" {
+		return
+	}
+	priv := core.Field(in.Settings, "private_key")
+	if priv == "" {
+		return
+	}
+	pub, err := realityPubFromPriv(priv)
+	if err != nil || pub == "" {
+		// 私钥本身解不开时不动它：交给渲染/校验去报，别在这里把配置改坏
+		return
+	}
+	if core.Field(in.Settings, "pbk") == pub {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(in.Settings), &m); err != nil {
+		return
+	}
+	m["pbk"] = pub
+	if b, err := json.Marshal(m); err == nil {
+		in.Settings = string(b)
+	}
 }
 
 // ---- 握手目标（dest）择优 ----

@@ -42,6 +42,7 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
+	normalizeRealitySettings(&in)
 	if msg := a.validateInboundInput(&in, 0); msg != "" {
 		fail(w, 400, msg)
 		return
@@ -201,6 +202,7 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Settings == "" {
 		in.Settings = "{}"
 	}
+	normalizeRealitySettings(&in)
 	if msg := a.validateInboundInput(&in, old.ID); msg != "" {
 		fail(w, 400, msg)
 		return
