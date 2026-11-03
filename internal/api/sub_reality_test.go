@@ -275,6 +275,85 @@ func TestSaveKeepsCorrectRealityPbkByteIdentical(t *testing.T) {
 	}
 }
 
+// 已经在库里的旧入站（保存期归一化上线之前建的、从 3x-ui 导入的）也要在
+// 列表接口里显示正确的公钥。
+//
+// 保存期归一化只覆盖「这次之后」建/改的入站，而用户报错的那条入站早就躺在库里了——
+// 他升级后打开编辑框，看到的还是那个和私钥不配的公钥，点「复制」填进 v2rayN，
+// 就又回到同一条报错上。所以读路径也要归一化（只改返回的副本，不落库）。
+func TestListNormalizesLegacyStaleRealityPbk(t *testing.T) {
+	a := newAuthTestServer(t)
+	h := a.Handler()
+	tok := loginForToken(t, a)
+
+	priv, pub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stalePub, err := newRealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 绕过 API 直接写库：模拟「保存期归一化还不存在」时存进去的行
+	legacy := &model.Inbound{
+		Name: "r-legacy", Core: "xray", Protocol: "vless",
+		Listen: "127.0.0.1", Port: 24463, Tag: "r-legacy",
+		Transport: "tcp", TLS: "reality", Enabled: true,
+		Settings: `{"handshake_server":"www.apple.com","private_key":"` + priv +
+			`","pbk":"` + stalePub + `","short_ids":["ab12cd34"]}`,
+	}
+	if err := a.Store.CreateInbound(legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	w := apiReq(t, h, tok, "GET", "/api/inbounds", "")
+	if w.Code != 200 {
+		t.Fatalf("列表应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	var list []struct {
+		ID       int64  `json:"id"`
+		Settings string `json:"settings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	var shown string
+	for _, it := range list {
+		if it.ID == legacy.ID {
+			shown = it.Settings
+		}
+	}
+	if shown == "" {
+		t.Fatalf("没找到旧入站 %d", legacy.ID)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(shown), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["pbk"] != pub {
+		t.Fatalf("列表返回的 pbk 应是私钥推导值 %s，实际 %v（旧公钥直接显示给了用户）", pub, got["pbk"])
+	}
+
+	// 只改副本：库里仍然是旧值，下一次保存才落库。
+	// （GET 不该有副作用——否则一个「刷新列表」就能改数据。）
+	raw, err := a.Store.ListInbounds("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range raw {
+		if in.ID != legacy.ID {
+			continue
+		}
+		var dbGot map[string]any
+		if err := json.Unmarshal([]byte(in.Settings), &dbGot); err != nil {
+			t.Fatal(err)
+		}
+		if dbGot["pbk"] != stalePub {
+			t.Fatalf("GET 不该写库，库里 pbk 应还是 %s，实际 %v", stalePub, dbGot["pbk"])
+		}
+	}
+}
+
 // 短 ID 必须跟服务端渲染用的 short_ids 一致，不能被 settings 里残留的单数 sid 顶掉。
 //
 // 服务端只认 shortIds 里列出来的值。客户端要是拿了一个不在列表里的短 ID，

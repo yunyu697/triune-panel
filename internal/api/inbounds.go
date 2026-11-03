@@ -23,6 +23,13 @@ func (a *Server) listInbounds(w http.ResponseWriter, r *http.Request) {
 	if ins == nil {
 		ins = []*model.Inbound{}
 	}
+	// 库里已有的行也要归一化：保存期归一化只覆盖「这次之后」建/改的入站，
+	// 而这次报错的那条入站早就躺在库里了。表单里那一栏是给人复制去手填客户端的，
+	// 显示一个和私钥不配的公钥，等于把人送上同一条报错。
+	// 只改返回给界面的副本，不落库——落库留给下一次保存，避免 GET 触发写。
+	for _, in := range ins {
+		normalizeRealitySettings(in)
+	}
 	writeJSON(w, 200, ins)
 }
 
