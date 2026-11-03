@@ -89,6 +89,49 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 > `install.sh` 是 `curl … | bash` 直接取 `main` 分支的，所以这个修复**不需要发版**，
 > 推上去即对所有人生效（发版时本小节并入）。
 
+**CSP 的 `script-src` 收回成 `'self'`：脚本外置 + 事件委托。**
+
+以前 `script-src 'self' 'unsafe-inline'`，原因很直白：界面是单个 HTML，脚本内嵌、
+交互全是 `onclick="fn(...)"` 这类内联属性，不开 `'unsafe-inline'` 界面直接瘫。
+但那一项**同时**放行了注入的 `<script>`——等于这套面板最后一道执行型防线是空的，
+README 里也一直承认这一点。这版把它收掉：
+
+- **脚本搬出 HTML**：`qr.js`（二维码编码器）与 `app.js`（全部界面逻辑）成为
+  `internal/webui/` 下的独立文件，`go:embed` 进二进制，经 `GET /assets/qr.js`、
+  `/assets/app.js` 同源下发（带 ETag、`no-cache`、`text/javascript; charset=utf-8`）。
+- **内联事件全部换掉**：184 处 `onclick` / `onchange` / `oninput` / `onkeydown` 改成
+  `data-act="fn"`（参数放 `data-args='[...]'`，JSON 数组）、`data-enter="fn"`（回车）、
+  `data-el="1|checked|value|num"`（把元素自身/状态作为末参）、`data-self="1"`
+  （遮罩只点自身才算）。`app.js` 顶部挂四个 document 级监听器统一分派——
+  `click` / `change` / `input` / `keydown`，动态参数一律经 `escJson()` 生成，
+  用户名里带引号也不会再把属性值撑破（这是老写法里真实存在的坑）。
+- **`script-src` 收到 `'self'`**，不带 `nonce` 也不带 hash：脚本都外置了，
+  nonce 唯一的作用是放行内联脚本，加上反而把口子重新打开（同源页面上就能读到）。
+- **自定义 UI 自动放宽**：`data/web/index.html` 可以被替换成用户自己的构建产物。
+  下发 HTML 前扫一遍字节，只要发现「没有 `src` 的 `<script>`」或内联事件属性，
+  这一份响应就退回带 `'unsafe-inline'` 的旧策略——不把别人的界面打成白屏。
+  这个检测没用正则：Go 的 RE2 不支持 `(?!...)` 前瞻，`hasInlineScript` 是手写扫描。
+
+`style-src` 保留 `'unsafe-inline'`（300 多处 `style="..."`），`connect-src 'self'`
+等「掐死变现路径」的条目一条没动。
+
+顺带修掉一个**一直没生效的按钮**：设置 → 运维 →「历史备份」弹窗指向的
+`loadPanelBackups` 从来没有定义过，点了没反应。这次真正实现了（拉
+`/api/panel/backups`，显示当前版本、可执行路径、`.bak` 回滚备份与版本备份）。
+
+验证：`go test ./...` 全绿，新增三例——`TestCSPNoInlineScriptForBuiltinUI`
+（CSP 里不许再有 `'unsafe-inline'`，并直接扫 `index.html` 断言零内联脚本/内联事件）、
+`TestCustomUIGetsRelaxedCSP`（写一份带 `onclick` 的自定义页面，断言拿到放宽版）、
+`TestAssetScriptsServed`（两个 `/assets/*.js` 必须 200 且是 JS，404 就等于白屏）。
+真机 playwright（Chrome）跑内置 UI：脚本来源只有 `/assets/qr.js` 与 `/assets/app.js`；
+回车登录成功；生成 / 应用 / 导入 / 设置四个视图内容齐全；改动客户端开关确实发出
+`PUT /api/clients/1`；历史备份弹窗正确显示「当前版本：dev / 可执行文件 / 回滚备份：无」；
+**CSP 违规 0 条、控制台错误 0 条**。
+
+`demo.html` 是给浏览器直接打开的离线版，脚本必须内联（`file://` 下不能按路径取），
+所以它不再是对 `index.html` 的逐字节拷贝，改由 `python3 deploy/build-demo.py` 从
+`index.html` + 两个 `.js` 生成，`TestDemoHTMLMatchesIndex` 守着生成结果的一致性。
+
 ---
 
 ## v1.1.1

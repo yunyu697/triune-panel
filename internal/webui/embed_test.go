@@ -7,19 +7,41 @@ import (
 	"testing"
 )
 
-// TestDemoHTMLMatchesIndex demo.html 是 index.html 的逐字节副本——演示模式
-// 本身就是 index.html 内建的（URL 带 #demo 或文件名是 demo.html 时启用），
-// 所以两个文件必须完全一致。
+// buildDemo 按 deploy/build-demo.py 的同一规则生成离线演示页：把
+// /assets/*.js 的引用换回内联脚本。
 //
-// 这条断言是防手滑的：每次改 UI 都要 `cp index.html demo.html`，忘了的话
-// 仓库里的离线演示会停留在旧版，而 CI 和日常使用都不会碰到它。
+// 为什么不再是「逐字节副本」：CSP 收紧到 script-src 'self' 之后，脚本必须
+// 作为独立文件加载；而 demo.html 是双击用 file:// 打开的，拿不到 /assets，
+// 只能把两份脚本贴回去。内容仍与面板服务的页面严格对应。
+func buildDemo(t *testing.T) []byte {
+	t.Helper()
+	html := indexHTML
+	for _, name := range []string{"qr.js", "app.js"} {
+		tag := []byte(`<script src="/assets/` + name + `"></script>`)
+		if bytes.Count(html, tag) != 1 {
+			t.Fatalf("index.html 里 %s 应恰好出现一次（实际 %d）", tag, bytes.Count(html, tag))
+		}
+		js, _, err := AssetFile(name)
+		if err != nil {
+			t.Fatalf("读 %s 失败: %v", name, err)
+		}
+		inline := append(append([]byte("<script>\n"), js...), []byte("</script>")...)
+		html = bytes.Replace(html, tag, inline, 1)
+	}
+	return html
+}
+
+// TestDemoHTMLMatchesIndex demo.html 必须等于「index.html + 内联脚本」的生成结果。
+//
+// 这条断言是防手滑的：每次改 UI 都要 `python3 deploy/build-demo.py`，
+// 忘了的话仓库里的离线演示会停留在旧版，而日常使用与测试都不会碰到它。
 func TestDemoHTMLMatchesIndex(t *testing.T) {
 	demo, err := os.ReadFile(filepath.Join("..", "..", "demo.html"))
 	if err != nil {
 		t.Fatalf("读 demo.html 失败: %v", err)
 	}
-	if !bytes.Equal(demo, indexHTML) {
-		t.Error("demo.html 与 internal/webui/index.html 不一致——改完 UI 记得 `cp internal/webui/index.html demo.html`")
+	if want := buildDemo(t); !bytes.Equal(demo, want) {
+		t.Error("demo.html 与 index.html 不同步——改完 UI 记得 `python3 deploy/build-demo.py`")
 	}
 }
 

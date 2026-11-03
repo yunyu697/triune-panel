@@ -39,6 +39,31 @@ func pwaContentType(name string) string {
 	return "application/octet-stream"
 }
 
+// handleAsset 从内嵌副本提供前端脚本（qr.js / app.js）。
+//
+// 和 PWA 资源同一个理由：它们必须与当前二进制的 index.html 严格对应，
+// 从 data/web 读会出现「html 是新的、js 还是旧的」这种错位。
+// 走 no-cache + ETag：内容没变就 304，变了立刻拿到新的。
+func (a *Server) handleAsset(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, etag, err := webui.AssetFile(name)
+		if err != nil {
+			// 落进「/」兜底会返回 HTML，浏览器按 text/javascript 解析会静默报语法错
+			http.NotFound(w, r)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Type", "text/javascript; charset=utf-8")
+		h.Set("ETag", etag)
+		h.Set("Cache-Control", "no-cache")
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
+	}
+}
+
 // handlePWA 从内嵌副本提供 PWA 资源。name 为空表示走 /icons/{file} 路由，
 // 实际文件名从路径参数取。
 func (a *Server) handlePWA(name string) http.HandlerFunc {

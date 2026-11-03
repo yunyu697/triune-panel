@@ -2,6 +2,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -179,11 +181,28 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/audit", a.ownerOnly(a.handleAuditClear))
 	mux.HandleFunc("POST /api/panel/rollback", a.ownerOnly(a.handlePanelRollback))
 
+	// 前端脚本从内嵌副本走（见 webui.AssetFile）：内容与二进制严格对应，
+	// 且 CSP 收紧到 script-src 'self' 之后必须能同源加载。
+	mux.HandleFunc("GET /assets/app.js", a.handleAsset("app.js"))
+	mux.HandleFunc("GET /assets/qr.js", a.handleAsset("qr.js"))
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致
 		// "明明升级了，界面还是旧的"。API 走 JSON 不受影响。
+		path := filepath.Join(a.DataDir, "web", "index.html")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, r, filepath.Join(a.DataDir, "web", "index.html"))
+		// 自定义 UI（data/web/index.html 被换成自己的构建产物）可能仍在用内联
+		// 脚本或内联事件属性。对这类页面单独放宽 CSP，否则收紧的那一下会把
+		// 人家整套界面打死；内置 UI 不带这些形态，始终走严格策略。
+		if htmlNeedsInlineScript(data) {
+			w.Header().Set("Content-Security-Policy", cspPolicyLegacyInline)
+		}
+		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(data))
 	})
 	// 安全响应头包在最外层：连 401/404 这类错误响应也要带上，
 	// 否则错误页仍可能被浏览器按 HTML 嗅探执行。

@@ -23,6 +23,24 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+// 前端脚本作为独立文件内嵌，和 PWA 资源同样的理由：它们必须和当前二进制的
+// index.html 严格对应。更重要的是——把脚本从 HTML 里挪出来之后，
+// CSP 才能收紧到 script-src 'self'，不再需要 'unsafe-inline'
+// （内联 <script> 和内联 onclick 只能靠它放行，而那一条同时也放行了注入的脚本）。
+//
+//go:embed qr.js app.js
+var scriptAssets embed.FS
+
+// AssetFile 读取内嵌的前端脚本，并返回内容的 ETag。
+func AssetFile(name string) (data []byte, etag string, err error) {
+	b, err := fs.ReadFile(scriptAssets, name)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(b)
+	return b, `"` + hex.EncodeToString(sum[:8]) + `"`, nil
+}
+
 // pwaAssets 内嵌的 PWA 静态资源：manifest、service worker、图标。
 //
 // 这些**不**落盘到 data/web，和 index.html 的处理方式刻意不同。

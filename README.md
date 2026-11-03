@@ -84,7 +84,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 - **云厂商安全组不归面板管**：面板只能改本机防火墙（firewalld / ufw / iptables），控制台要自己放行；iptables 规则重启不保留。
 - **会话只存在内存**：面板重启后所有设备要重新登录。这是刻意的——换来「旧 token 不可能残留」。
 - **订阅与导出依赖 `public_host`**：没填就回退成请求的 Host，所以用内网 IP / localhost 访问面板时，生成的节点地址不可用。
-- **CSP 挡不住内联脚本注入**：单文件 UI 有 126 处内联事件，只能开 `'unsafe-inline'`。当前防线是掐死变现路径（`connect-src 'self'`）。
+- **样式仍靠 `'unsafe-inline'` 放行**：脚本已经全部外置、`script-src` 收到 `'self'`，但界面有 300 多处 `style="..."`，`style-src` 还留着 `'unsafe-inline'`。样式注入的危害远低于脚本执行。
 - **下载镜像与主题列表都会过期**：镜像还可能返回被替换过的文件，要求强保证就填 `sha256` 或干脆走官方地址。
 
 ## 目录
@@ -98,7 +98,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 **网络与访问**
 
 - [挂在反向代理后面](#挂在反向代理后面nginx--caddy--traefik) — nginx / Caddy / Traefik 下的真实 IP 与防爆破计数
-- [安全响应头](#安全响应头) — CSP、HSTS、点击劫持防护，以及为什么开了 `'unsafe-inline'`
+- [安全响应头](#安全响应头) — CSP、HSTS、点击劫持防护，以及 `script-src 'self'` 是怎么收回来的
 
 **日常使用**
 
@@ -569,7 +569,7 @@ Caddy 默认就会带 `X-Forwarded-For`，同样把 `127.0.0.1` 填进可信网�
 CSP 的实际内容：
 
 ```
-default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self';
 worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self';
 frame-ancestors 'none'
@@ -579,15 +579,40 @@ frame-ancestors 'none'
 （都是 `'self'`，PWA 能正常工作），显式写出来是为了将来收紧 `default-src` 时
 不会连带把「加到主屏」弄哑——那种故障的表现只是手机上装不了，很难归因。
 
-**关于 `'unsafe-inline'`——这里没有假装能挡 XSS。** UI 是单文件，用了 126 处内联
-`onclick="..."` 事件属性，只能靠 `'unsafe-inline'` 放行；也不能改用 nonce：
-按 CSP3，`script-src` 里一旦出现 nonce 或 hash，浏览器会**忽略** `'unsafe-inline'`，
-126 个内联事件会全部失效、界面直接瘫掉。
+**`script-src` 是 `'self'`，没有 `'unsafe-inline'`。** 这件事不是一开始就能做到：
+早先界面是单个 HTML，脚本内嵌、交互全靠 `onclick="fn(...)"` 这类内联属性，只能靠
+`'unsafe-inline'` 放行——而那一项同时放行了**注入的** `<script>`，等于最后一道
+执行型防线是空的。后来分两步收回来的：
 
-所以策略是「不挡内联执行，但掐死变现路径」：`connect-src 'self'` 让注入脚本
+1. 脚本从 HTML 里搬出去，成为 `internal/webui/qr.js` 与 `app.js`，经
+   `/assets/qr.js`、`/assets/app.js` 同源下发（`embed` 进二进制，带 ETag）；
+2. 全部内联事件属性换成 **document 级事件委托**：按钮上只留
+   `data-act="fn"` / `data-args='[...]'` / `data-enter` / `data-el`，由 `app.js`
+   里一个 `click` / `change` / `input` / `keydown` 监听器统一分派。动态参数走
+   `escJson()` 生成，属性值里不会因为用户名带引号而炸掉。
+
+现在内置 UI 里既没有内联 `<script>`，也没有内联事件属性——`security_test.go`
+的 `TestCSPNoInlineScriptForBuiltinUI` 直接扫 `index.html` 字节来守这条，
+谁再塞一个 `onclick` 进去就会红。
+
+**没有用 nonce，也不用**。脚本全部同源外置之后 nonce 没有意义：它唯一的作用是
+放行内联 `<script>`，而一旦出现，注入者只要能把 nonce 读出来（同源页面上就有）
+就又能执行；同时按 CSP3，`script-src` 里有 nonce 时浏览器会**忽略**同一列表里的
+`'unsafe-inline'`，行为变得难以推理。所以用例里有一条反过来断言「不许出现
+`nonce-` / `sha256-`」。
+
+`style-src` 仍保留 `'unsafe-inline'`：界面有 300 多处 `style="..."` 和一个内联
+`<style>` 块，拆出去的收益远小于风险（样式注入也读不到 token）。
+
+除此之外，仍然保留「把 XSS 变现路径掐死」那几条：`connect-src 'self'` 让注入脚本
 连 `fetch`/`XHR`/`WebSocket` 都发不到外部域名（token 偷出去也没地方送），
 `form-action 'self'` 堵表单外发，`base-uri 'none'` 防 `<base>` 改写相对 URL，
-`frame-ancestors 'none'` 防点击劫持。这比什么都不加实质性强得多。
+`frame-ancestors 'none'` 防点击劫持。
+
+**自定义 UI 会自动放宽。** `data/web/index.html` 允许被换成用户自己的构建产物
+（这是有意的功能）。服务端下发 HTML 前会扫一遍：只要发现「没有 `src` 的
+`<script>`」或内联事件属性，这一份响应就改用带 `'unsafe-inline'` 的旧策略，
+否则一收紧就把别人的界面打成白屏。内置 UI 永远走严格版。
 
 **HSTS 的下发条件**：直连看 `r.TLS`；反代后看 `X-Forwarded-Proto`，但**只采信
 可信代理发来的值**——否则攻击者随手加一个 `X-Forwarded-Proto: https` 就能让面板
@@ -1361,11 +1386,11 @@ scrape_configs:
 9. **备份口令丢失无法找回**：age 是端到端加密，没有后门也没有恢复密钥。
    `--gen-passphrase` 生成的口令只打印一次，务必当场存进密码管理器。
    面板不会把口令写进任何配置或日志。
-10. **CSP 挡不住内联脚本注入**：UI 有 126 处内联 `onclick="..."`，只能启用
-    `'unsafe-inline'`，所以注入的 `<script>` 仍会执行。当前防线是「掐死变现路径」
-    （`connect-src 'self'` 让偷到的 token 发不出去）。**根治办法**是把内联事件
-    全部改成 `addEventListener` + 用 nonce，工作量在单文件 UI 上不小，
-    目前没做——知道这是已知短板，不假装它不存在。
+10. **`style-src` 仍靠 `'unsafe-inline'`**：脚本那条已经收干净了（见
+    [安全响应头](#安全响应头)），但界面有 300 多处 `style="..."`，`style-src`
+    还留着 `'unsafe-inline'`。这意味着注入的 `<style>` 或行内样式会生效——能做
+    视觉欺骗，但读不到 token、也发不出数据。要彻底收掉得把样式全改成 class，
+    目前收益不抵工作量。
 11. **会话只存在内存**：面板重启即全部失效（所有设备都要重新登录），也无法跨实例
     共享。这是刻意的——会话落库就要处理清理、并发与「重启后旧 token 还能用」的
     风险，收益不足以抵消。v0.9.7 起可在「设置 → 登录设备」里看在线会话并精准踢掉，
