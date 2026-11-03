@@ -36,19 +36,15 @@ func (a *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var created, failed []string
-	for _, n := range nodes {
-		en := &model.ExternalNode{Name: orDefault(n.Name, n.Host), RawLink: n.Raw}
-		if err := a.Store.CreateExternalNode(en); err != nil {
-			failed = append(failed, n.Name+": "+err.Error())
-			continue
-		}
-		created = append(created, fmt.Sprintf("%s → 外部节点（仅订阅聚合）", en.Name))
-	}
-	writeJSON(w, 200, map[string]any{"created": created, "failed": failed, "parse_errors": errStrings(errs)})
-	if len(created) > 0 {
+	created, skipped, failed := a.addExternalNodes(nodes, "")
+	writeJSON(w, 200, map[string]any{
+		"created": created, "skipped": skipped, "failed": failed,
+		"parse_errors": errStrings(errs),
+	})
+	if len(created)+len(skipped) > 0 {
 		a.auditOK(r, AuditImport, "external",
-			fmt.Sprintf("导入 %d 条外部节点（失败 %d）", len(created), len(failed)))
+			fmt.Sprintf("导入 %d 条外部节点（跳过 %d 条重复，失败 %d）",
+				len(created), len(skipped), len(failed)))
 	}
 }
 

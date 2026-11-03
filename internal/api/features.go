@@ -113,37 +113,7 @@ func (a *Server) importSubURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := strings.TrimSpace(req.Prefix)
-	existing, _ := a.Store.ListExternalNodes()
-	seen := map[string]bool{}
-	for _, e := range existing {
-		seen[e.RawLink] = true
-	}
-	var created, skipped, failed []string
-	for _, n := range nodes {
-		if n.Raw == "" {
-			if l := link.GenLink(n); l != "" {
-				n.Raw = l
-			} else {
-				failed = append(failed, n.Name+": 无法生成链接")
-				continue
-			}
-		}
-		if seen[n.Raw] {
-			skipped = append(skipped, n.Name+"（已存在）")
-			continue
-		}
-		seen[n.Raw] = true
-		name := n.Name
-		if prefix != "" {
-			name = prefix + "-" + name
-		}
-		en := &model.ExternalNode{Name: orDefault(name, n.Host), RawLink: n.Raw}
-		if err := a.Store.CreateExternalNode(en); err != nil {
-			failed = append(failed, n.Name+": "+err.Error())
-			continue
-		}
-		created = append(created, name+"（"+n.Protocol+"）")
-	}
+	created, skipped, failed := a.addExternalNodes(nodes, prefix)
 	writeJSON(w, 200, map[string]any{"created": created, "skipped": skipped, "failed": failed, "parse_errors": errStrings(errs)})
 	if len(created) > 0 {
 		a.auditOK(r, AuditExternal, req.URL,

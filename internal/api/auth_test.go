@@ -52,6 +52,7 @@ var protectedRoutes = []struct{ method, path string }{
 	{"POST", "/api/external-nodes/import-url"},
 	{"GET", "/api/external-nodes"},
 	{"POST", "/api/external-nodes"},
+	{"PUT", "/api/external-nodes/1"},
 	{"DELETE", "/api/external-nodes/1"},
 	{"POST", "/api/import"},
 	{"POST", "/api/apply"},

@@ -535,6 +535,27 @@ func (s *Store) DeleteExternalNode(id int64) error {
 	return err
 }
 
+// GetExternalNode 按 id 取一条外部节点；不存在返回 (nil, nil)——
+// 「找不到」是正常的业务分支，不该让调用方去分辨 sql.ErrNoRows。
+func (s *Store) GetExternalNode(id int64) (*model.ExternalNode, error) {
+	var n model.ExternalNode
+	err := s.db.QueryRow(`SELECT id,name,raw_link,created_at FROM external_nodes WHERE id=?`, id).
+		Scan(&n.ID, &n.Name, &n.RawLink, &n.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+// UpdateExternalNode 只改名称与链接：id 与 created_at 不动（导入时间仍指第一次导入）。
+func (s *Store) UpdateExternalNode(n *model.ExternalNode) error {
+	_, err := s.db.Exec(`UPDATE external_nodes SET name=?,raw_link=? WHERE id=?`, n.Name, n.RawLink, n.ID)
+	return err
+}
+
 // ---- Revisions ----
 
 func (s *Store) CreateRevision(r *model.ConfigRevision) error {

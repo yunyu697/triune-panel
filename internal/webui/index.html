@@ -885,9 +885,10 @@ canvas{display:block;width:100%}
       <div class="card">
         <h3>外部节点<span class="muted" style="font-weight:400">（仅进订阅，不生成本地配置）</span><span class="spacer"></span><button class="btn sm" data-act="loadExternal">刷新</button></h3>
         <div class="tbl-wrap"><table>
-          <thead><tr><th>名称</th><th>协议</th><th>地址</th><th>导入时间</th><th class="ta-r">操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>协议</th><th>地址</th><th>传输 · TLS</th><th>状态</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="extbody"></tbody>
         </table></div>
+        <div id="ext_sum" class="muted" style="margin-top:10px;font-size:12.5px"></div>
       </div>
     </section>
 
@@ -1481,6 +1482,28 @@ canvas{display:block;width:100%}
   </div>
 </div>
 
+<!-- 外部节点 编辑（改名 / 换链接） -->
+<div class="overlay" id="mExt" data-act="closeModal" data-args='["mExt"]' data-self="1">
+  <div class="modal" style="max-width:560px">
+    <h3>编辑外部节点</h3>
+    <div class="frm">
+      <div class="full"><label>名称</label>
+        <input id="ext_name" class="input" maxlength="64" placeholder="在客户端里显示的名字"></div>
+      <div class="full"><label>分享链接</label>
+        <textarea id="ext_link" class="input" placeholder="vless:// / vmess:// / trojan:// / ss:// / hysteria2:// / tuic://"></textarea></div>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:10px">
+      改名只影响订阅里的显示名，不动连接参数。换链接必须是能解析的分享链接——
+      解析不了的那条不会出现在订阅里，所以这里会直接拦下。
+    </p>
+    <p class="muted" id="ext_hint" style="font-size:12.5px;margin-top:6px"></p>
+    <div class="foot">
+      <button class="btn" data-act="closeModal" data-args='["mExt"]'>取消</button>
+      <button class="btn primary" data-act="saveExternal">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- 入站 编辑弹窗 -->
 <div class="overlay" id="mInbound" data-act="closeModal" data-args='["mInbound"]' data-self="1">
   <div class="modal" style="max-width:640px">
@@ -1632,7 +1655,7 @@ canvas{display:block;width:100%}
     <pre class="log" id="df_body" style="max-height:420px;overflow:auto;font-size:12px"></pre>
     <div class="foot">
       <button class="btn" data-act="closeModal" data-args='["mDiff"]'>关闭</button>
-      <button class="btn primary" data-act="closeModal" data-args="${escJson(['mDiff');applyCfg(])}">确认无误，应用</button>
+      <button class="btn primary" data-act="diffApply">确认无误，应用</button>
     </div>
   </div>
 </div>

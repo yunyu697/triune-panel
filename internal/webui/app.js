@@ -41,19 +41,34 @@ function runAction(el, name, ev) {
 function closestAct(t) {
   return (t && t.closest) ? t.closest("[data-act]") : null;
 }
-document.addEventListener("click", e => {
+
+/* 事件 → 动作元素。data-self 的含义：遮罩类元素只有事件发生在**它自己身上**
+   （点在空白区）才算，内部控件冒泡上来的一律忽略。
+
+   这条判断必须 click/change/input 三个事件共用。以前只写在 click 里，于是
+   input 事件从输入框冒泡到遮罩（遮罩挂着 data-act="closeModal"），在弹窗里
+   每敲一个字就 closeModal 一次——所有对话框都「一编辑就退出」，而且控制台
+   一声不响。change 同理（下拉框一选就关）。
+
+   【回归测试】internal/webui/ui_delegation_test.go 盯着这三个注册都走这里。 */
+function actFrom(e) {
   const el = closestAct(e.target);
-  if (!el) return;
-  // data-self：遮罩类元素只有点在它自己身上（空白区）才算，点内部内容不算
-  if (el.dataset.self === "1" && e.target !== el) return;
-  runAction(el, el.dataset.act, e);
+  if (!el) return null;
+  if (el.dataset.self === "1" && e.target !== el) return null;
+  return el;
+}
+/* 三个事件都必须走 actFrom()，不能各写一份 closestAct ——漏一个就是这次的
+   「一编辑就退出」。新增委托事件时照抄下面三行即可。 */
+document.addEventListener("click", e => {
+  const el = actFrom(e);
+  if (el) runAction(el, el.dataset.act, e);
 });
 document.addEventListener("change", e => {
-  const el = closestAct(e.target);
+  const el = actFrom(e);
   if (el) runAction(el, el.dataset.act, e);
 });
 document.addEventListener("input", e => {
-  const el = closestAct(e.target);
+  const el = actFrom(e);
   if (el) runAction(el, el.dataset.act, e);
 });
 document.addEventListener("keydown", e => {
@@ -379,9 +394,14 @@ if (DEMO) {
     counters:{1:{up:3.6e9,down:41.6e9},2:{up:0.9e9,down:6.2e9},3:{up:0,down:0}},
     daily:seedDaily(30),
     external:[
-      {id:1,name:"香港 IEPL-01",raw_link:"vless://8f2b1c3d@hk-iepl.example.net:443?security=tls#香港 IEPL-01",created_at:"2026-10-28T09:12:44"},
-      {id:2,name:"日本 BGP-02",raw_link:"vmess://eyJhZGQiOiJqcC0wMi5leGFtcGxlLmNvbSIsInBvcnQiOjQ0MywiaWQiOiJkZGVhZGVhZCJ9",created_at:"2026-10-29T21:03:17"},
-      {id:3,name:"美国 中转-01",raw_link:"trojan://p@ss@us-relay.example.org:8443#美国 中转-01",created_at:"2026-10-30T13:45:02"}
+      {id:1,name:"香港 IEPL-01",raw_link:"vless://8f2b1c3d@hk-iepl.example.net:443?security=tls#香港 IEPL-01",created_at:"2026-10-28T09:12:44",
+       parsed:{ok:true,protocol:"vless",host:"hk-iepl.example.net",port:443,network:"tcp",security:"tls"}},
+      {id:2,name:"日本 BGP-02",raw_link:"vmess://eyJhZGQiOiJqcC0wMi5leGFtcGxlLmNvbSIsInBvcnQiOjQ0MywiaWQiOiJkZGVhZGVhZCJ9",created_at:"2026-10-29T21:03:17",
+       parsed:{ok:true,protocol:"vmess",host:"jp-02.example.com",port:443,network:"ws",security:"tls",sni:"jp-02.example.com"}},
+      {id:3,name:"美国 中转-01",raw_link:"trojan://p@ss@us-relay.example.org:8443#美国 中转-01",created_at:"2026-10-30T13:45:02",
+       parsed:{ok:true,protocol:"trojan",host:"us-relay.example.org",port:8443,network:"tcp",security:"tls"}},
+      {id:4,name:"旧订阅-ss-01",raw_link:"ss://旧格式链接#旧订阅-ss-01",created_at:"2026-10-31T02:08:51",
+       parsed:{ok:false,error:"ss: base64 解码失败"}}
     ],
     revisions:[
       {id:3,core:"singbox",status:"applied",note:"web apply",created_at:"2026-10-31T03:40:11",content:"(修订内容示例)"},
@@ -603,10 +623,28 @@ async function mockRoute(path, opts) {
   if (api === "external-nodes" && rest === "/import-url") {
     const p = opts.body?.prefix ? opts.body.prefix + "-" : "";
     const now = new Date().toISOString().slice(0, 19);
-    MDB.external.push({ id: Math.max(0, ...MDB.external.map(x => x.id)) + 1, name: p + "远端订阅节点-01", raw_link: "vless://demo@node01.example.org:443#" + p + "远端订阅节点-01", created_at: now });
-    return { created: [p + "远端订阅节点-01（vless）", p + "远端订阅节点-02（trojan）", p + "远端订阅节点-03（ss）"], skipped: [], failed: [], parse_errors: [] };
+    const raw = "vless://demo@node01.example.org:443#" + p + "远端订阅节点-01";
+    MDB.external.push({ id: Math.max(0, ...MDB.external.map(x => x.id)) + 1, name: p + "远端订阅节点-01", raw_link: raw, created_at: now, parsed: demoExtParsed(raw) });
+    return { created: [p + "远端订阅节点-01（vless）"], skipped: [p + "远端订阅节点-01（这条链接已存在）"], failed: [], parse_errors: [] };
   }
   if (api === "external-nodes" && m === "GET") return MDB.external;
+  // 演示模式：改名 / 换链接（真机由后端解析并要求链接合法、不与别的节点重复）
+  if (api === "external-nodes" && m === "PUT") {
+    const id = +rest.split("/")[1];
+    const it = MDB.external.find(x => x.id === id);
+    if (!it) throw new Error("外部节点不存在");
+    if (opts.body?.name !== undefined) {
+      if (!String(opts.body.name).trim()) throw new Error("名称不能为空");
+      it.name = String(opts.body.name).trim();
+    }
+    if (opts.body?.raw_link !== undefined) {
+      const raw = String(opts.body.raw_link).trim();
+      const p = demoExtParsed(raw);
+      if (!p.ok) throw new Error("链接无法解析: " + p.error);
+      it.raw_link = raw; it.parsed = p;
+    }
+    return it;
+  }
   if (api === "external-nodes" && m === "DELETE") { MDB.external = MDB.external.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
   if (api === "certs") {
     // 演示两条：一条健康、一条仅剩 9 天，便于看到到期标红效果
@@ -5442,12 +5480,14 @@ function redrawCharts() {
 async function doImport() {
   try {
     const j = await req("/api/import", { method:"POST", body:{ text:$("im_text").value } });
-    const ok = (j.created||[]).length;
+    const ok = (j.created||[]).length, sk = (j.skipped||[]).length;
     $("immsg").innerHTML =
       (j.created||[]).map(s => `<div class="muted" style="color:var(--ok)">✓ ${escHtml(s)}</div>`).join("") +
+      (j.skipped||[]).map(s => `<div class="muted">= ${escHtml(s)}</div>`).join("") +
       (j.failed||[]).map(s => `<div class="muted" style="color:var(--err)">✕ ${escHtml(s)}</div>`).join("") +
       (j.parse_errors||[]).map(s => `<div class="muted" style="color:var(--err)">✕ 解析失败: ${escHtml(s)}</div>`).join("");
-    if (ok > 0) { toast(`已导入 ${ok} 条外部节点`); loadExternal(); }
+    if (ok) { toast(`已导入 ${ok} 条外部节点` + (sk ? `，跳过 ${sk} 条重复` : "")); loadExternal(); }
+    else if (sk) toast(`这 ${sk} 条已经在列表里了`, "info");
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -5502,28 +5542,92 @@ async function loadOutbounds() {
 }
 
 /* ---- 外部节点 ---- */
+// 这一页的每个字都来自后端的 parsed 摘要，**前端不再自己猜**：
+// vmess:// 与 ss:// 的正文是 base64，用 new URL() 解析得到的是那坨 base64，
+// 之前列表上「地址」一列显示的正是它——看着像地址，其实不是节点地址。
 let EXT = [];
+const EXT_NET = { tcp: "TCP", ws: "WebSocket", grpc: "gRPC", h2: "HTTP/2", http: "HTTP", quic: "QUIC", kcp: "mKCP", httpupgrade: "HTTPUpgrade" };
+const EXT_SEC = { reality: "REALITY", tls: "TLS", none: "无 TLS" };
+
+function extRow(n) {
+  const p = n.parsed || {};
+  const ok = !!p.ok;
+  const proto = ok ? p.protocol : "—";
+  const addr = ok ? `${p.host}:${p.port}` : "—";
+  const trans = ok ? [EXT_NET[p.network] || p.network || "TCP", EXT_SEC[p.security] || p.security || "无 TLS"]
+    .filter(Boolean).join(" · ") : "";
+  const sni = ok && p.sni && p.sni !== p.host
+    ? `<div class="muted" style="font-size:11.5px">SNI ${escHtml(p.sni)}</div>` : "";
+  // 解析失败必须在列表上说出来：订阅渲染会静默跳过这类节点，
+  // 用户看不到提示就只会觉得「明明加进去了怎么没有」。
+  const state = ok
+    ? `<span class="badge b-ok">可导出</span>`
+    : `<span class="badge b-err">无法解析</span>
+       <div style="color:var(--err);font-size:11.5px;margin-top:3px;white-space:normal;max-width:220px">这条不会出现在订阅里：${escHtml(p.error || "无法解析")}</div>`;
+  return `<tr>
+    <td style="white-space:normal;word-break:break-word;max-width:240px">
+      <b>${escHtml(n.name)}</b>
+      <div class="muted" style="font-size:11.5px">${escHtml((n.created_at || "").replace("T", " ").slice(0, 16))}</div>
+    </td>
+    <td><span class="badge b-acc">${escHtml(proto)}</span></td>
+    <td class="mono" style="white-space:normal;word-break:break-all;max-width:220px">${escHtml(addr)}</td>
+    <td style="font-size:12px">${escHtml(trans)}${sni}</td>
+    <td style="white-space:normal">${state}</td>
+    <td class="ta-r" style="white-space:nowrap">
+      <button class="btn sm" data-act="editExternal" data-args="${escJson([n.id])}">编辑</button>
+      <button class="btn sm danger" data-act="delExternal" data-args="${escJson([n.id])}">删除</button>
+    </td></tr>`;
+}
+
 async function loadExternal() {
   try {
-    EXT = await req("/api/external-nodes");
-    $("extbody").innerHTML = EXT.map(n => {
-      let proto = "", host = "";
-      try { const u = new URL(n.raw_link); proto = u.protocol.replace(":", ""); host = u.host; } catch(e) { host = "(链接待解析)"; }
-      return `<tr>
-        <td><b>${n.name}</b></td>
-        <td><span class="badge b-acc">${proto || "未知"}</span></td>
-        <td class="mono muted">${host}</td>
-        <td class="muted mono">${(n.created_at||"").replace("T"," ").slice(0,19)}</td>
-        <td class="ta-r"><button class="btn sm danger" data-act="delExternal" data-args="${escJson([n.id])}">删除</button></td></tr>`;
-    }).join("") || `<tr><td colspan="5" class="empty">暂无外部节点 —— 在上方粘贴链接导入后显示</td></tr>`;
-  } catch(e){}
+    EXT = await req("/api/external-nodes") || [];
+    $("extbody").innerHTML = EXT.map(extRow).join("") ||
+      `<tr><td colspan="6" class="empty">暂无外部节点 —— 在上方粘贴链接导入后显示</td></tr>`;
+    const bad = EXT.filter(n => !(n.parsed && n.parsed.ok)).length;
+    const sum = $("ext_sum");
+    if (sum) sum.innerHTML = !EXT.length ? "" :
+      `共 <b>${EXT.length}</b> 个 · ${EXT.length - bad} 个可导出` +
+      (bad ? ` · <span style="color:var(--err)">${bad} 个无法解析</span>（不会出现在订阅里）` : "") +
+      ` · 解析结果实时来自链接，不落库`;
+  } catch (e) { /* 静默：这一页失败时表格留空，不弹重复错误 */ }
 }
+
+let EXT_EDIT_ID = 0;
+function editExternal(id) {
+  const n = EXT.find(x => x.id === id);
+  if (!n) return;
+  EXT_EDIT_ID = id;
+  $("ext_name").value = n.name || "";
+  $("ext_link").value = n.raw_link || "";
+  const p = n.parsed || {};
+  $("ext_hint").innerHTML = p.ok
+    ? `当前链接解析为 <b>${escHtml(p.protocol)}</b> · ${escHtml(p.host)}:${p.port}` +
+      `（${escHtml([EXT_NET[p.network] || p.network || "TCP", EXT_SEC[p.security] || p.security || "无 TLS"].join(" · "))}）`
+    : `<span style="color:var(--err)">当前链接无法解析：${escHtml(p.error || "未知原因")}</span>`;
+  openModal("mExt");
+  setTimeout(() => { const el = $("ext_name"); if (el) { el.focus(); el.select(); } }, 40);
+}
+
+async function saveExternal() {
+  const name = $("ext_name").value.trim();
+  const link = $("ext_link").value.trim();
+  if (!name) { toast("名称不能为空", "warn"); $("ext_name").focus(); return; }
+  if (!link) { toast("链接不能为空", "warn"); $("ext_link").focus(); return; }
+  try {
+    await req("/api/external-nodes/" + EXT_EDIT_ID, { method: "PUT", body: { name, raw_link: link } });
+    closeModal("mExt");
+    toast("已保存");
+    loadExternal();
+  } catch (e) { toast(e.message, "err"); }
+}
+
 async function delExternal(id) {
   const n = EXT.find(x => x.id === id);
   const name = n ? n.name : "#" + id;
   if (!(await ask("删除外部节点", `删除「${name}」？它将从订阅中移除，不影响任何运行中的配置。`))) return;
-  try { await req("/api/external-nodes/" + id, { method:"DELETE" }); toast("已删除"); loadExternal(); }
-  catch(e){ toast(e.message, "err"); }
+  try { await req("/api/external-nodes/" + id, { method: "DELETE" }); toast("已删除"); loadExternal(); }
+  catch (e) { toast(e.message, "err"); }
 }
 
 /* ---- 应用 / 修订 / 日志 ---- */
@@ -5534,6 +5638,11 @@ async function dryRun() {
       j.content + "\n\n—— 校验: " + (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验"));
   } catch (e) { toast(e.message, "err"); }
 }
+/* diff 弹窗里的「确认无误，应用」：先关弹窗再走正常应用流程。
+   这个按钮以前写成 data-args="${escJson(['mDiff');applyCfg(])}"——一段没经过
+   模板求值的字面量，JSON.parse 必然失败，点了只会往控制台丢一条参数错误。 */
+function diffApply() { closeModal("mDiff"); applyCfg(); }
+
 async function applyCfg() {
   const core = $("ap_core").value;
   if (!(await ask("应用配置", "将把「" + core + "」的配置渲染 → 内核校验 → 原子替换 → 重启内核。校验失败时运行中的配置不会受任何影响。继续？"))) return;

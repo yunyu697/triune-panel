@@ -164,6 +164,7 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/config/diff", a.write(a.handleConfigDiff))
 	mux.HandleFunc("POST /api/external-nodes/import-url", a.write(a.importSubURL))
 	mux.HandleFunc("POST /api/external-nodes", a.write(a.addExternal))
+	mux.HandleFunc("PUT /api/external-nodes/{id}", a.write(a.updateExternal))
 	mux.HandleFunc("DELETE /api/external-nodes/{id}", a.write(a.deleteExternal))
 	mux.HandleFunc("POST /api/import", a.write(a.handleImport))
 	mux.HandleFunc("POST /api/apply", a.write(a.handleApply))
