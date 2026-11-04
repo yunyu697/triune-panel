@@ -119,6 +119,9 @@ func serve(args []string) {
 		return
 	}
 
+	// 统一转绝对路径，下游一律拿绝对值（见 absDataDir）。
+	*dataDir = absDataDir(*dataDir)
+
 	st, err := store.Open(*dataDir)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
@@ -209,14 +212,13 @@ func serve(args []string) {
 
 	handler := srv.Handler()
 	if v, _ := st.GetSetting(api.SettingPanelHTTPS); v == "1" {
-		dataAbs, _ := filepath.Abs(*dataDir)
-		cert, key, err := api.EnsurePanelCert(dataAbs)
+		cert, key, err := api.EnsurePanelCert(*dataDir)
 		if err != nil {
 			// 开了 HTTPS 就绝不静默退回明文：用户以为在加密、实际在明文传密码，
 			// 比「起不来」危险得多。这里的报错必须自带走出来的路。
 			log.Fatalf("已开启面板 HTTPS 但证书不可用，拒绝以明文启动: %v\n"+
 				"  恢复：删除 %s/tls/ 下的 panel.crt / panel.key 后重启（会自动重建自签证书），\n"+
-				"        或把设置 panel_https 置 0 关闭 HTTPS。", err, dataAbs)
+				"        或把设置 panel_https 置 0 关闭 HTTPS。", err, *dataDir)
 			return
 		}
 		srv.TLSActive = true
@@ -240,6 +242,23 @@ func serve(args []string) {
 	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// absDataDir 把 -data 统一转成绝对路径。
+//
+// 为什么必须转：dataDir 会被拼进 certificate_path / key_path 存进 DB，而内核
+// 进程的 cmd.Dir 会被切到 cores/<内核>——相对路径在那个 cwd 下指向不存在的地方。
+// `serve -data ./data` 起面板时，导入证书的入站会报
+// `open <别的目录>/certs/imported/…/fullchain.pem: no such file`，
+// 看起来像路径拼接写错，实际是相对路径被换了参照系。
+//
+// install.sh 用的本来就是绝对路径，所以只有手工用相对路径起才会踩到；
+// 转不了（极端情况）就原样返回，不因为这件事让面板起不来。
+func absDataDir(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
 }
 
 // applyBootstrapCreds 消费安装脚本落地的初始凭据文件 data/bootstrap.creds
