@@ -112,6 +112,8 @@ func (m *Mihomo) renderListener(iw core.InboundWithClients) (map[string]any, err
 	}
 	// 面板托管/客户端专用的键不透传到顶层（由下方结构化消费或剔除）
 	core.StripManagedKeys(l)
+	// sniffing / allocate 是 xray 入站专属字段，mihomo 的 listener 没有它们
+	core.StripXrayOnlyKeys(l)
 
 	switch in.Protocol {
 	case "mixed":

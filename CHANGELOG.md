@@ -10,6 +10,29 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ## 未发布
 
+**3x-ui 导入的入站切不到 sing-box 内核。** 导入时把 xray 的入站顶层字段
+`sniffing` / `allocate` 原样存进 settings（这是对的——xray 渲染器要把它们透传下去），
+但 sing-box 对未知字段是严格校验的：
+
+```
+FATAL decode config: inbounds[0].sniffing: json: unknown field "sniffing"
+```
+
+于是「3x-ui 导入 → 想换内核」这条最常见的路径必然 422，而报错只说校验失败，
+既看不出是哪个字段，也看不出它是 xray 专属的。现在 sing-box / mihomo 渲染时
+会先摘掉这两个键（`core.StripXrayOnlyKeys`），xray 侧照旧透传。
+
+**REALITY 的客户端兼容性写进已知限制了。** 实测同一份参数（`pbk`/`sid`/`sni`/`fp`
+逐项核对一致）：xray 26.10.31 的 REALITY 服务端 + xray 客户端 = 204；
+换成 mihomo 或 sing-box 1.15 客户端就是
+`REALITY: processed invalid connection … authentication failed or validation
+criteria not met`（服务端）/ `REALITY Authentication: false`（客户端）。
+这个差异是**单向**的：同一条入站切到 sing-box 内核后，xray 客户端与 mihomo 客户端
+都返回 204（`verify-reality-link.py` 的 sing-box 一节两条都 PASS）。也就是说
+「Clash Verge 连不上、v2rayN 能连」很多时候不是配置错，而是 xray 的 REALITY
+服务端当前不认 sing-box 家族的客户端——面板能做的是把参数对齐，对齐之后还不行，
+改面板没有用，要按客户端选内核。
+
 **导出的配置会自己说明「服务端没在监听」。** 导出的是「客户端该怎么连」，不是
 「服务端在监听」：入站停用或还是草稿时端口根本没有监听，可链接和 Clash 配置看起来
 完全正常——`security`、`sni`、`sid`、`pbk`、`fp` 一个不少。于是排查会一路跑到客户端

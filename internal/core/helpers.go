@@ -65,6 +65,26 @@ func StripManagedKeys(obj map[string]any) {
 	}
 }
 
+// xrayOnlyKeys 是「只属于 xray 入站顶层、别的内核对它是未知字段」的键。
+//
+// 它们**不能**进 ManagedSettingsKeys：xray 渲染器要把 sniffing / allocate
+// 原样透传下去，列进托管键就会被删掉，导入的 3x-ui 入站会丢掉协议嗅探。
+// 但反过来，同一条入站切到 sing-box / mihomo 时，这两个键就成了未知字段：
+// sing-box 严格校验，直接报
+//
+//	inbounds[0].sniffing: json: unknown field "sniffing"
+//
+// 于是「从 3x-ui 导入 → 想切到 sing-box 内核」这条最常见的路径必然失败，
+// 而报错只说"校验失败"，看不出是哪个字段、更看不出它是 xray 专属的。
+var xrayOnlyKeys = []string{"sniffing", "allocate"}
+
+// StripXrayOnlyKeys 删掉 xray 专属的入站顶层字段（sing-box / mihomo 渲染用）。
+func StripXrayOnlyKeys(obj map[string]any) {
+	for _, k := range xrayOnlyKeys {
+		delete(obj, k)
+	}
+}
+
 // Field 从入站 settings JSON 中取字符串字段（含一层嵌套对象平铺查找）。
 func Field(settings, key string) string {
 	if settings == "" {

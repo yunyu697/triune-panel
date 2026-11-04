@@ -124,6 +124,9 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 	}
 	// 面板托管/客户端专用的键不透传到顶层（由下方结构化消费或剔除）
 	core.StripManagedKeys(obj)
+	// sniffing / allocate 是 xray 入站专属字段，由 xray 渲染器原样透传；
+	// sing-box 对未知字段是严格校验的，留着会直接拒收整份配置。
+	core.StripXrayOnlyKeys(obj)
 
 	var users []any
 	for _, c := range iw.Clients {

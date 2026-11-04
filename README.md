@@ -77,7 +77,7 @@ GOOS=linux GOARCH=amd64 go build -o triune-panel-linux ./cmd/server   # 交叉�
 
 ## 适用边界（先看这几条）
 
-不想让人装完才发现，所以放在前面。完整 20 条见 [已知限制与未验证项](#已知限制与未验证项)。
+不想让人装完才发现，所以放在前面。完整 21 条见 [已知限制与未验证项](#已知限制与未验证项)。
 
 - **ACME 真实签发未做端到端验证**：代码路径完整（lego + Let's Encrypt HTTP-01），但开发环境没有公网域名与 80 端口。首次启用 HTTPS 前请按第 1 条自查。
 - **每用户限速做不到**：三个内核都没有这个能力。用量控制请用 `quota_gb`（真会被执行）；要限速只能在内核之外做（`tc` / 上游交换机 / 云厂商带宽上限）。
@@ -1590,6 +1590,25 @@ scrape_configs:
       「可执行验证 + 用新二进制校验当前配置 + 健康检查」，能挡住坏的/错的文件，
       但挡不住「能跑但被植入后门」的二进制。要求强保证就填 `sha256`
       （Release 页的 `sha256sums.txt` 里有），或者干脆走官方地址。
+21. **REALITY 的客户端兼容性取决于内核，不是链接**：
+    - 同一份参数（`pbk` / `sid` / `sni` / `fp` 全部核对一致）在不同客户端上表现
+      可能相反。实测 **xray 26.10.31 的 REALITY 服务端**：xray 客户端
+      （v2rayN / v2rayNG / xray 本体）返回 204，而 mihomo（Clash Verge / FlClash）
+      或 sing-box 1.15 客户端失败——服务端日志写
+      `REALITY: processed invalid connection … authentication failed or validation
+      criteria not met`，客户端写 `REALITY Authentication: false` /
+      `reality verification failed`。**两边都不指向真正的原因**（配置是对的）。
+    - 这个差异是**单向**的：**sing-box 的 REALITY 服务端两边都认**——同一条入站
+      切到 sing-box 内核后，xray 客户端与 mihomo 客户端都返回 204
+      （`deploy/verify-reality-link.py` 里 sing-box 那节两条都 PASS）。所以
+      「Clash Verge 连不上、v2rayN 能连」时，先看是不是这条：xray 的 REALITY
+      服务端当前不认 sing-box 家族的客户端，**按客户端选内核**比逐项排查参数快。
+    - 面板能做的只是把两边参数对齐（`pbk` 由私钥推导、`sid` 取 `short_ids` 第一个
+      非空、`sni` 取 `server_names` 第一个、clash 侧补 `client-fingerprint`）。
+      对齐之后仍然连不上，就是内核实现层面的问题，改面板配置不会有帮助。
+    - `deploy/verify-reality-link.py` 覆盖的是「xray 服务端 + xray 客户端」与
+      「sing-box 服务端 + xray/sing-box 客户端」，**没有**「xray 服务端 + sing-box
+      客户端」这一格——所以它不会为这个问题变红。
 
 ## 架构
 

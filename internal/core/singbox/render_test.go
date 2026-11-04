@@ -446,3 +446,39 @@ func TestRenderRealityWritesServerName(t *testing.T) {
 		t.Errorf("没填 SNI 时应退回握手目标主机名 www.bing.com，实际 %q（空串会让服务端拒绝所有客户端）", got)
 	}
 }
+
+// 从 3x-ui 导入的入站，settings 里带着 xray 的入站顶层字段 sniffing / allocate。
+//
+// 这两个键由 xray 渲染器原样透传（不能列进托管键，否则 xray 侧会丢掉协议嗅探），
+// 但 sing-box 对未知字段是严格校验的：
+//
+//	FATAL decode config: inbounds[0].sniffing: json: unknown field "sniffing"
+//
+// 于是「3x-ui 导入 → 切到 sing-box 内核」这条最常见的路径必然失败，而报错只说
+// "校验失败"，既看不出是哪个字段，也看不出它是 xray 专属的。
+func TestRenderInboundDropsXrayOnlyFields(t *testing.T) {
+	sb := &SingBox{}
+	in := &model.Inbound{
+		Name: "from-3xui", Core: "singbox", Protocol: "vless",
+		Port: 24464, Transport: "tcp", TLS: "reality",
+		Settings: `{"private_key":"PRIV","handshake_server":"www.apple.com",` +
+			`"short_ids":["aabbccdd"],` +
+			`"sniffing":{"enabled":true,"destOverride":["http","tls"]},` +
+			`"allocate":{"strategy":"always"}}`,
+	}
+	obj, err := sb.renderInbound(core.InboundWithClients{Inbound: in, Clients: []*model.Client{
+		{Name: "u", Credential: "uuid", Enabled: true},
+	}})
+	if err != nil {
+		t.Fatalf("renderInbound: %v", err)
+	}
+	for _, k := range []string{"sniffing", "allocate"} {
+		if _, ok := obj[k]; ok {
+			t.Errorf("xray 专属字段 %q 透传到了 sing-box 入站顶层（strict 校验会拒收整份配置）", k)
+		}
+	}
+	// 正常字段不能跟着被删
+	if obj["type"] != "vless" || obj["listen_port"] != 24464 {
+		t.Errorf("基础字段被误删: %v", obj)
+	}
+}
