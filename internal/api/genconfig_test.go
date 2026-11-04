@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -155,5 +156,37 @@ func TestNormalizeSetsFallsBackToCatalogPolicy(t *testing.T) {
 		CustomSets: []customSetReq{{Name: "x", URL: "https://e.com/a.mrs"}}})
 	if len(sets) != 1 || sets[0].Policy != "PROXY" {
 		t.Errorf("自定义规则集应默认 PROXY，实际 %+v", sets)
+	}
+}
+
+// 端口提示。Clash Verge 默认 7897、FlClash 也有自己的端口设置，客户端一律
+// 用自身设置覆盖配置里的 mixed-port。用户照着文件头的 7890 去配浏览器代理，
+// 就会连到一个没人监听的端口——现象是「节点在线、网页全打不开」，很难自己查出来。
+// 所以头注释必须点明，且写出来的数字要和 doc 里实际的值一致。
+func TestMihomoClientHeaderPortHint(t *testing.T) {
+	g := genMihomo("client", testNodes(), nil, nil, new([]string), ruleMirrorSel{})
+
+	port, ok := g.doc["mixed-port"].(int)
+	if !ok || port != mihomoMixedPort {
+		t.Fatalf("mixed-port 应为 %d，实际 %v", mihomoMixedPort, g.doc["mixed-port"])
+	}
+	if !strings.Contains(g.header, "端口提示") {
+		t.Errorf("客户端配置头注释缺端口提示：\n%s", g.header)
+	}
+	if !strings.Contains(g.header, fmt.Sprintf("混合端口 %d", mihomoMixedPort)) {
+		t.Errorf("端口提示没写出实际端口 %d：\n%s", mihomoMixedPort, g.header)
+	}
+	if !strings.Contains(g.header, "7897") {
+		t.Errorf("端口提示没点出 Clash Verge 的默认端口，用户仍会照着 7890 配：\n%s", g.header)
+	}
+}
+
+// 路由模式是内核直跑，没有客户端插在中间改端口，这段提示只会变成噪音。
+func TestMihomoRouterHeaderNoPortHint(t *testing.T) {
+	for _, target := range []string{"main-router", "side-router"} {
+		g := genMihomo(target, testNodes(), nil, nil, new([]string), ruleMirrorSel{})
+		if strings.Contains(g.header, "端口提示") {
+			t.Errorf("%s 不该出现客户端端口提示：\n%s", target, g.header)
+		}
 	}
 }

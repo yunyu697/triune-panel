@@ -917,6 +917,11 @@ var fakeIPFilter = []string{
 	"xbox.*.microsoft.com", "+.xboxlive.com", "time.*.com", "ntp.*.com",
 }
 
+// mihomoMixedPort 客户端配置里的默认混合端口（HTTP/SOCKS 同端口）。
+// 注意这只是「文件里写的值」：Clash Verge 默认 7897、FlClash 也有自己的端口设置，
+// 客户端会用自身设置覆盖它，所以头注释必须提醒，见 genMihomo。
+const mihomoMixedPort = 7890
+
 // targetNotes 各目标的使用说明（YAML 头注释 / UI 提示）
 func targetNote(target string) string {
 	switch target {
@@ -1029,7 +1034,7 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		"log-level":           map[bool]string{true: "info", false: "warning"}[router],
 		"allow-lan":           router,
 		"bind-address":        "*",
-		"mixed-port":          7890,
+		"mixed-port":          mihomoMixedPort,
 		"external-controller": "127.0.0.1:9090",
 		"unified-delay":       true,
 		"tcp-concurrent":      true,
@@ -1049,6 +1054,14 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 
 	note := strings.ReplaceAll(targetNote(target), "\n", "\n# ")
 	header := "# Triune Panel 生成 | mihomo | " + target + "\n# " + note + "\n"
+	// 端口是最容易踩的一环：用户照着文件头的 7890 去配浏览器/系统代理，
+	// 而 Clash Verge 之类会用它自己设置里的端口（默认 7897），于是连到一个
+	// 没人监听的端口上——现象就是「节点好好的，网页全打不开」。
+	if !router {
+		header += fmt.Sprintf("# 端口提示：混合端口 %d 只是本文件的默认值。\n", mihomoMixedPort) +
+			"# Clash Verge / FlClash 等客户端会改用它自己设置里的端口（Clash Verge 默认 7897），\n" +
+			"# 配置浏览器或系统代理时，以客户端界面上显示的端口为准。\n"
+	}
 	// 规则集地址是配置里最容易「看着对但拉不到」的一环，把实际用的下载源
 	// 写在头注释里，出问题时一眼能看出是不是镜像挂了。
 	if !mir.direct() {
