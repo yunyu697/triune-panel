@@ -1656,12 +1656,17 @@ canvas{display:block;width:100%}
       <span class="mono">www.apple.com</span>）反而更容易被针对性封锁，xray 在启动时也会这么提醒。
       优先选<b>离服务器近</b>、别人不常填、且证书正常的大站。
     </p>
+    <p class="muted" style="font-size:12px;margin:-4px 0 10px">
+      「取 SNI」会读该目标的证书，把里面每个域名逐个真握手验证一遍——REALITY 只认
+      <span class="mono">serverNames</span> 里的名字，而该填哪些只能问证书。验过的可以一键并入。
+    </p>
     <div class="frm">
       <div class="full"><label>候选目标</label>
         <textarea id="dest_list" class="input mono" style="min-height:110px;font-size:12px"></textarea></div>
     </div>
     <p class="muted" id="dest_msg" style="font-size:12.5px;margin:8px 0 0"></p>
     <div id="dest_result"></div>
+    <div id="dest_sni"></div>
     <div class="foot">
       <button class="btn" data-act="closeModal" data-args='["mDest"]'>关闭</button>
       <button class="btn primary" data-act="runDestProbe">开始测速</button>

@@ -189,6 +189,292 @@ func (a *Server) handleRealityDestProbe(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// ---- 同站 SNI 收集 ----
+//
+// REALITY 只接受 serverNames 里列出的 SNI：客户端发一个不在名单里的名字，
+// 服务端直接拒握手，而两边的日志都看不出所以然。可 serverNames 到底该填什么，
+// 取决于 dest 那张证书覆盖了谁——只能去问 dest 自己。
+//
+// 所以这里不猜：先按目标自己的名字握一次，把证书里的域名清单读出来，
+// 再逐个真握手验证（TLS 1.3 + 证书对得上），只返回验过的。
+//
+// 「证书覆盖」和「域名真实存在」是两件事，REALITY 只需要前者：通配符证书
+// （*.example.com）下任何单级子域都能当 SNI。但我们仍然逐个实测——有些站点
+// 按 SNI 分流，不存在的子域会拿到另一张证书，那种填进去就会露馅。
+
+const (
+	sniCollectMaxCandidates = 12
+	sniCollectTotalTimeout  = 18 * time.Second
+)
+
+// sniWildcardPrefixes 通配符展开时试的几个前缀。不是「猜哪个域名存在」，
+// 而是给实测提供候选：验不过的不会出现在结果里。
+var sniWildcardPrefixes = []string{"www", "api", "cdn"}
+
+// realityCertInfo dest 证书里「能当 SNI 的名字」清单。
+type realityCertInfo struct {
+	Issuer   string   `json:"issuer"`
+	NotAfter string   `json:"not_after"`
+	DaysLeft int      `json:"days_left"`
+	Names    []string `json:"names"`     // 写明的具体域名（可直接当 SNI）
+	Wildcard []string `json:"wildcards"` // *.example.com，需要展开成具体名字
+}
+
+// realitySNIResult 一个验过的 SNI。
+type realitySNIResult struct {
+	SNI    string `json:"sni"`
+	OK     bool   `json:"ok"`
+	MS     int64  `json:"ms"`
+	Source string `json:"source"` // 目标本身 / 证书 SAN / 通配符展开
+	Detail string `json:"detail"` // 没验过时的原因
+}
+
+// sniSeed 一个待验证的候选 SNI 及其来源（来源只是给人看的解释）。
+type sniSeed struct {
+	Name   string
+	Source string
+}
+
+// realitySNICollectResult 收集接口的完整结论。
+type realitySNICollectResult struct {
+	Host     string             `json:"host"`
+	Port     int                `json:"port"`
+	SNIs     []realitySNIResult `json:"snis"`
+	Rejected []realitySNIResult `json:"rejected"`
+	Cert     realityCertInfo    `json:"cert"`
+	Tried    int                `json:"tried"`
+	Note     string             `json:"note"`
+}
+
+// handleRealitySNICollect POST /api/tools/reality-sni
+//
+//	{"host":"www.amd.com","port":443}
+//
+// 与 reality-dest 同一档（write）：都会替用户连外网。
+func (a *Server) handleRealitySNICollect(w http.ResponseWriter, r *http.Request) {
+	var q struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+		fail(w, 400, "bad request")
+		return
+	}
+	cands, msg := normalizeDestCandidates([]destCandidate{{Host: q.Host, Port: q.Port}})
+	if msg != "" {
+		fail(w, 400, msg)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), sniCollectTotalTimeout)
+	defer cancel()
+
+	res, errMsg := collectRealitySNI(ctx, cands[0], nil)
+	if errMsg != "" {
+		fail(w, 502, errMsg)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"host":     res.Host,
+		"port":     res.Port,
+		"snis":     res.SNIs,
+		"rejected": res.Rejected,
+		"cert":     res.Cert,
+		"tried":    res.Tried,
+		"note":     res.Note,
+		"timeout":  sniCollectTotalTimeout.Milliseconds(),
+	})
+}
+
+// collectRealitySNI 读 dest 的证书、展开候选、逐个真握手验证。
+//
+// 第二个返回值是给用户看的失败原因（非空时 SNIs 无意义）。拆出来是为了
+// 能对着本地 TLS 服务测——handler 里的 guardDestHost 不允许 127.0.0.1，
+// roots 也就是为此留的口子（生产传 nil = 系统根证书）。
+func collectRealitySNI(ctx context.Context, base destCandidate, roots *x509.CertPool) (realitySNICollectResult, string) {
+	out := realitySNICollectResult{
+		Host: base.Host, Port: base.Port,
+		// 空切片而不是 nil：JSON 里要出 []，前端才不用到处兜 null
+		SNIs:     []realitySNIResult{},
+		Rejected: []realitySNIResult{},
+	}
+
+	// 第一次握手：SNI 就用目标自己的名字，拿到的证书就是这个 dest 的
+	// 「合法域名清单」。这一次也顺带证明目标本身可不可用。
+	h := handshakeDest(ctx, base, roots)
+	if h.err != nil {
+		detail, warning := describeDestError(h.err, base)
+		return out, detail + "。" + warning
+	}
+	if h.state.Version != tls.VersionTLS13 {
+		return out, fmt.Sprintf("目标只协商到 TLS %s：REALITY 必须在 TLS 1.3 上工作，"+
+			"这个目标不能当 dest，也就无所谓 SNI", tlsVersionName(h.state.Version))
+	}
+	leaf := h.leaf()
+	if leaf == nil {
+		return out, "目标没有提供证书：读不到它的域名清单"
+	}
+	cert := certInfoOf(leaf)
+	out.Cert = cert
+	// 「目标本身」这一项用的是握手时发的那个名字（base.SNI，缺省即 host）：
+	// 用户指定了 SNI 时，名单的起点就是它，而不是拨号用的那个地址。
+	primary := destSNI(base)
+	seeds, total := sniSeeds(primary, cert)
+
+	results := make([]realityDestResult, 0, len(seeds))
+	// 目标自己已经在上面的握手验过了，不用再握一次。
+	if h.certErr == nil {
+		results = append(results, realityDestResult{
+			Host: base.Host, Port: base.Port, SNI: primary,
+			OK: true, TLS: "1.3", ALPN: h.state.NegotiatedProtocol,
+			H2: h.state.NegotiatedProtocol == "h2", CertOK: true,
+			MS: h.took.Milliseconds(), Detail: "TLS 1.3 握手成功",
+			Issuer: cert.Issuer, NotAfter: cert.NotAfter, DaysLeft: cert.DaysLeft,
+		})
+	} else {
+		out.Rejected = append(out.Rejected, realitySNIResult{
+			SNI: primary, Source: "目标本身",
+			Detail: "证书与 SNI 对不上（" + trimErr(h.certErr.Error()) + "）",
+		})
+	}
+
+	rest := make([]destCandidate, 0, len(seeds))
+	for _, s := range seeds {
+		if strings.EqualFold(s.Name, primary) {
+			continue
+		}
+		rest = append(rest, destCandidate{Host: base.Host, Port: base.Port, SNI: s.Name})
+	}
+	if len(rest) > 0 {
+		// 这里要的是「行不行」而不是「多快」，握一次就够。
+		results = append(results, probeRealityDestAllN(ctx, rest, roots, 1)...)
+	}
+	sortDestResults(results)
+
+	srcOf := make(map[string]string, len(seeds))
+	for _, s := range seeds {
+		srcOf[strings.ToLower(s.Name)] = s.Source
+	}
+	out.SNIs = make([]realitySNIResult, 0, len(results))
+	for _, r := range results {
+		if r.OK && r.CertOK {
+			out.SNIs = append(out.SNIs, realitySNIResult{
+				SNI: r.SNI, OK: true, MS: r.MS,
+				Source: srcOf[strings.ToLower(r.SNI)],
+			})
+			continue
+		}
+		out.Rejected = append(out.Rejected, realitySNIResult{
+			SNI: r.SNI, Source: srcOf[strings.ToLower(r.SNI)],
+			Detail: sniRejectReason(r),
+		})
+	}
+	// 试过的名字个数就是候选个数：可用与被拒是同一批候选的两种结局，
+	// 用两边相加会把自己重复算一次。
+	out.Tried = len(seeds)
+
+	var notes []string
+	switch {
+	case len(out.SNIs) == 0:
+		notes = append(notes, "一个都没验过：这个目标可能按 SNI 分流，或证书里没有可用的名字。"+
+			"先确认目标本身能不能当 dest。")
+	case len(out.SNIs) == 1 && total == 1:
+		// 只有「证书里本来就没别的名字」才这么说。证书写了两个、只验过一个时
+		// 别下这个结论——被拒的那个已经在 rejected 里说明原因了。
+		notes = append(notes, "这张证书只写了这一个域名，没有别的可选。")
+	}
+	if total > len(seeds) {
+		notes = append(notes, fmt.Sprintf("证书里一共 %d 个可用名字，这里实测了前 %d 个——"+
+			"填两三个就够轮换了，不必全要。", total, len(seeds)))
+	}
+	out.Note = strings.Join(notes, " ")
+	return out, ""
+}
+
+// sniRejectReason 把「没验过」压成一句话。
+func sniRejectReason(res realityDestResult) string {
+	if !res.OK {
+		if res.Detail != "" {
+			return res.Detail
+		}
+		return "握手失败"
+	}
+	return "证书与 SNI 对不上"
+}
+
+// certInfoOf 拆出证书里的具体域名与通配符。
+//
+// 顺序保持证书里的原样（第一项通常是主域名），不排序——用户看到的第一个
+// 往往就是他该选的那个。
+func certInfoOf(leaf *x509.Certificate) realityCertInfo {
+	info := realityCertInfo{
+		Issuer:   issuerName(leaf),
+		NotAfter: leaf.NotAfter.Format("2006-01-02"),
+		DaysLeft: int(time.Until(leaf.NotAfter).Hours() / 24),
+		Names:    []string{},
+		Wildcard: []string{},
+	}
+	seen := map[string]bool{}
+	add := func(n string) {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n == "" || seen[n] {
+			return
+		}
+		seen[n] = true
+		if strings.HasPrefix(n, "*.") {
+			info.Wildcard = append(info.Wildcard, n)
+			return
+		}
+		info.Names = append(info.Names, n)
+	}
+	for _, n := range leaf.DNSNames {
+		add(n)
+	}
+	// 老证书可能只把域名写在 CN 里，SAN 是空的
+	add(leaf.Subject.CommonName)
+	return info
+}
+
+// sniSeeds 候选 SNI 列表：目标本身 + 证书里的具体域名 + 通配符展开。
+//
+// 通配符本身不能当 SNI（客户端发的必须是具体名字），所以展开成几个前缀试，
+// 验不过的不返回。
+//
+// 第二个返回值是「本来有多少个候选」——大站证书动辄二三十个 SAN，
+// 截断之后得让人知道还有没测的，否则会以为名单就这么点。
+func sniSeeds(host string, cert realityCertInfo) ([]sniSeed, int) {
+	all := []sniSeed{{Name: strings.ToLower(host), Source: "目标本身"}}
+	seen := map[string]bool{strings.ToLower(host): true}
+	push := func(name, source string) {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || seen[name] {
+			return
+		}
+		if strings.Contains(name, "*") {
+			return
+		}
+		seen[name] = true
+		all = append(all, sniSeed{Name: name, Source: source})
+	}
+	for _, n := range cert.Names {
+		push(n, "证书 SAN")
+	}
+	for _, w := range cert.Wildcard {
+		base := strings.TrimPrefix(w, "*.")
+		if base == "" || base == w {
+			continue
+		}
+		for _, p := range sniWildcardPrefixes {
+			push(p+"."+base, "通配符展开")
+		}
+	}
+	total := len(all)
+	if total > sniCollectMaxCandidates {
+		all = all[:sniCollectMaxCandidates]
+	}
+	return all, total
+}
+
 // normalizeDestCandidates 归一化候选列表：去重、补默认端口、挡私网与畸形输入。
 //
 // 容忍「host:port」这种写法（用户从别处复制过来时基本都是这样），
@@ -287,7 +573,15 @@ func guardDestHost(host string) error {
 }
 
 // probeRealityDestAll 并发实测整组候选，按「可用 → 证书对得上 → 快」排序。
+//
+// 每个目标握手 destProbeAttempts 次取中位数——这是给「挑最快的那个」用的，
+// 单次抖动不该改变排名。要的是「行不行」而不是「多快」时（收集 SNI），
+// 走 probeRealityDestAllN 传 1，省掉三分之二的握手。
 func probeRealityDestAll(ctx context.Context, cands []destCandidate, roots *x509.CertPool) []realityDestResult {
+	return probeRealityDestAllN(ctx, cands, roots, destProbeAttempts)
+}
+
+func probeRealityDestAllN(ctx context.Context, cands []destCandidate, roots *x509.CertPool, attempts int) []realityDestResult {
 	out := make([]realityDestResult, len(cands))
 	sem := make(chan struct{}, destProbeConcurrency)
 	var wg sync.WaitGroup
@@ -303,7 +597,7 @@ func probeRealityDestAll(ctx context.Context, cands []destCandidate, roots *x509
 				return
 			}
 			defer func() { <-sem }()
-			out[i] = probeRealityDest(ctx, c, roots)
+			out[i] = probeRealityDestN(ctx, c, roots, attempts)
 		}(i, c)
 	}
 	wg.Wait()
@@ -320,11 +614,18 @@ func destSNI(c destCandidate) string {
 
 // probeRealityDest 对一个目标握手多次，取中位耗时，并给出可用性结论。
 func probeRealityDest(ctx context.Context, c destCandidate, roots *x509.CertPool) realityDestResult {
+	return probeRealityDestN(ctx, c, roots, destProbeAttempts)
+}
+
+func probeRealityDestN(ctx context.Context, c destCandidate, roots *x509.CertPool, attempts int) realityDestResult {
+	if attempts < 1 {
+		attempts = 1
+	}
 	res := realityDestResult{Host: c.Host, Port: c.Port, SNI: destSNI(c)}
 
 	var samples []time.Duration
 	var last destHandshake
-	for i := 0; i < destProbeAttempts; i++ {
+	for i := 0; i < attempts; i++ {
 		h := handshakeDest(ctx, c, roots)
 		if h.err != nil {
 			// 第一次连不上就不再试：连续三次超时只会让界面等 12 秒才给同样的结论

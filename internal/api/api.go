@@ -179,6 +179,9 @@ func (a *Server) Handler() http.Handler {
 	// REALITY 握手目标实测：从这台服务器真握手几次，给出延迟 / TLS 版本 /
 	// 证书结论，供用户挑 dest（见 reality.go）。会替用户连外网，按 write 档。
 	mux.HandleFunc("POST /api/tools/reality-dest", a.write(a.handleRealityDestProbe))
+	// 同站 SNI 收集：读 dest 的证书，把里面每个域名逐个真握手验证，
+	// 只返回能填进 serverNames 的那些（见 reality.go）。同样会连外网。
+	mux.HandleFunc("POST /api/tools/reality-sni", a.write(a.handleRealitySNICollect))
 	mux.HandleFunc("POST /api/self-update", a.write(a.handleSelfUpdate))
 	// 变更通知：发一条测试事件，把错误原样返回（配错了要能立刻发现）
 	mux.HandleFunc("POST /api/notify/test", a.write(a.handleNotifyTest))

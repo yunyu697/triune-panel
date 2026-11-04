@@ -1656,12 +1656,17 @@ canvas{display:block;width:100%}
       <span class="mono">www.apple.com</span>）反而更容易被针对性封锁，xray 在启动时也会这么提醒。
       优先选<b>离服务器近</b>、别人不常填、且证书正常的大站。
     </p>
+    <p class="muted" style="font-size:12px;margin:-4px 0 10px">
+      「取 SNI」会读该目标的证书，把里面每个域名逐个真握手验证一遍——REALITY 只认
+      <span class="mono">serverNames</span> 里的名字，而该填哪些只能问证书。验过的可以一键并入。
+    </p>
     <div class="frm">
       <div class="full"><label>候选目标</label>
         <textarea id="dest_list" class="input mono" style="min-height:110px;font-size:12px"></textarea></div>
     </div>
     <p class="muted" id="dest_msg" style="font-size:12.5px;margin:8px 0 0"></p>
     <div id="dest_result"></div>
+    <div id="dest_sni"></div>
     <div class="foot">
       <button class="btn" data-act="closeModal" data-args='["mDest"]'>关闭</button>
       <button class="btn primary" data-act="runDestProbe">开始测速</button>
@@ -8470,7 +8475,15 @@ const IB_SS_NET = [["tcp,udp", "TCP + UDP（默认）"], ["tcp", "仅 TCP"], ["u
 const IB_HANDSHAKE_SITES = ["www.apple.com", "www.microsoft.com", "www.cloudflare.com",
   "addons.mozilla.org", "www.bing.com", "www.yahoo.com", "www.samsung.com",
   "gateway.icloud.com", "www.nvidia.com", "www.amd.com", "www.lovelive-anime.jp"];
-const IB_SPIDER = [["", "不指定（默认 /）"], ["/", "/"], ["/x", "/x"], ["/api/v1", "/api/v1"]];
+/* spiderX 没有「正确值」这回事：它只是握手成功后客户端去目标站点上「爬」的路径，
+   用来模仿真实浏览。固定填 / 是最常见的默认值，也正好是最好认的指纹，
+   所以新建时直接给一串随机的——想手填就在输入框里改。 */
+function realityRandSpider() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const b = new Uint8Array(12);
+  crypto.getRandomValues(b);
+  return "/" + Array.from(b, x => chars[x % chars.length]).join("");
+}
 
 /* 新建 Reality 入站的默认短 ID 与 spiderX（参考 3x-ui 的做法）。
    为什么不留空：
@@ -8484,7 +8497,7 @@ function realityRandHex(bytes) {
   return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 }
 function realityDefaultSettings() {
-  return { short_ids: [realityRandHex(8), realityRandHex(8), realityRandHex(4)], spider_x: "/" };
+  return { short_ids: [realityRandHex(8), realityRandHex(8), realityRandHex(4)], spider_x: realityRandSpider() };
 }
 
 // ibDynamic 按协议/传输/TLS 渲染需要的动态字段；表单值写回 settings
@@ -8621,7 +8634,12 @@ function ibDynamic(userTriggered) {
       <input id="ib_f_snames" class="input" value="${esc(s.server_names || s.server_name || "www.apple.com")}" placeholder="www.apple.com,apple.com"></div>`;
     tlsRows += `<div><label>shortIds <span class="muted" style="font-weight:400">（逗号分隔；留空=允许空 ID）</span></label>
       <input id="ib_f_shortids" class="input mono" value="${esc(Array.isArray(s.short_ids) ? s.short_ids.join(",") : (s.short_ids || s.short_id || ""))}" placeholder="ab12,cd34"></div>`;
-    tlsRows += `<div><label>spiderX</label>${sel("ib_f_spider", IB_SPIDER, s.spider_x || "")}</div>`;
+    tlsRows += `<div><label>spiderX <span class="muted" style="font-weight:400">（握手后爬的路径）</span></label>
+      <div style="display:flex;gap:6px">
+        <input id="ib_f_spider" class="input mono" style="flex:1;min-width:0" value="${esc(s.spider_x || "/")}" placeholder="/abc123">
+        <button class="btn sm" data-act="genSpider" title="重新生成一个随机路径">随机</button>
+      </div>
+      <span class="muted" style="font-size:11.5px">客户端握手成功后去目标站点的这个路径「爬」一下，模仿真实浏览；固定的 / 最好认</span></div>`;
     tlsRows += `<div><label>maxTimeDiff <span class="muted" style="font-weight:400">（毫秒，0=默认）</span></label>
       <input id="ib_f_mtd" class="input" type="number" min="0" value="${esc(s.max_time_diff || 0)}"></div>`;
   }
@@ -9017,6 +9035,19 @@ async function delInbound(id) {
   if (!(await ask("删除入站", "删除入站不会立即影响运行中的配置（下次应用后生效）。确定删除？"))) return;
   try { await req("/api/inbounds/"+id, { method:"DELETE" }); toast("已删除"); loadInbounds(); } catch(e){ toast(e.message,"err"); }
 }
+// genSpider 换一个随机 spiderX。同时写回 settings：动态字段是按 settings
+// 重建的，只改输入框的话，切一下传输方式就被冲掉了。
+function genSpider() {
+  const el = $("ib_f_spider");
+  if (!el) return;
+  const v = realityRandSpider();
+  el.value = v;
+  const s = ibGetSettings();
+  s.spider_x = v;
+  ibPutSettings(s);
+  toast("已生成随机 spiderX：" + v, "info");
+}
+
 async function genReality(quiet) {
   try {
     // 不传 core：密钥是标准 X25519，后端用 crypto/ecdh 直接算，与内核无关
@@ -9060,6 +9091,9 @@ async function ibCopyPub() {
    REALITY 服务端收到 ClientHello 后会把它转给 dest，dest 慢的话每个客户端
    每次握手都要多等这么久。所以这个数只能在这里测，在家里测没有意义。 */
 let __destResults = [];
+// 上一次「取 SNI」验过的名字（小写）。只用来判断「serverNames 首位可不可信」，
+// 不做任何回填——验过的名单在弹窗里看得见，回填由用户点按钮决定。
+let __sniVerified = null;
 
 function openDestPick() {
   const cur = ($("ib_f_handshake") || {}).value || "";
@@ -9072,7 +9106,9 @@ function openDestPick() {
   $("dest_msg").textContent = "";
   $("dest_result").innerHTML = `<div class="muted" style="font-size:12.5px">
     还没测。点「开始测速」会从这台服务器逐个真握手 3 次，按「可用 → 证书对得上 → 快」排序。</div>`;
+  $("dest_sni").innerHTML = "";
   __destResults = [];
+  __sniVerified = null;
   openModal("mDest");
 }
 
@@ -9098,6 +9134,8 @@ async function runDestProbe() {
   if (!cands.length) { toast("先填至少一个目标", "warn"); return; }
   $("dest_msg").textContent = `正在实测 ${cands.length} 个目标（每个握手 3 次取中位数）…`;
   $("dest_result").innerHTML = "";
+  $("dest_sni").innerHTML = "";
+  __sniVerified = null;
   try {
     const j = await req("/api/tools/reality-dest", { method: "POST", body: { candidates: cands } });
     __destResults = j.results || [];
@@ -9131,15 +9169,99 @@ function renderDestResults() {
       <td class="ta-r num" style="white-space:nowrap">${r.ok ? r.ms + " ms" : "—"}</td>
       <td style="white-space:nowrap">${badge}${best}</td>
       <td style="font-size:12px;white-space:normal;word-break:break-word">${escHtml(r.detail || "")}${r.warning ? `<div class="muted" style="margin-top:2px">⚠ ${escHtml(r.warning)}</div>` : ""}</td>
-      <td class="ta-r"><button class="btn sm" data-act="useDest" data-args="${escJson([i])}"${r.ok ? "" : " disabled"}>使用</button></td>
+      <td class="ta-r" style="white-space:nowrap">
+        <button class="btn sm" data-act="useDest" data-args="${escJson([i])}"${r.ok ? "" : " disabled"}>使用</button>
+        <button class="btn sm" data-act="collectSNI" data-args="${escJson([i])}"${r.ok ? "" : " disabled"} title="读这个目标的证书，验出能填进 serverNames 的域名">取 SNI</button>
+      </td>
     </tr>`;
   }).join("");
   // table-layout:fixed + 固定列宽：失败行的 warning 是一长句，自动布局会把表格
   // 撑到弹窗外面，把「使用」按钮推到水平滚动区——用户根本看不见该点哪儿。
   $("dest_result").innerHTML = `<div class="tbl-wrap" style="margin-top:8px"><table style="table-layout:fixed">
-    <colgroup><col style="width:30%"><col style="width:76px"><col style="width:112px"><col><col style="width:64px"></colgroup>
+    <colgroup><col style="width:26%"><col style="width:72px"><col style="width:104px"><col><col style="width:132px"></colgroup>
     <thead><tr><th>目标</th><th class="ta-r">握手</th><th>结论</th><th>说明</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
+}
+
+/* ---- 同站 SNI 收集 ----
+   目标择优回答「填哪个 dest」，这里回答「serverNames 填什么」。
+   REALITY 只接受名单里的 SNI，而该填哪些取决于 dest 那张证书覆盖了谁；
+   接口会把证书里的域名逐个真握手验一遍，只有验过的才返回。 */
+async function collectSNI(i) {
+  const r = (__destResults || [])[i];
+  if (!r) return;
+  $("dest_msg").textContent = `正在读 ${r.host} 的证书，并逐个验证…`;
+  $("dest_sni").innerHTML = `<div class="muted" style="font-size:12.5px;margin-top:8px">读取中…</div>`;
+  try {
+    const j = await req("/api/tools/reality-sni", { method:"POST", body:{ host: r.host, port: r.port } });
+    renderSNIPanel(r, j);
+    $("dest_msg").textContent = `「${r.host}」验出 ${(j.snis || []).length} 个可用 SNI（共试 ${j.tried} 个）`;
+    // 结果在目标表格下方，弹窗高度有限时会被挡在折叠线外。
+    // 不用平滑滚动：动画途中按钮还在动，点下去容易点空。
+    const panel = $("dest_sni");
+    if (panel && panel.scrollIntoView) panel.scrollIntoView({ block: "nearest" });
+  } catch (e) {
+    $("dest_msg").textContent = "";
+    $("dest_sni").innerHTML = `<div style="color:var(--err);font-size:12.5px;margin-top:8px">取 SNI 失败：${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderSNIPanel(r, j) {
+  const cert = j.cert || {};
+  __sniVerified = new Set((j.snis || []).map(s => String(s.sni || "").toLowerCase()));
+  const meta = [cert.issuer || "",
+    cert.not_after ? "到期 " + cert.not_after : "",
+    cert.days_left > 0 ? "剩 " + cert.days_left + " 天" : ""].filter(Boolean).join(" · ");
+  const wc = (cert.wildcards || []).length
+    ? `<div class="muted" style="font-size:11.5px;margin-top:2px">
+        证书还覆盖 ${(cert.wildcards || []).map(escHtml).join("、")}——单级子域都能用，但下面只列真验过的</div>`
+    : "";
+  const snis = j.snis || [];
+  const rows = snis.map(s => `<tr>
+      <td class="mono" style="font-size:12px">${escHtml(s.sni)}</td>
+      <td class="muted" style="font-size:11.5px">${escHtml(s.source || "")}</td>
+      <td class="ta-r num" style="font-size:11.5px">${s.ms} ms</td>
+      <td class="ta-r"><button class="btn sm" data-act="mergeSNI" data-args="${escJson([[s.sni]])}">加入</button></td>
+    </tr>`).join("");
+  const rej = (j.rejected || []).map(x =>
+    `<div class="muted" style="font-size:11.5px">✗ <span class="mono">${escHtml(x.sni)}</span> — ${escHtml(x.detail || "")}</div>`).join("");
+  $("dest_sni").innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;
+      background:rgba(127,127,127,.07);border:1px solid rgba(127,127,127,.22)">
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <b style="font-size:12.5px">${escHtml(r.host)} 的合法 SNI</b>
+      <span class="muted" style="font-size:11.5px">${escHtml(meta)}</span>
+      <span style="flex:1"></span>
+      ${snis.length ? `<button class="btn sm primary" data-act="mergeSNI" data-args="${escJson([snis.map(s => s.sni)])}">全部并入 serverNames</button>` : ""}
+    </div>
+    ${wc}
+    ${snis.length ? `<div class="tbl-wrap" style="margin-top:6px"><table style="table-layout:fixed">
+        <colgroup><col><col style="width:92px"><col style="width:66px"><col style="width:56px"></colgroup>
+        <thead><tr><th>域名</th><th>来源</th><th class="ta-r">握手</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`
+      : `<div class="muted" style="font-size:12px">一个都没验过。${escHtml(j.note || "")}</div>`}
+    ${rej ? `<div style="margin-top:8px"><div class="muted" style="font-size:11.5px">没验过的（不能填）：</div>${rej}</div>` : ""}
+    ${j.note && snis.length ? `<div class="muted" style="font-size:11.5px;margin-top:8px">${escHtml(j.note)}</div>` : ""}
+  </div>`;
+}
+
+// mergeSNI 把验过的域名并进 serverNames。只加不换：用户自己填的其它名字
+// 可能来自别处（多目标轮换），删掉等于替他做决定。
+function mergeSNI(names) {
+  const sn = $("ib_f_snames");
+  if (!sn) return;
+  const cur = String(sn.value || "").split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+  const seen = new Set(cur.map(x => x.toLowerCase()));
+  let added = 0;
+  (names || []).forEach(n => {
+    n = String(n || "").trim().toLowerCase();
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    cur.push(n);
+    added++;
+  });
+  sn.value = cur.join(",");
+  toast(added ? `已并入 ${added} 个 SNI（现在共 ${cur.length} 个）` : "这些域名已经在 serverNames 里了",
+    added ? "ok" : "warn");
 }
 
 function useDest(i) {
@@ -9148,16 +9270,32 @@ function useDest(i) {
   const oldHost = ($("ib_f_handshake").value || "").trim().replace(/:\d+$/, "");
   $("ib_f_handshake").value = r.host;
   $("ib_f_hsport").value = r.port;
-  // SNI 要跟着 dest 走：REALITY 只接受 serverNames 里的 SNI，换了目标却留着
-  // 旧 SNI，客户端握手会被直接拒。只在「没自己改过」时同步，用户填的多个
-  // SNI 保持原样，只提示一句。
+  // SNI 要跟着 dest 走：REALITY 只接受 serverNames 里的 SNI，而且导出时客户端
+  // 拿**第一项**当 SNI——换了目标却把旧目标的域名留在首位，客户端就会拿一个
+  // 新 dest 证书覆盖不到的名字去握手，直接连不上。
+  //
+  // 所以这里只做两件事：摘掉「旧 dest 主机名」那一项（它只是旧目标的镜像），
+  // 再确保新目标的 SNI 在名单里。用户自己填的其它名字一律不动——那可能是
+  // 他按轮换配的。
   const sn = $("ib_f_snames");
-  const cur = (sn.value || "").trim();
-  if (!cur || cur === oldHost) {
-    sn.value = r.sni || r.host;
-    toast(`已选用 ${r.host}:${r.port}，SNI 同步为 ${sn.value}`);
+  const name = r.sni || r.host;
+  const cur = String(sn.value || "").split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+  // 目标没换（重复点同一个「使用」）时不要摘：那一项就是当前目标的域名，仍然有效，
+  // 摘掉再追加只会把首位换掉。
+  const changing = oldHost && oldHost.toLowerCase() !== String(r.host).toLowerCase();
+  const kept = changing ? cur.filter(x => x.toLowerCase() !== oldHost.toLowerCase()) : cur.slice();
+  const has = kept.some(x => x.toLowerCase() === name.toLowerCase());
+  if (!has) kept.push(name);
+  sn.value = kept.join(",");
+  if (kept.length === 1) {
+    toast(`已选用 ${r.host}:${r.port}，SNI 同步为 ${name}`);
   } else {
-    toast(`已选用 ${r.host}:${r.port}；SNI 仍是你填的 ${cur}，请确认它也在这个目标的证书里`, "warn");
+    // 客户端导出时取首位当 SNI。首位是不是可信的：等于目标自己的名字，
+    // 或者刚被「取 SNI」验过。都不是就提醒一句，别让人带着一个错的首位走。
+    const first = String(kept[0] || "").toLowerCase();
+    const trusted = first === name.toLowerCase() || (__sniVerified && __sniVerified.has(first));
+    toast(`已选用 ${r.host}:${r.port}；serverNames 现在 ${kept.length} 个，客户端会用首位 ${kept[0]}` +
+      (trusted ? "" : "——它没被验证过是否在该目标的证书里"), trusted ? "ok" : "warn");
   }
   closeModal("mDest");
 }

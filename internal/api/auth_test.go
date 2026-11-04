@@ -69,6 +69,8 @@ var protectedRoutes = []struct{ method, path string }{
 	{"GET", "/api/traffic/daily"},
 	{"GET", "/api/traffic/live"},
 	{"POST", "/api/tools/reality-keypair"},
+	{"POST", "/api/tools/reality-dest"},
+	{"POST", "/api/tools/reality-sni"},
 	{"GET", "/api/tools/uuid"},
 	{"GET", "/api/version"},
 	{"POST", "/api/self-update"},
