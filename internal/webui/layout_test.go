@@ -187,3 +187,95 @@ func TestMobileNavAndTableHints(t *testing.T) {
 		t.Error("表格提示元素类名变了，CSS 里的 .tbl-hint 会失配")
 	}
 }
+
+// cssBlock 取出以 header 开头的那段（含 @media 头）大括号平衡的内容。
+// 窄屏规则全在 @media 里，cssRule 只会命中桌面那条同名规则，所以需要这个。
+func cssBlock(t *testing.T, css, header string) string {
+	t.Helper()
+	i := strings.Index(css, header)
+	if i < 0 {
+		t.Fatalf("index.html 里找不到 %q", header)
+	}
+	depth := 0
+	for j := i; j < len(css); j++ {
+		switch css[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return css[i : j+1]
+			}
+		}
+	}
+	t.Fatalf("%q 的大括号不闭合", header)
+	return ""
+}
+
+// TestMobileUsesDocumentScroll 窄屏必须交还给文档滚动。
+//
+// 原来窄屏是「.shell 固定 100dvh + .main 内部滚动」。Android（Edge / 系统浏览器 /
+// Chrome 都一样）上地址栏伸缩会让 .shell 反复改高度，而滚动发生在 .main 内部，
+// 合成器在重排中途会丢栅格 tile——表现是整页从某一行开始变白、后面的内容不再
+// 绘制、底部滑也滑不到。桌面没有地址栏伸缩，所以这个问题在桌面上完全看不出来。
+//
+// 现在窄屏改成文档滚动（外壳高度由内容决定、.main 不再裁剪），导航条自己 sticky，
+// 顶栏不 sticky 以免和导航条叠在一起。这几条少一条就会退回「白块」。
+func TestMobileUsesDocumentScroll(t *testing.T) {
+	block := cssBlock(t, string(indexHTML), "@media (max-width:960px){")
+	for _, frag := range []string{
+		"html,body{height:auto}",
+		".shell{flex-direction:column;height:auto;min-height:0;overflow:visible}",
+		".main{overflow:visible;min-height:0}",
+		"position:sticky;top:0}",               // 导航条
+		"position:static;background:var(--bg)", // 顶栏
+	} {
+		if !strings.Contains(block, frag) {
+			t.Errorf("窄屏缺 %q：Android 上会退回「固定高度外壳 + 内部滚动」，整页可能变白", frag)
+		}
+	}
+}
+
+// 整页入场动画会为整个 view 建一个合成层，部分 Android GPU 上这层画不出来，
+// 切页后就是一片白；全屏 backdrop-filter 则会让弹窗打开瞬间白闪/黑闪。
+// 两者都只在窄屏关掉。
+func TestMobileDropsHeavyEffects(t *testing.T) {
+	css := string(indexHTML)
+	if !strings.Contains(css, "@media (max-width:960px){.view.active{animation:none}}") {
+		t.Error("窄屏没关掉 .view 入场动画：整页合成层在部分 Android GPU 上画不出来")
+	}
+	if !strings.Contains(css, "@media (max-width:960px){.overlay{backdrop-filter:none;-webkit-backdrop-filter:none}}") {
+		t.Error("窄屏没关掉遮罩的 backdrop-filter：弹窗打开瞬间会白闪/黑闪")
+	}
+}
+
+// 切页要把滚动位置归零：窄屏是文档滚动、桌面是 .main 内部滚动，两个都要清。
+// 不清的话从长页切到短页会停在半空，看着像「上面缺了一块」。
+func TestGotoResetsScroll(t *testing.T) {
+	js, err := scriptAssets.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	for _, frag := range []string{"window.scrollTo(0, 0)", "mn.scrollTop = 0"} {
+		if !strings.Contains(s, frag) {
+			t.Errorf("goto 里缺 %q：切页会停在上一个页面的滚动位置", frag)
+		}
+	}
+}
+
+// 弹窗开着时要锁住页面滚动（窄屏是文档滚动，不锁的话手指在遮罩上一拖，
+// 背后的页面跟着滑）。锁必须按 DOM 现状重算，不能计数——计数漏减会把页面永久锁死。
+func TestBodyScrollLockFollowsModal(t *testing.T) {
+	js, err := scriptAssets.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	if !strings.Contains(s, `document.querySelector(".overlay.show") ? "hidden" : ""`) {
+		t.Error("syncBodyLock 没按 .overlay.show 重算：用计数锁会漏减，页面可能被永久锁死")
+	}
+	if n := strings.Count(s, "syncBodyLock()") - strings.Count(s, "function syncBodyLock()"); n < 4 {
+		t.Errorf("syncBodyLock 只被调了 %d 处（openModal/closeModal/mMustChange/mHttps）", n)
+	}
+}

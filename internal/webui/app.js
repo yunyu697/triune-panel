@@ -263,6 +263,11 @@ function goto(v, sect) {
   CURRENT = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  // 切页回到顶部：窄屏是文档滚动、桌面是 .main 内部滚动，两个都归零。
+  // 不归零的话从长页切到短页会停在半空，看着像「上面缺了一块」。
+  window.scrollTo(0, 0);
+  const mn = document.querySelector(".main");
+  if (mn) mn.scrollTop = 0;
   scrollNavToActive();
   markScrollableTables();
   $("pageTitle").textContent = TITLES[v];
@@ -295,8 +300,15 @@ function openModal(id){
   // 上次关掉时停在中段的弹窗，再打开应该从头看；顺带重算表格横滑提示
   const m = ov.querySelector(".modal"); if (m) m.scrollTop = 0;
   markScrollableTables();
+  syncBodyLock();
 }
-function closeModal(id){ $(id).classList.remove("show"); }
+function closeModal(id){ $(id).classList.remove("show"); syncBodyLock(); }
+/* 弹窗开着时锁住页面滚动。窄屏是文档滚动，不锁的话手指在遮罩上一拖，
+   背后的页面跟着滑，看着像整页在抖。按 DOM 现状重算而不做计数——
+   计数一旦漏减就会把页面永久锁死，那是比不锁严重得多的故障。 */
+function syncBodyLock(){
+  document.body.style.overflow = document.querySelector(".overlay.show") ? "hidden" : "";
+}
 function ask(title, text) {
   return new Promise(resolve => {
     $("cf_title").textContent = title; $("cf_text").textContent = text;
@@ -1060,7 +1072,7 @@ async function login() {
       $("login_last").textContent = ` · 上次登录 ${j.last_ip}`;
     }
     // 默认密码未改：强制改密后才能使用
-    if (j.must_change) { $("mMustChange").classList.add("show"); $("mc_pass").focus(); return; }
+    if (j.must_change) { $("mMustChange").classList.add("show"); syncBodyLock(); $("mc_pass").focus(); return; }
     showApp();
   } catch (e) {
     toast(String(e.message).includes("fetch")
@@ -6017,6 +6029,7 @@ function openHttpsModal() {
   $("hs_domain").value = $("s_acme_domain").value || $("s_host").value || "";
   $("hs_email").value = $("s_acme_email").value || "";
   $("mHttps").classList.add("show");
+  syncBodyLock();
   $("hs_domain").focus();
 }
 async function submitHTTPS() {
@@ -6678,6 +6691,21 @@ window.addEventListener("resize", syncTopbarH);
 if (window.ResizeObserver) {
   const tb = document.querySelector(".topbar");
   if (tb) new ResizeObserver(syncTopbarH).observe(tb);
+}
+
+/* 窄屏导航条（.side 变成横向一行）是 sticky 的，设置页的分组条要钉在它下面，
+   高度同样随字号和安全区变化，一起量进 --nav-h。桌面上 .side 是整列侧栏，
+   量出来的值只被窄屏媒体查询用，不影响桌面布局。 */
+function syncNavH() {
+  const s = document.querySelector(".side");
+  if (!s || !s.offsetHeight) return;
+  document.documentElement.style.setProperty("--nav-h", s.offsetHeight + "px");
+}
+syncNavH();
+window.addEventListener("resize", syncNavH);
+if (window.ResizeObserver) {
+  const s = document.querySelector(".side");
+  if (s) new ResizeObserver(syncNavH).observe(s);
 }
 
 const SET_SECTS = {
