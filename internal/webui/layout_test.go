@@ -131,15 +131,20 @@ func mustReadAsset(t *testing.T, name string) []byte {
 
 // viewport-fit=cover 是 env(safe-area-inset-*) 生效的前提；少了它，下面所有
 // 让开安全区的写法都取 0，加到主屏后底部按钮会被 Home Indicator 压住。
+//
+// 导航条挪到底部之后，顶部安全区改由顶栏让开、底部安全区由导航条自己让开
+// （--nav-h 把这段内距一起量进去，所以内容区的底部留白自动跟着变）。
 func TestMobileSafeArea(t *testing.T) {
 	css := string(indexHTML)
 	if !strings.Contains(css, "initial-scale=1,viewport-fit=cover") {
 		t.Error("viewport 缺 viewport-fit=cover：env(safe-area-inset-*) 会全部取 0")
 	}
 	for _, frag := range []string{
-		"calc(48px + env(safe-area-inset-bottom))",        // .content 底部留白
-		"bottom:calc(12px + env(safe-area-inset-bottom))", // 设置页常驻保存条
-		"padding:max(8px,env(safe-area-inset-top))",       // 窄屏导航条
+		"padding:calc(12px + env(safe-area-inset-top))", // 顶栏让开状态栏 / 刘海
+		"calc(8px + env(safe-area-inset-bottom))",       // 底部导航条让开 Home Indicator
+		"max(8px,env(safe-area-inset-right))",           // 横屏刘海
+		"bottom:calc(var(--nav-h,60px) + 10px)",         // 设置页常驻保存条抬到导航条上方
+		"calc(28px + var(--nav-h,60px))",                // .content 底部留白
 	} {
 		if !strings.Contains(css, frag) {
 			t.Errorf("CSS 缺安全区适配 %q：iPhone 上内容会被状态栏/Home Indicator 遮住", frag)
@@ -219,20 +224,52 @@ func cssBlock(t *testing.T, css, header string) string {
 // 合成器在重排中途会丢栅格 tile——表现是整页从某一行开始变白、后面的内容不再
 // 绘制、底部滑也滑不到。桌面没有地址栏伸缩，所以这个问题在桌面上完全看不出来。
 //
-// 现在窄屏改成文档滚动（外壳高度由内容决定、.main 不再裁剪），导航条自己 sticky，
-// 顶栏不 sticky 以免和导航条叠在一起。这几条少一条就会退回「白块」。
+// 现在窄屏改成文档滚动（外壳高度由内容决定、.main 不再裁剪），导航条固定在底部，
+// 顶栏不 sticky。这几条少一条就会退回「白块」或「顶部导航」。
 func TestMobileUsesDocumentScroll(t *testing.T) {
 	block := cssBlock(t, string(indexHTML), "@media (max-width:960px){")
 	for _, frag := range []string{
 		"html,body{height:auto}",
 		".shell{flex-direction:column;height:auto;min-height:0;overflow:visible}",
 		".main{overflow:visible;min-height:0}",
-		"position:sticky;top:0}",               // 导航条
-		"position:static;background:var(--bg)", // 顶栏
+		"position:fixed;left:0;right:0;bottom:0", // 导航条钉在底部
+		"position:static;background:var(--bg)",   // 顶栏
 	} {
 		if !strings.Contains(block, frag) {
-			t.Errorf("窄屏缺 %q：Android 上会退回「固定高度外壳 + 内部滚动」，整页可能变白", frag)
+			t.Errorf("窄屏缺 %q：Android 上会退回「固定高度外壳 + 内部滚动」或顶部导航", frag)
 		}
+	}
+}
+
+// 导航条固定到底部之后，内容区必须让出它的高度，否则最后一张卡片被压在导航条下面。
+// 高度用 JS 量的 --nav-h（导航条随字号、安全区变化），不能写死。
+func TestMobileContentClearsBottomNav(t *testing.T) {
+	block := cssBlock(t, string(indexHTML), "@media (max-width:960px){")
+	if !strings.Contains(block, "calc(28px + var(--nav-h,60px))") {
+		t.Error("窄屏 .content 底部没让出 --nav-h：最后一张卡片会被底部导航条压住")
+	}
+	if !strings.Contains(string(indexHTML), ".set-bar{bottom:calc(var(--nav-h,60px) + 10px)}") {
+		t.Error("窄屏常驻保存条没抬到导航条上方：保存按钮会被导航条盖住")
+	}
+}
+
+// 「应用配置」在手机上是常驻动作：导航条左侧的品牌图标在手机上只是装饰，
+// 让出这块位置给它。必须留在导航条内（不能浮在内容上挡住图表），
+// 且不能被卷进 #nav 的横向滚动区。
+func TestMobilePinnedApplyButton(t *testing.T) {
+	css := string(indexHTML)
+	if !strings.Contains(css, ".side-apply{display:none}") {
+		t.Error("缺 .side-apply 的桌面隐藏规则：桌面侧栏会多出一个「应用」按钮")
+	}
+	block := cssBlock(t, string(indexHTML), "@media (max-width:960px){\n  .side .logo{display:none}")
+	for _, frag := range []string{".side .logo{display:none}", ".side-apply{display:inline-flex"} {
+		if !strings.Contains(block, frag) {
+			t.Errorf("窄屏缺 %q：常驻「应用」按钮没地方放", frag)
+		}
+	}
+	i, j := strings.Index(css, `id="sideApply"`), strings.Index(css, `<nav id="nav">`)
+	if i < 0 || j < 0 || i > j {
+		t.Error("「应用」按钮必须在 #nav 之前（放进去会跟着导航一起横滑走）")
 	}
 }
 
@@ -277,5 +314,25 @@ func TestBodyScrollLockFollowsModal(t *testing.T) {
 	}
 	if n := strings.Count(s, "syncBodyLock()") - strings.Count(s, "function syncBodyLock()"); n < 4 {
 		t.Errorf("syncBodyLock 只被调了 %d 处（openModal/closeModal/mMustChange/mHttps）", n)
+	}
+}
+
+// 图表画布绝不能把宽度钉成内联像素值。
+//
+// 旧实现是 `clientWidth || 父宽 || 600` 再 `style.width = W + "px"`：容器还没布局
+// （display:none 的 view、刚插入的节点）时量到 0，就回落到 600 并把画布钉成 600px
+// 固定宽。卡片内宽只有 314px，右边直接被裁掉——手机上「模块太宽、显示不全」就是
+// 这么来的。宽度一律交给 CSS（.chart-wrap canvas{width:100%}），JS 只设位图尺寸。
+func TestChartSetupNeverPinsWidth(t *testing.T) {
+	js, err := scriptAssets.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	if strings.Contains(s, `cv.style.width = W + "px"`) {
+		t.Error("chartSetup 又把画布宽度钉成内联像素了：容器量到 0 时会画成 600px 宽，手机上右侧被裁掉")
+	}
+	if !strings.Contains(s, "if (!W) return null;") {
+		t.Error("chartSetup 量不到宽度时必须放弃这一轮（返回 null），否则会拿兜底值硬画")
 	}
 }

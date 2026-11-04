@@ -261,6 +261,9 @@ function goto(v, sect) {
   // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
   if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
   CURRENT = v;
+  // 给 CSS 一个「现在是哪一页」的钩子：手机端常驻的「应用」按钮在设置页（有自己的
+  // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
+  document.body.dataset.view = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
   // 切页回到顶部：窄屏是文档滚动、桌面是 .main 内部滚动，两个都归零。
@@ -5353,16 +5356,18 @@ window.addEventListener("resize", () => { if (typeof redrawCharts === "function"
 /* ================= 图表引擎（纯 Canvas，无外部依赖） ================= */
 function chartSetup(cv, h) {
   const dpr = window.devicePixelRatio || 1;
-  // 先清掉上次的内联宽度，让 clientWidth 反映 CSS（100%）测出的真实容器宽；
-  // 否则窗口变窄后画布永远是旧宽度。旧实现强制最小 220px 且只设 height 不设
-  // width，窄容器（内核状态环/迷你走势图）里 220px 的位图被 CSS 压回 ~100px，
-  // 圆环被水平压缩成竖椭圆——这就是"图表变形"的根因。
-  cv.style.width = "";
-  const W = Math.max(80, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600);
   const H = h || 200;
+  // 宽度一律交给 CSS（.chart-wrap canvas{width:100%}），这里只按**量到的实际宽度**
+  // 设位图尺寸，绝不写死 style.width。
+  // 旧实现是 `clientWidth || 父宽 || 600` 再 `style.width = W + "px"`：容器还没布局
+  // （display:none 的 view、刚插入的节点）时量到 0，就回落到 600 并把画布钉成 600px
+  // 固定宽——卡片内宽只有 314px，右边直接被裁掉，正是手机上「图表宽度太大、
+  // 显示不全」的成因。现在量不到就这轮不画，等切页/缩放的 redraw 再来。
+  cv.style.width = "";
+  const W = Math.round(cv.getBoundingClientRect().width);
+  if (!W) return null;
   cv.width = Math.round(W * dpr);
   cv.height = Math.round(H * dpr);
-  cv.style.width = W + "px";
   cv.style.height = H + "px";
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -5395,7 +5400,8 @@ function fmtRate(b) {
 
 /* —— 流量趋势：双序列平滑面积图 + 悬停十字线 —— */
 function drawFlowChart(cv, points, tipEl) {
-  const { ctx, W, H } = chartSetup(cv, cv.id === "ov_chart" ? 268 : 236);
+  const s = chartSetup(cv, cv.id === "ov_chart" ? 268 : 236); if (!s) return;
+  const { ctx, W, H } = s;
   if (!points || !points.length) return;
   const maxV = Math.max(1, ...points.map(p => p.up + p.down));
   const nice = niceCeil(maxV);
@@ -5505,7 +5511,8 @@ function drawCrosshair(cv, g, idx) {
 
 /* —— 迷你折线（KPI 卡内） —— */
 function drawSpark(cv, values, color) {
-  const { ctx, W, H } = chartSetup(cv, 52);
+  const s = chartSetup(cv, 52); if (!s) return;
+  const { ctx, W, H } = s;
   if (!values || values.length < 2) return;
   const max = Math.max(1, ...values);
   const pts = values.map((v, i) => [ (W - 4) * i / (values.length - 1) + 2, H - 4 - (H - 10) * (v / max) ]);
@@ -5520,7 +5527,8 @@ function drawSpark(cv, values, color) {
 
 /* —— 实时速率双线 —— */
 function drawLiveChart(cv, hist) {
-  const { ctx, W, H } = chartSetup(cv, 120);
+  const s = chartSetup(cv, 120); if (!s) return;
+  const { ctx, W, H } = s;
   if (!hist || hist.length < 2) {
     ctx.fillStyle = cssVar("--muted"); ctx.font = "12px " + (cssVar("--font") || "sans-serif");
     ctx.textAlign = "center"; ctx.fillText("等待采样数据…", W / 2, H / 2);
@@ -5558,7 +5566,8 @@ function drawLiveChart(cv, hist) {
 
 /* —— 环形图 —— */
 function drawDonut(cv, items) {
-  const { ctx, W, H } = chartSetup(cv, 172);
+  const s = chartSetup(cv, 172); if (!s) return;
+  const { ctx, W, H } = s;
   const total = items.reduce((s, i) => s + i.value, 0);
   const cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 12, ri = r * 0.62;
   if (!total) {
@@ -5590,7 +5599,8 @@ function drawDonut(cv, items) {
 
 /* —— 状态环（内核运行状态） —— */
 function drawRing(cv, pct, color, label) {
-  const { ctx, W, H } = chartSetup(cv, 92);
+  const s = chartSetup(cv, 92); if (!s) return;
+  const { ctx, W, H } = s;
   const cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 9, lw = 7;
   ctx.lineCap = "round";
   ctx.strokeStyle = cssVar("--line"); ctx.lineWidth = lw;

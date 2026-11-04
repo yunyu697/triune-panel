@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.6 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -244,8 +244,14 @@ body[data-role="admin"] .need-owner{display:none!important}
   html,body{height:auto}
   .shell{flex-direction:column;height:auto;min-height:0;overflow:visible}
   .main{overflow:visible;min-height:0}
-  .side{width:100%;flex-direction:row;align-items:center;padding:8px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);
-    position:sticky;top:0}
+  /* 导航条放到底部：单手握手机时拇指在下方，顶部导航每次都要把手挪上去。
+     position:fixed 之后它脱离文档流，内容底部必须留出它的高度（--nav-h，JS 量的），
+     否则最后一张卡片会被压在导航条下面。 */
+  .side{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;
+    width:100%;flex-direction:row;align-items:center;overflow-x:auto;
+    padding:8px max(8px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
+    border-right:none;border-top:1px solid var(--line);
+    box-shadow:0 -12px 28px -22px rgba(0,0,0,.55)}
   .logo{padding:0 8px 0 4px}.logo .logo-v{display:none}
   .nav-sec{display:none}
   /* #nav 平时没有样式（块级，导航项竖着排）。窄屏把 .side 改成 row 之后，
@@ -263,19 +269,17 @@ body[data-role="admin"] .need-owner{display:none!important}
   .side-foot .theme-btn{width:auto;padding:7px 9px}
   .side-foot .theme-btn span{display:none}
   .logo b{display:none}
-  .content{padding:18px max(16px,env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
-  /* 顶栏不再 sticky：手机上导航条已经钉在顶部，两条都钉会叠在一起。
-     它只是「当前页标题 + 实时速率」，滚走不影响操作，正好把高度让给内容。
-     毛玻璃也去掉——顶栏下面一直在滚，部分 Android GPU 要整块重绘，滚动时会闪。 */
-  .topbar{padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+  /* 底部要留出固定导航条的高度（--nav-h，JS 量的），否则最后一张卡片会被压在它下面 */
+  .content{padding:18px max(16px,env(safe-area-inset-right)) calc(28px + var(--nav-h,60px)) max(16px,env(safe-area-inset-left))}
+  /* 导航条移到底部之后，顶部安全区（刘海 / 状态栏）改由顶栏让开；
+     顶栏本身仍不 sticky——它只是「当前页标题 + 实时速率」，滚走正好把高度让给内容。
+     毛玻璃也去掉：顶栏下面一直在滚，部分 Android GPU 要整块重绘，滚动时会闪。 */
+  .topbar{padding:calc(12px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
     position:static;background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
   /* 登录页那两个 820/640px 的模糊圆：动画会持续重绘，filter:blur 又会为整块
      建一个离屏层，低端 Android 上这就是登录页闪烁/白屏的常见来源。手机上停掉
      动画并去掉 blur——径向渐变本身边缘就是软的，视觉差别很小。 */
   .login-wrap::before,.login-wrap::after{animation:none;filter:none}
-  /* 加到主屏（standalone）时顶部状态栏会压在导航条上，横屏刘海又会切掉左右
-     第一个入口。四边都让开安全区；普通 Safari 下 env() 取 0，桌面无变化。 */
-  .side{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 8px max(8px,env(safe-area-inset-left))}
 }
 
 /* ============ 卡片 ============ */
@@ -306,8 +310,8 @@ body[data-role="admin"] .need-owner{display:none!important}
   background:linear-gradient(to bottom,var(--bg),transparent)}
 .set-tabs[hidden]{display:none}
 .set-tabs-hint{font-size:13px;line-height:1.5;flex:1;min-width:200px}
-/* 窄屏顶栏不再 sticky，分组条改钉在导航条下面；导航条高度同样是量出来的。 */
-@media (max-width:960px){.set-tabs{top:var(--nav-h,56px)}}
+/* 窄屏顶栏不再 sticky、导航条移到了底部，分组条直接钉在视口最上方。 */
+@media (max-width:960px){.set-tabs{top:0}}
 .card[hidden]{display:none}
 /* 卡片底部操作条：把「保存」这类按钮和上方的说明文字隔开 */
 .card-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -327,7 +331,31 @@ body[data-role="admin"] .need-owner{display:none!important}
 .set-bar .sb-hint b{color:var(--fg);font-weight:600}
 .set-bar .btn{flex:none}
 @media (max-width:640px){.set-bar .sb-hint{display:none}}
+/* 窄屏导航条固定在底部，常驻保存条必须抬到它上面，否则「保存」正好被压在
+   导航条底下——点得到的是导航项，不是保存。 */
+@media (max-width:960px){.set-bar{bottom:calc(var(--nav-h,60px) + 10px)}}
+
+/* 手机上「应用配置」常驻：底部导航一行塞不下 11 个入口，最常用的那个不能靠横滑去找。
+   做法是把导航条左侧的品牌图标让出来——它在手机上只剩一个装饰用的盾牌（文字早就
+   藏了），而「应用」是每次改完配置都要点的。放在导航条里而不是浮在内容上，就不会
+   挡住图表，也不用为了它多留一段底部空白。 */
+.side-apply{display:none}
+@media (max-width:960px){
+  .side .logo{display:none}
+  .side-apply{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;
+    height:40px;padding:0 12px;margin-right:4px;border:none;border-radius:10px;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));color:var(--on-acc);
+    font:600 13px/1 var(--font);cursor:pointer;
+    box-shadow:0 6px 14px -8px rgba(20,40,80,.6)}
+  .side-apply:active{transform:translateY(1px)}
+  /* 已经在应用页时不必再强调，跟导航项一样只留「当前」的观感 */
+  body[data-view="apply"] .side-apply{background:var(--acc-soft);color:var(--acc-text);box-shadow:none}
+}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+/* 网格子项默认 min-width:auto（不肯小于内容宽度）。里面一旦有比列还宽的东西，
+   整列会被撑宽、右侧直接被裁掉——手机上的「模块太宽、显示不全」就是这么来的。
+   图表画布尤其危险：旧实现会把 canvas 钉成固定像素宽。归零让列按容器收缩。 */
+.grid-2>*,.grid-3>*,.kpis>*{min-width:0}
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 @media (max-width:1080px){.grid-3{grid-template-columns:1fr}}
 @media (max-width:880px){.grid-2{grid-template-columns:1fr}}
@@ -367,8 +395,8 @@ body[data-role="admin"] .need-owner{display:none!important}
 .chip.err{background:var(--err-soft);color:var(--err)}
 
 /* 图表容器 */
-.chart-wrap{position:relative;width:100%}
-.chart-wrap canvas{width:100%;display:block}
+.chart-wrap{position:relative;width:100%;min-width:0}
+.chart-wrap canvas{width:100%;max-width:100%;display:block}
 .chart-tip{position:absolute;pointer-events:none;z-index:5;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r);box-shadow:var(--shadow-lg);padding:9px 12px;font-size:12px;min-width:132px;
   opacity:0;transform:translate(-50%,-112%);transition:opacity .14s ease}
@@ -775,6 +803,12 @@ canvas{display:block;width:100%}
       <b>Triune Panel</b>
       <span class="logo-v" id="logoVer">—</span>
     </div>
+    <!-- 手机端常驻「应用配置」：导航条左侧的品牌图标在手机上只是装饰，
+         这块位置让给每次改完配置都要点的动作（见 .side-apply 的样式） -->
+    <button class="side-apply" id="sideApply" data-act="goto" data-args='["apply"]' aria-label="应用配置">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      <span>应用</span>
+    </button>
     <nav id="nav"></nav>
     <div class="side-foot">
       <div class="whoami" id="whoami" title="当前登录账号与角色">
