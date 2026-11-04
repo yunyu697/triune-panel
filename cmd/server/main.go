@@ -128,7 +128,9 @@ func serve(args []string) {
 	applyBootstrapCreds(*dataDir, st)
 
 	pm := proc.NewManager()
-	pipe := &core.PipelineManager{DataDir: *dataDir, ProcMgr: pm, Settings: st}
+	// Version 会写进渲染戳（data/cores/<内核>/.rendered.json），
+	// 启动时靠它判断磁盘上那份配置是不是上一版渲染的。
+	pipe := &core.PipelineManager{DataDir: *dataDir, ProcMgr: pm, Settings: st, Version: Version}
 
 	srv := api.New(st, pipe, pm, *dataDir)
 	api.Version = Version

@@ -11,6 +11,7 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -28,6 +29,74 @@ type PipelineManager struct {
 	ProcMgr *proc.Manager
 	// Settings 提供内核二进制路径等设置（由 store 实现）。
 	Settings SettingProvider
+	// Version 是面板版本，写进渲染戳（见 RenderStamp）。
+	Version string
+}
+
+// RenderStamp 记录「磁盘上这份配置是哪一版面板渲染出来的」。
+//
+// 为什么需要它：内核是拿磁盘上的渲染产物启动的，而渲染器本身会随面板升级变化。
+// 升级只换二进制，磁盘上那份还是旧渲染器的结果——v1.2.0 修 sing-box REALITY
+// 时就栽在这里：面板已经是 1.2.0，内核照旧用 1.1.9 渲染出来的配置启动，
+// 用户不去点一次「应用配置」就永远不会好，而界面上所有指标都是绿的。
+//
+// 所以每次写配置时在旁边记一笔版本号，启动时比对：版本变了才重新渲染。
+// **只比版本、不比内容**——比内容会把「保存了但还没应用」的改动和「回滚」
+// 一并当成过期配置重新应用，那是另一种事故。
+//
+// 一个已知的粗糙处：`dev` 构建所有版本都叫 dev，所以改完渲染器重编译、
+// 重启后面板认为「配置是同一版渲染的」，不会自愈。开发时手动点一次
+// 「应用配置」即可；生产构建都带真实版本号，不受影响。
+type RenderStamp struct {
+	Version string `json:"version"`
+	Hash    string `json:"hash,omitempty"` // 配置内容的短哈希，仅供排障对照
+	At      string `json:"at,omitempty"`
+}
+
+func (m *PipelineManager) stampPath(name string) string {
+	return filepath.Join(m.coreDir(name), ".rendered.json")
+}
+
+// RenderStamp 读磁盘上那份配置的渲染戳。
+//
+// 读不到、读坏了都返回零值。零值的 Version 与任何真实版本都不等，于是会被
+// 当成「来历不明，需要重新渲染」——这是安全的默认方向：宁可多渲染一次
+// （内容一样时并不会重启内核），也不要留着一份不知道谁渲染的配置。
+func (m *PipelineManager) RenderStamp(name string) RenderStamp {
+	var s RenderStamp
+	b, err := os.ReadFile(m.stampPath(name))
+	if err != nil {
+		return s
+	}
+	_ = json.Unmarshal(b, &s)
+	return s
+}
+
+// MarkRendered 只更新渲染戳，不动配置文件。给「渲染结果与磁盘内容一致」的
+// 场景用：那种情况下没有任何东西需要重启，但戳得跟着升上来，否则每次启动
+// 都要重渲染一遍。
+func (m *PipelineManager) MarkRendered(name string, content []byte) {
+	m.writeStamp(name, shortHash(content))
+}
+
+func (m *PipelineManager) writeStamp(name, hash string) {
+	v := m.Version
+	if v == "" {
+		v = "dev"
+	}
+	b, err := json.Marshal(RenderStamp{
+		Version: v, Hash: hash, At: time.Now().Format(time.RFC3339),
+	})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(m.stampPath(name), b, 0o600)
+}
+
+// shortHash 与 ApplyResult.Hash 同一口径（sha256 前 8 字节）。
+func shortHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 // SettingProvider 设置读取接口。
@@ -100,8 +169,7 @@ type validateResult struct {
 }
 
 func (m *PipelineManager) validate(name string, c Core, content []byte) validateResult {
-	sum := sha256.Sum256(content)
-	hash := hex.EncodeToString(sum[:8])
+	hash := shortHash(content)
 
 	bin, _ := m.Settings.Get("bin_" + name)
 	if bin == "" {
@@ -131,8 +199,7 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}
-	sum := sha256.Sum256(content)
-	hash := hex.EncodeToString(sum[:8])
+	hash := shortHash(content)
 
 	dir := m.coreDir(name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -167,6 +234,10 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 		os.Remove(tmp)
 		return nil, fmt.Errorf("atomic rename: %w", err)
 	}
+	// 4.1 记下「这份配置是哪一版渲染的」。放在替换之后：中间崩了只会丢戳，
+	// 下次启动当成来历不明重新渲染一遍，方向是安全的；反过来先写戳再替换，
+	// 崩在中间就会把一份旧配置标成新版本，自愈永远不触发。
+	m.writeStamp(name, hash)
 
 	// 5. 重启内核进程
 	restarted := false
@@ -235,6 +306,9 @@ func (m *PipelineManager) Rollback(name string) (string, error) {
 	if err := os.Rename(tmp, cfgPath); err != nil {
 		return "", err
 	}
+	// 回滚是用户的明确选择，写当前版本的戳意味着「别再自动重渲染它」——
+	// 否则下次启动的自愈会把刚回滚掉的配置又渲染回来，等于回滚无效。
+	m.writeStamp(name, shortHash(data))
 	if bin, _ := m.Settings.Get("bin_" + name); bin != "" && m.ProcMgr != nil {
 		_ = m.ProcMgr.Restart(name, bin, cfgPath, m.coreDir(name))
 	}

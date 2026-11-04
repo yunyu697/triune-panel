@@ -4,8 +4,10 @@
 package api_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"triune/internal/api"
@@ -56,7 +58,10 @@ func restoreFixture(t *testing.T, fakeBin bool) (*api.Server, *proc.Manager, str
 }
 
 // writeCfg 在预期位置放一份渲染产物（模拟「上次应用过配置」）。
-func writeCfg(t *testing.T, dir, coreName string) string {
+//
+// 连渲染戳一起写上：真实的应用会写戳，缺了戳的配置会被启动流程当成
+// 「来历不明」重新渲染一遍（见 healStaleRender），那会让这里的断言全部错位。
+func writeCfg(t *testing.T, a *api.Server, dir, coreName string) string {
 	t.Helper()
 	c, err := core.Get(coreName)
 	if err != nil {
@@ -67,6 +72,39 @@ func writeCfg(t *testing.T, dir, coreName string) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.Pipe.MarkRendered(coreName, []byte("{}"))
+	return p
+}
+
+// writeStamp 直接把渲染戳改成某个版本，模拟「这份配置是上一版渲染的」。
+func writeStamp(t *testing.T, dir, coreName, version string) {
+	t.Helper()
+	p := filepath.Join(dir, "cores", coreName, ".rendered.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(map[string]string{"version": version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fastBin 换成一个立刻退出的假内核。
+//
+// 升级自愈会走完整的「应用」流水线，里面要跑一次内核校验；默认那个
+// `sleep 30` 的假内核会让每个用例白等 30 秒。这里只需要「命令返回 0」。
+func fastBin(t *testing.T, a *api.Server, dir string) string {
+	t.Helper()
+	p := filepath.Join(dir, "fast-core.sh")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Store.SetSetting("bin_singbox", p); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -85,7 +123,7 @@ func TestRestoreCoresStartsEnabledCore(t *testing.T) {
 	mkInbound(t, a, &model.Inbound{
 		Name: "n1", Core: "singbox", Protocol: "vless", Port: 443, Transport: "tcp", Enabled: true,
 	})
-	writeCfg(t, dir, "singbox")
+	writeCfg(t, a, dir, "singbox")
 
 	a.RestoreCores()
 
@@ -100,7 +138,7 @@ func TestRestoreCoresSkipsDisabledAndDraft(t *testing.T) {
 	a, pm, dir, _ := restoreFixture(t, true)
 	mkInbound(t, a, &model.Inbound{Name: "off", Core: "singbox", Protocol: "vless", Port: 1001, Enabled: false})
 	mkInbound(t, a, &model.Inbound{Name: "draft", Core: "singbox", Protocol: "vless", Port: 1002, Enabled: true, Draft: true})
-	writeCfg(t, dir, "singbox")
+	writeCfg(t, a, dir, "singbox")
 
 	a.RestoreCores()
 
@@ -128,7 +166,7 @@ func TestRestoreCoresSkipsWhenConfigMissing(t *testing.T) {
 func TestRestoreCoresSkipsWhenBinaryMissing(t *testing.T) {
 	a, pm, dir, _ := restoreFixture(t, false) // 不写 bin_singbox
 	mkInbound(t, a, &model.Inbound{Name: "n1", Core: "singbox", Protocol: "vless", Port: 443, Enabled: true})
-	writeCfg(t, dir, "singbox")
+	writeCfg(t, a, dir, "singbox")
 
 	a.RestoreCores()
 
@@ -144,7 +182,7 @@ func TestRestoreCoresSkipsWhenBinaryNotOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	mkInbound(t, a, &model.Inbound{Name: "n1", Core: "singbox", Protocol: "vless", Port: 443, Enabled: true})
-	writeCfg(t, dir, "singbox")
+	writeCfg(t, a, dir, "singbox")
 
 	a.RestoreCores()
 
@@ -158,7 +196,7 @@ func TestRestoreCoresSkipsWhenBinaryNotOnDisk(t *testing.T) {
 func TestRestoreCoresAlreadyRunning(t *testing.T) {
 	a, pm, dir, bin := restoreFixture(t, true)
 	mkInbound(t, a, &model.Inbound{Name: "n1", Core: "singbox", Protocol: "vless", Port: 443, Enabled: true})
-	cfg := writeCfg(t, dir, "singbox")
+	cfg := writeCfg(t, a, dir, "singbox")
 
 	if err := pm.Start("singbox", bin, cfg, filepath.Join(dir, "cores", "singbox")); err != nil {
 		t.Fatal(err)
@@ -187,4 +225,89 @@ func TestRestoreCoresNoProcMgr(t *testing.T) {
 	defer st.Close()
 	a := api.New(st, nil, nil, dir)
 	a.RestoreCores() // 不 panic 即通过
+}
+
+// TestRestoreCoresRerendersAfterVersionChange 是本组用例的核心：
+// 面板升级后，磁盘上那份旧配置必须用当前渲染器重做一遍。
+//
+// 这就是「升级只换二进制」那个坑的回归——v1.2.0 修 sing-box REALITY 时，
+// 用户升级完看到的是「面板写着 1.2.0、节点仍然连不上」，因为内核拿的还是
+// 上一版渲染出来的配置。不点一次「应用配置」就永远不会好，而界面上所有
+// 指标都是绿的。
+func TestRestoreCoresRerendersAfterVersionChange(t *testing.T) {
+	a, _, dir, _ := restoreFixture(t, true)
+	fastBin(t, a, dir)
+	mkInbound(t, a, &model.Inbound{
+		Name: "n1", Core: "singbox", Protocol: "vless", Port: 24561,
+		Transport: "tcp", Enabled: true,
+	})
+	cfg := writeCfg(t, a, dir, "singbox")
+	writeStamp(t, dir, "singbox", "0.0.1") // 假装是上一版渲染的
+
+	a.RestoreCores()
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) == "{}" {
+		t.Fatal("版本变了，磁盘上却还是旧配置——升级后自愈没生效")
+	}
+	if !strings.Contains(string(got), "inbounds") {
+		t.Fatalf("重新渲染出的内容不像内核配置: %q", string(got))
+	}
+	if st := a.Pipe.RenderStamp("singbox"); st.Version != api.Version {
+		t.Fatalf("渲染戳没跟着更新: %+v", st)
+	}
+}
+
+// TestRestoreCoresKeepsConfigWhenVersionSame 版本没变时一个字都不该动——
+// 尤其是「用户保存了改动但还没点应用配置」的情况，启动时不能替人做主。
+func TestRestoreCoresKeepsConfigWhenVersionSame(t *testing.T) {
+	a, _, dir, _ := restoreFixture(t, true)
+	fastBin(t, a, dir)
+	mkInbound(t, a, &model.Inbound{
+		Name: "n1", Core: "singbox", Protocol: "vless", Port: 24562,
+		Transport: "tcp", Enabled: true,
+	})
+	cfg := writeCfg(t, a, dir, "singbox") // 戳就是当前版本
+
+	a.RestoreCores()
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{}" {
+		t.Fatalf("版本没变却重新渲染了: %q", string(got))
+	}
+}
+
+// TestRestoreCoresKeepsOldConfigWhenRerenderFails 重新渲染失败时，
+// 磁盘上那份能用的旧配置必须原样留着。
+// 「升级」绝不能变成「节点全断」——旧配置能跑就先让它跑，下次再试。
+func TestRestoreCoresKeepsOldConfigWhenRerenderFails(t *testing.T) {
+	a, _, dir, _ := restoreFixture(t, true)
+	fastBin(t, a, dir)
+	// reality 缺私钥：渲染阶段就会报错，走不到落盘
+	mkInbound(t, a, &model.Inbound{
+		Name: "bad", Core: "singbox", Protocol: "vless", Port: 24563,
+		Transport: "tcp", TLS: "reality", Enabled: true, Settings: "{}",
+	})
+	cfg := writeCfg(t, a, dir, "singbox")
+	writeStamp(t, dir, "singbox", "0.0.1")
+
+	a.RestoreCores()
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{}" {
+		t.Fatalf("重新渲染失败时旧配置必须原样保留，got %q", string(got))
+	}
+	// 戳也不能被改成当前版本，否则下次启动就不会再试了
+	if st := a.Pipe.RenderStamp("singbox"); st.Version == api.Version {
+		t.Fatalf("渲染失败却把戳标成了当前版本，以后不会再重试: %+v", st)
+	}
 }

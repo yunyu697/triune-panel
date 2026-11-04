@@ -213,6 +213,70 @@ func TestRollbackWithoutBackups(t *testing.T) {
 	}
 }
 
+// TestApplyWritesRenderStamp 每次落盘都要记下「这份配置是哪一版渲染的」，
+// 启动流程靠它判断要不要重新渲染（见 api.healStaleRender）。
+func TestApplyWritesRenderStamp(t *testing.T) {
+	m, _ := newPipeline(t, "fake-stamp", `{"s":1}`, "", true)
+	m.Version = "v9.9.9"
+
+	res, err := m.Apply("fake-stamp", nil, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := m.RenderStamp("fake-stamp")
+	if st.Version != "v9.9.9" {
+		t.Fatalf("渲染戳版本不对: %+v", st)
+	}
+	if st.Hash != res.Hash {
+		t.Fatalf("渲染戳哈希应与 ApplyResult.Hash 一致: stamp=%q res=%q", st.Hash, res.Hash)
+	}
+	if st.At == "" {
+		t.Fatal("渲染戳应带时间，排障时能对上是哪次升级")
+	}
+}
+
+// TestRollbackStampsCurrentVersion 回滚后戳要标成当前版本，
+// 否则下次启动的自愈会把用户刚回滚掉的配置又渲染回来，等于回滚无效。
+func TestRollbackStampsCurrentVersion(t *testing.T) {
+	m, _ := newPipeline(t, "fake-rbstamp", `{"v":1}`, "", true)
+	m.Version = "v9.9.9"
+	if _, err := m.Apply("fake-rbstamp", nil, "first"); err != nil {
+		t.Fatal(err)
+	}
+	Register(&fakeCore{name: "fake-rbstamp", content: `{"v":2}`, badCmd: "true"})
+	if _, err := m.Apply("fake-rbstamp", nil, "second"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟「升级之后回滚」：戳先变成旧版本，回滚必须把它拉回当前版本
+	m.Version = "v9.9.9"
+	if _, err := m.Rollback("fake-rbstamp"); err != nil {
+		t.Fatal(err)
+	}
+	if st := m.RenderStamp("fake-rbstamp"); st.Version != "v9.9.9" {
+		t.Fatalf("回滚后戳应标成当前版本: %+v", st)
+	}
+}
+
+// TestRenderStampMissingIsNotCurrent 没有戳 / 戳读坏了都算「来历不明」，
+// 必须与任何真实版本都不等——这是安全的默认方向：宁可多渲染一次。
+func TestRenderStampMissingIsNotCurrent(t *testing.T) {
+	m, dir := newPipeline(t, "fake-nostamp", `{}`, "", true)
+	if st := m.RenderStamp("fake-nostamp"); st.Version != "" {
+		t.Fatalf("没有戳时应返回零值: %+v", st)
+	}
+	p := filepath.Join(dir, "cores", "fake-nostamp", ".rendered.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st := m.RenderStamp("fake-nostamp"); st.Version != "" {
+		t.Fatalf("戳损坏时应按零值处理: %+v", st)
+	}
+}
+
 func TestApplyUnknownCore(t *testing.T) {
 	m := &PipelineManager{DataDir: t.TempDir(), Settings: mapSettings{}}
 	if _, err := m.Apply("no-such-core", nil, "x"); err == nil {
