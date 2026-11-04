@@ -2,15 +2,19 @@ package api
 
 // 内核切换：把已运行的入站从一个内核迁移到另一个内核。
 //
+// 注意「切换」只作用于**单条入站**：三个内核本来就是三个独立进程，各自管
+// 自己那批入站、可以同时运行。这里做的是把某几条入站的 core 字段改掉，
+// 不是让两个内核二选一。
+//
 // 安全流程（任何一步失败都不会让服务处于不可用状态）：
 //  1. 预检：在内存中构造切换后的配置，用目标内核二进制做真实校验（不落盘、不动进程）；
 //  2. 校验失败 → HTTP 422，DB 与运行配置零改动；
-//  3. 校验通过 → 提交 DB（入站 core 字段）→ 停旧内核进程（释放端口）→
-//     走标准 apply 流水线启动新内核；
-//  4. 健康检查：确认新进程持续存活（端口占用、启动即崩溃等都会在此暴露）；
-//  5. 健康检查失败 → 自动回滚：还原 DB 中的 core 字段，重新 apply 旧内核
-//     （旧配置此前已验证可运行），并返回失败详情；
-//  6. 切换成功后，若原内核仍承载其他入站，则重新 apply 原内核使其配置同步收缩。
+//  3. 校验通过 → 提交 DB（入站 core 字段）→ 旧内核按新状态收缩（迁走那条从
+//     配置里消失、端口随之释放，其它入站只经历这次重启）；旧内核被搬空则直接停；
+//  4. 收缩后先检查旧内核剩下的入站是否真的还在监听——不通过就中止，新内核没动过；
+//  5. 走标准 apply 流水线启动新内核，再做健康检查（端口占用、启动即崩溃都会暴露）；
+//  6. 任何一步失败 → 自动回滚：还原 DB 中的 core 字段，把目标内核与旧内核
+//     都恢复成切换前的配置，并返回失败详情。
 
 import (
 	"encoding/json"
@@ -189,56 +193,79 @@ func (a *Server) handleSwitchCore(w http.ResponseWriter, r *http.Request) {
 		t.Core = req.To // 让响应里的入站展示与切换结果一致
 	}
 
-	// ---- 3. 停旧内核进程（释放端口）----
+	// ---- 3. 先收缩旧内核（不再整体 Stop）----
+	//
+	// 这一步是 v1.2.2 的核心修正。原实现直接 ProcMgr.Stop(from) 把整个旧内核
+	// 停掉，于是「迁一条入站」会连带断掉旧内核上所有其它入站，而后续的收缩
+	// 只把失败记进 warnings、HTTP 照样返回 200 —— 那些入站就一直是断的，
+	// 界面上却全是绿的。
+	//
+	// 现在把失败点全部前移：旧内核先按切换后的状态收缩（迁走那条从配置里
+	// 消失，端口随之释放），其它入站只经历这次重启；收缩或健康检查不成功
+	// 就中止切换，新内核一个字节都没动过。只有旧内核被搬空了才真的 Stop。
 	for _, from := range fromList {
-		a.ProcMgr.Stop(from)
+		input, err := a.buildRenderInput(from)
+		if err != nil {
+			a.restoreCores(origs)
+			fail(w, 500, "读取切换后的入站失败（DB 已还原，新内核未改动）: "+err.Error())
+			return
+		}
+		if len(input) == 0 {
+			// 旧内核已经没有入站了：停掉它，释放端口，也省一份内存。
+			if a.ProcMgr != nil {
+				a.ProcMgr.Stop(from)
+			}
+			continue
+		}
+		if _, err := a.applyWithRevision(from, input,
+			fmt.Sprintf("shrink before switch to %s", req.To)); err != nil {
+			rollErrs := a.rollbackSwitch(origs, fromList, req.To)
+			detail := fmt.Sprintf("收缩 %s 失败，切换已中止（新内核未改动）：%v", from, err)
+			if len(rollErrs) > 0 {
+				detail += " 回滚异常（需人工检查）：" + fmt.Sprint(rollErrs)
+			}
+			writeJSON(w, 422, map[string]any{"error": detail, "rolled_back": true})
+			return
+		}
+		// 旧内核上剩下的入站必须还活着。只看 apply 是否返回 nil 不够：
+		// 配置合法但端口绑不上时内核会「启动成功」，服务实际是断的。
+		if err := a.healthCheck(from); err != nil {
+			rollErrs := a.rollbackSwitch(origs, fromList, req.To)
+			detail := fmt.Sprintf("收缩 %s 后健康检查失败，切换已中止（新内核未改动）：%v", from, err)
+			if len(rollErrs) > 0 {
+				detail += " 回滚异常（需人工检查）：" + fmt.Sprint(rollErrs)
+			}
+			writeJSON(w, 422, map[string]any{"error": detail, "rolled_back": true})
+			return
+		}
 	}
 
-	// ---- 4. apply 新内核（带修订记录）----
+	// ---- 4. 启动目标内核（带修订记录）----
 	applyRes, aerr := a.applyWithRevision(req.To, targetInput, fmt.Sprintf("switch %v → %s", fromList, req.To))
 	if aerr == nil {
 		aerr = a.healthCheck(req.To)
 	}
 	if aerr != nil {
-		// ---- 5. 自动回滚：还原 DB + 重启旧内核 ----
-		a.restoreCores(origs)
-		rollErrs := []string{}
-		for _, from := range fromList {
-			input, err := a.buildRenderInput(from)
-			if err != nil {
-				rollErrs = append(rollErrs, err.Error())
-				continue
-			}
-			if _, err := a.applyWithRevision(from, input, fmt.Sprintf("rollback after failed switch to %s", req.To)); err != nil {
-				rollErrs = append(rollErrs, fmt.Sprintf("回滚 %s: %v", from, err))
-			}
-		}
+		// ---- 5. 自动回滚：还原 DB，两个内核都恢复成切换前的样子 ----
+		rollErrs := a.rollbackSwitch(origs, fromList, req.To)
 		detail := fmt.Sprintf("切换到 %s 失败：%v。已自动回滚到 %v。", req.To, aerr, fromList)
 		if len(rollErrs) > 0 {
 			detail += " 回滚异常（需人工检查）：" + fmt.Sprint(rollErrs)
 		}
+		hash := ""
+		if applyRes != nil {
+			hash = applyRes.Hash
+		}
 		writeJSON(w, 422, map[string]any{
 			"error":       detail,
 			"rolled_back": true,
-			"apply_hash":  applyRes.Hash,
+			"apply_hash":  hash,
 		})
 		return
 	}
-
-	// ---- 6. 原内核仍承载其他入站 → 重新 apply 使配置收缩 ----
+	// 保留这个字段是为了不破坏前端契约。v1.2.2 起收缩失败不再降级成警告，
+	// 而是直接中止切换并回滚，所以这里恒为空。
 	warnings := []string{}
-	for _, from := range fromList {
-		input, err := a.buildRenderInput(from)
-		if err != nil {
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		if len(input) > 0 {
-			if _, err := a.applyWithRevision(from, input, fmt.Sprintf("shrink after switch to %s", req.To)); err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s 收缩配置失败: %v", from, err))
-			}
-		}
-	}
 
 	writeJSON(w, 200, map[string]any{
 		"ok":          true,
@@ -363,6 +390,43 @@ func (a *Server) restoreCores(origs []*model.Inbound) {
 		cp.UpdatedAt = time.Now()
 		_ = a.Store.UpdateInbound(&cp)
 	}
+}
+
+// rollbackSwitch 把切换失败后的现场恢复成切换前的样子。
+//
+// 顺序有讲究：先恢复目标内核，再恢复旧内核。目标内核可能已经起来并占着
+// 迁过去的端口，先让它的配置缩回去（或直接停掉），旧内核才绑得回原端口。
+//
+// 返回每一步的错误，调用方拼进响应里；空切片表示全部恢复成功。
+func (a *Server) rollbackSwitch(origs []*model.Inbound, fromList []string, to string) []string {
+	a.restoreCores(origs) // 先还原 DB，后面两次渲染都以还原后的状态为准
+	var errs []string
+	if err := a.restoreCoreTo(to, "rollback switch: 恢复 "+to+" 到切换前"); err != nil {
+		errs = append(errs, fmt.Sprintf("回滚 %s: %v", to, err))
+	}
+	for _, from := range fromList {
+		if err := a.restoreCoreTo(from, "rollback switch: 恢复 "+from+" 到切换前"); err != nil {
+			errs = append(errs, fmt.Sprintf("回滚 %s: %v", from, err))
+		}
+	}
+	return errs
+}
+
+// restoreCoreTo 按当前 DB 状态把某个内核重新应用一遍（DB 需已还原）。
+// 没有入站时直接停进程——空配置的内核留着只会占端口。
+func (a *Server) restoreCoreTo(name, note string) error {
+	input, err := a.buildRenderInput(name)
+	if err != nil {
+		return err
+	}
+	if len(input) == 0 {
+		if a.ProcMgr != nil {
+			a.ProcMgr.Stop(name)
+		}
+		return nil
+	}
+	_, err = a.applyWithRevision(name, input, note)
+	return err
 }
 
 func inboundNames(ins []*model.Inbound) []string {

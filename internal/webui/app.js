@@ -1178,7 +1178,10 @@ async function loadStatus() {
     const j = await req("/api/status");
     OV.cores = j.cores || [];
     const pc = $("pillCore");
-    if (pc) pc.innerHTML = `<i class="pulse"></i> 内核 <b>${OV.cores.filter(c => c.running).length}/${OV.cores.length}</b>`;
+    if (pc) {
+      pc.innerHTML = `<i class="pulse"></i> 内核 <b>${OV.cores.filter(c => c.running).length}/${OV.cores.length}</b>`;
+      pc.title = "sing-box / xray / mihomo 是三个独立进程，可以同时运行，各自管自己的入站";
+    }
     if ($("v-overview") && $("v-overview").classList.contains("active")) { renderKpis(); renderRings(); }
   } catch(e){}
 }
@@ -4739,7 +4742,7 @@ async function openInboundModal(id) {
   // 运行中的入站改内核必须走安全切换流程，编辑弹窗里直接锁住内核选择
   const lockCore = id && v.enabled && !v.draft;
   $("ib_core").disabled = lockCore;
-  $("ib_core").title = lockCore ? "运行中的入站请用「切换内核」按钮安全迁移" : "";
+  $("ib_core").title = lockCore ? "运行中的入站请用「切换内核」按钮安全迁移（只影响这一条，其它入站留在原内核）" : "";
   ibDynamic(false);
   if (!id) {
     // 新增：应用该协议在当前内核下的推荐 TLS，再自动名称/端口与动态字段
@@ -4848,7 +4851,7 @@ async function previewSwitch() {
 async function doSwitch() {
   if (!swInbound) return;
   const to = $("sw_to").value;
-  if (!(await ask("切换内核", `确认把入站「${swInbound.name}」从 ${swInbound.core} 切换到 ${to}？预检失败不会切换；启动失败会自动回滚。`))) return;
+  if (!(await ask("切换内核", `确认把入站「${swInbound.name}」从 ${swInbound.core} 迁移到 ${to}？只影响这一条，${swInbound.core} 上其它入站继续运行。预检或旧内核收缩失败都不会切换；新内核启动失败会自动回滚。`))) return;
   $("sw_go").disabled = true;
   try {
     const j = await req("/api/switch-core", { method:"POST", body:{ to, inbound_ids:[swInbound.id] } });
@@ -5369,7 +5372,7 @@ function renderKpis() {
       <div class="kpi-top"><div class="kpi-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
         <div class="kpi-lb">内核运行中</div></div>
       <div class="kpi-val">${running}<span class="unit">/ ${totalC}</span></div>
-      <div class="kpi-delta">${running === totalC && totalC ? "全部在线" : (totalC - running) + " 个未运行"}</div>
+      <div class="kpi-delta">${running === totalC && totalC ? "全部在线" : (totalC - running) + " 个未运行"} · 各内核独立并存</div>
     </div>
     <div class="kpi">
       <div class="kpi-top"><div class="kpi-ic g2"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>

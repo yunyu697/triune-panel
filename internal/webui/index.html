@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1710,8 +1710,11 @@ canvas{display:block;width:100%}
   <div class="modal" style="max-width:480px">
     <h3>切换内核</h3>
     <p class="muted" style="font-size:13px;margin-bottom:10px">
-      流程：预检新内核配置（校验不过则不会切换）→ 停旧内核 → 启动新内核 → 健康检查。
-      启动失败会<b>自动回滚</b>到原内核，全程服务不中断（仅切换瞬间约 1 秒）。</p>
+      只迁移<b>选中的这一条入站</b>，其它入站的归属不变——sing-box 与 xray 本来就是
+      <b>同时运行</b>的独立进程，不是二选一。<br>
+      流程：预检新内核 → 旧内核收缩（迁走的这条从配置里消失、端口随之释放）→
+      启动新内核 → 健康检查。收缩失败会直接中止，新内核一个字节都不动；新内核启动失败会
+      <b>自动回滚</b>。旧内核上剩下的入站只在收缩重启时断约 1~2 秒。</p>
     <div class="frm">
       <div class="full"><label>切换入站</label><input id="sw_inbound" class="input" disabled></div>
       <div class="full"><label>目标内核</label>

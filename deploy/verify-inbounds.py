@@ -30,6 +30,7 @@
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -68,6 +69,23 @@ def mk(name, core, proto, port, **kw):
     }
     body.update(kw)
     return body
+
+
+def port_listening(port, host="127.0.0.1", timeout=3):
+    """端口上有没有进程在 accept。
+
+    只拨号、不读数据：内核在监听就说明配置真的生效了，
+    至于握手能不能成，那是 verify-reality-link.py 的事。
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
 
 
 def gen_cert(dirpath):
@@ -295,6 +313,87 @@ def main():
             call(args.base, "DELETE", f"/api/inbounds/{iid}")
     for c in ("xray", "singbox"):
         call(args.base, "POST", "/api/apply", {"core": c, "note": "verify same-port cleanup"})
+
+    # ---- 双内核并存：sing-box 与 xray 同时跑，各管一批入站 ----
+    #
+    # 面板从来没有「二选一」这回事：三个内核是三个独立进程、各自一份配置。
+    # 这里钉两件事：
+    #   1) 两个内核同时应用后，四条的端口都在监听；
+    #   2) 把 xray 上的一条切到 sing-box，xray 上**没被选中**的那条不受影响。
+    # 第 2 条是 v1.2.2 的回归点：旧实现切换时 ProcMgr.Stop 整个旧内核，
+    # 迁一条会让旧内核上所有其它入站一起断，且收缩失败只记 warning 返回 200。
+    print()
+    print("---- 双内核并存 ----")
+    coexist = p + 50
+    plan = [
+        ("vf-co-xa1", "xray", coexist + 1),
+        ("vf-co-xa2", "xray", coexist + 2),
+        ("vf-co-sb1", "singbox", coexist + 3),
+        ("vf-co-sb2", "singbox", coexist + 4),
+    ]
+    made = []
+    for name, core, port in plan:
+        code, r = call(args.base, "POST", "/api/inbounds",
+                       mk(name, core, "socks", port,
+                          clients=[{"name": "co", "credential": "su:sp"}]))
+        if code >= 300:
+            print(f"[FAIL   ] 并存：建 {name} -> {code} {(r.get('error') or '')[:120]}")
+            fails.append((f"并存-建{name}", "create", code, r))
+            continue
+        made.append({"id": r.get("id"), "core": core, "port": port, "name": name})
+
+    for c in ("xray", "singbox"):
+        code, r = call(args.base, "POST", "/api/apply", {"core": c, "note": "verify coexist"})
+        ok = code < 300 and r.get("validated") and r.get("restarted")
+        print(f"[{'OK     ' if ok else 'FAIL   '}] 并存：{c} 应用 -> {code} "
+              f"{'' if ok else (r.get('error') or '')[:140]}")
+        if not ok:
+            fails.append((f"并存-{c}应用", "apply", code, r))
+
+    for it in made:
+        ok = port_listening(it["port"])
+        print(f"[{'OK     ' if ok else 'FAIL   '}] 并存：{it['name']} "
+              f"({it['core']}:{it['port']}) 在监听")
+        if not ok:
+            fails.append((f"并存-监听{it['name']}", "port", 0, {"port": it["port"]}))
+
+    # 切换：xray 的两条里只迁第一条，第二条必须留在 xray 上继续服务
+    xa1 = next((x for x in made if x["name"] == "vf-co-xa1"), None)
+    xa2 = next((x for x in made if x["name"] == "vf-co-xa2"), None)
+    if xa1 and xa2:
+        code, r = call(args.base, "POST", "/api/switch-core",
+                       {"to": "singbox", "inbound_ids": [xa1["id"]]})
+        ok = code < 300 and r.get("ok")
+        print(f"[{'OK     ' if ok else 'FAIL   '}] 并存：把一条从 xray 迁到 sing-box -> {code} "
+              f"{'' if ok else (r.get('error') or '')[:180]}")
+        if not ok:
+            fails.append(("并存-切换", "switch", code, r))
+        else:
+            alive = port_listening(xa2["port"])
+            print(f"[{'OK     ' if alive else 'FAIL   '}] 并存：切换后 xray 上未被选中的 "
+                  f"{xa2['name']}:{xa2['port']} 仍在监听")
+            if not alive:
+                fails.append(("并存-未选中入站被牵连", "port", 0, {"port": xa2["port"]}))
+
+            moved = port_listening(xa1["port"])
+            print(f"[{'OK     ' if moved else 'FAIL   '}] 并存：迁走的 "
+                  f"{xa1['name']}:{xa1['port']} 已由 sing-box 接管")
+            if not moved:
+                fails.append(("并存-迁移后未监听", "port", 0, {"port": xa1["port"]}))
+
+            _, ins = call(args.base, "GET", "/api/inbounds")
+            cur = next((i for i in (ins or []) if i.get("id") == xa1["id"]), None)
+            ok2 = bool(cur) and cur.get("core") == "singbox"
+            print(f"[{'OK     ' if ok2 else 'FAIL   '}] 并存：切换后入站归属已改为 sing-box"
+                  f"{'' if ok2 else ' -> ' + str(cur)}")
+            if not ok2:
+                fails.append(("并存-归属未改", "inbound", 0, cur or {}))
+
+    for it in made:
+        if it["id"]:
+            call(args.base, "DELETE", f"/api/inbounds/{it['id']}")
+    for c in ("xray", "singbox"):
+        call(args.base, "POST", "/api/apply", {"core": c, "note": "verify coexist cleanup"})
 
     print()
     if fails:
