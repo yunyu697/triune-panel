@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.4 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.5 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -118,6 +118,15 @@
 /* ============ 基础 ============ */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
+/* Android Chrome 会按内容宽度自动放大正文字号（Text Autosizing），放大后卡片被
+   撑破、换行变乱，看起来像「显示不全」。明确关掉，字号只由我们自己的媒体查询决定。 */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* 兼容性下限：Android 微信内置浏览器（X5，Chromium 86）。几个容易忘的：
+   - 不用 inset 简写（Chrome 87+）：遮罩和开关轨道会直接没有尺寸
+   - 不依赖 dvh（108+）：见 .shell 处的 --app-h 兜底
+   - color-mix（111+）只用于装饰，失效时不能影响布局和可读性
+   - backdrop-filter 要有不透明底色兜底
+   新增属性前先确认 X5 认不认。 */
 body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t);
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 svg{flex:none}
@@ -160,6 +169,13 @@ a:hover{text-decoration:underline}
    底部内容（设置页的常驻操作条、最后一张卡片）会落在地址栏后面，滑不到也点不到。
    dvh 跟着可视区变；不认 dvh 的老浏览器仍取上一行的 100vh。 */
 .shell{display:flex;height:100vh;height:100dvh;overflow:hidden}
+/* 微信 X5 这类 Chromium 86 的内核不认 dvh，会落到上面的 100vh——底部一截永远被
+   地址栏盖着，而 .main 是内部滚动、页面本身不滚，滑也滑不到，表现就是「显示不全」。
+   这里改用 app.js 量出的实际可视高度（--app-h）。现代内核走 dvh，不受影响。 */
+@supports not (height:100dvh){
+  .shell{height:var(--app-h,100vh)}
+  .login-wrap{min-height:var(--app-h,100vh)}
+}
 .side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
   display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;min-height:0;
   transition:background var(--t),border-color var(--t)}
@@ -169,7 +185,7 @@ a:hover{text-decoration:underline}
    min-height:0 必须给：flex 子项的 min-height 默认是 auto，不归零它不会收缩，
    只会把 .side 撑破。 */
 #nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.side::after{content:"";position:absolute;inset:0;pointer-events:none;
+.side::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
 .logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
 .logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
@@ -202,6 +218,11 @@ body[data-role="admin"] .need-owner{display:none!important}
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:14px 28px;
   background:var(--glass);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
   border-bottom:1px solid var(--line)}
+/* 不支持 backdrop-filter 的内核里 --glass 仍是半透明的：内容从顶栏下面滚过时
+   直接透出来，看起来像闪烁/重影。给一层不透明底色兜底，顶栏才真的挡住内容。 */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .topbar{background:var(--bg)}
+}
 .topbar h2{font-size:17px;font-weight:650;letter-spacing:.2px}
 .topbar .sub{font-size:12px;color:var(--muted);margin-top:1px}
 .topbar .spacer{flex:1}
@@ -234,6 +255,12 @@ body[data-role="admin"] .need-owner{display:none!important}
   .logo b{display:none}
   .content{padding:18px max(16px,env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
   .topbar{padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left))}
+  /* 手机上顶栏下面一直在滚，毛玻璃在部分 Android GPU 上要整块重绘，滚动时会闪。
+     换成不透明底色，视觉几乎一样（顶栏本来就该挡住内容）。 */
+  .topbar{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
+  /* 登录页那两个 820/640px 的模糊圆一直在动，低端 Android 上持续重绘，
+     是登录页闪烁的常见来源。它们只是背景装饰，手机上静态显示即可。 */
+  .login-wrap::before,.login-wrap::after{animation:none}
   /* 加到主屏（standalone）时顶部状态栏会压在导航条上，横屏刘海又会切掉左右
      第一个入口。四边都让开安全区；普通 Safari 下 env() 取 0，桌面无变化。 */
   .side{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 8px max(8px,env(safe-area-inset-left))}
@@ -290,7 +317,7 @@ body[data-role="admin"] .need-owner{display:none!important}
 /* ============ 仪表盘 ============ */
 .hero{position:relative;overflow:hidden;border-radius:var(--r-xl);border:1px solid var(--line);box-shadow:var(--shadow);
   background:var(--card);padding:26px 28px;margin-bottom:18px}
-.hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+.hero::before{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
   background:radial-gradient(620px 240px at 12% -30%,color-mix(in srgb,var(--acc) 22%,transparent),transparent 68%),
              radial-gradient(520px 220px at 92% 0%,color-mix(in srgb,var(--acc2) 18%,transparent),transparent 70%)}
 .hero-inner{position:relative;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
@@ -396,7 +423,7 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .b-acc{background:var(--acc-soft);color:var(--acc-text)}
 .sw{position:relative;display:inline-block;width:38px;height:21px;flex:none;vertical-align:middle}
 .sw input{opacity:0;width:0;height:0}
-.sw i{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:background var(--t-fast);cursor:pointer}
+.sw i{position:absolute;top:0;right:0;bottom:0;left:0;background:var(--line);border-radius:99px;transition:background var(--t-fast);cursor:pointer}
 .sw i::after{content:"";position:absolute;left:3px;top:3px;width:15px;height:15px;border-radius:50%;background:#fff;
   box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform var(--t-fast)}
 .sw input:checked+i{background:linear-gradient(135deg,var(--acc),var(--acc2))}
@@ -581,7 +608,7 @@ td.num{font-variant-numeric:tabular-nums}
 @media (max-width:960px){.tpop{position:fixed;bottom:auto;top:54px;left:12px;right:12px;width:auto}}
 
 /* ============ 弹层 ============ */
-.overlay{position:fixed;inset:0;background:var(--mask);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
+.overlay{position:fixed;top:0;right:0;bottom:0;left:0;background:var(--mask);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
   display:flex;align-items:center;justify-content:center;
   padding:calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   opacity:0;pointer-events:none;transition:opacity var(--t-fast);z-index:100}
@@ -630,7 +657,7 @@ td.num{font-variant-numeric:tabular-nums}
 .scn-card:hover{border-color:color-mix(in srgb,var(--acc) 46%,var(--line));transform:translateY(-2px);box-shadow:var(--shadow)}
 .scn-card.on{border-color:transparent;background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 12%,var(--card)),var(--card));
   box-shadow:var(--glow)}
-.scn-card.on::after{content:"";position:absolute;inset:0;border-radius:var(--r);border:1.5px solid var(--acc);pointer-events:none}
+.scn-card.on::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;border-radius:var(--r);border:1.5px solid var(--acc);pointer-events:none}
 .scn-card .scn-t{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .scn-card .scn-t b{font-size:13.5px;font-weight:650}
 .scn-card .scn-d{font-size:12px;color:var(--muted);line-height:1.5;min-height:36px}

@@ -58,27 +58,72 @@ func TestNavScrollsWhenShort(t *testing.T) {
 // 内联样式的优先级高于媒体查询，窄屏退不回一列：手机上两列各 ~150px，
 // 里面的分段按钮组撑破列宽，把整页顶出横向滚动条（「界面显示不全」）。
 // 需要固定列数就用 .frm-2 / .grid-2 这类带媒体查询的类。
-func TestNoInlineGridColumns(t *testing.T) {
-	// 先把 CSS 注释整段去掉：注释里为了说明问题会引用旧写法，不该算违规。
-	css := string(indexHTML)
+// stripCSSComments 去掉整段 CSS 注释：注释里为了说明问题会引用旧写法，不该算违规。
+func stripCSSComments(css string) string {
 	for {
 		i := strings.Index(css, "/*")
 		if i < 0 {
-			break
+			return css
 		}
 		j := strings.Index(css[i:], "*/")
 		if j < 0 {
-			css = css[:i]
-			break
+			return css[:i]
 		}
 		css = css[:i] + css[i+j+2:]
 	}
+}
+
+func TestNoInlineGridColumns(t *testing.T) {
+	css := stripCSSComments(string(indexHTML))
 	for _, line := range strings.Split(css, "\n") {
 		if strings.Contains(line, "grid-template-columns") && strings.Contains(line, "style=") {
 			t.Errorf("index.html 用内联 grid-template-columns 写死了列数（媒体查询盖不掉）: %s",
 				strings.TrimSpace(line))
 		}
 	}
+}
+
+// ---- Android 老内核（微信 X5 / Chromium 86）----
+// 这几条都是「桌面和现代手机完全正常、X5 上直接坏掉」的写法，预览看不出来。
+
+// 目标下限是 Android 微信内置浏览器。它不认 dvh（108+）、inset 简写（87+），
+// backdrop-filter 缺失时半透明顶栏会透出滚动内容（看着像闪烁）。四处兜底缺一不可。
+func TestAndroidCompatFallbacks(t *testing.T) {
+	css := string(indexHTML)
+	for _, frag := range []string{
+		"text-size-adjust:100%",            // 关掉 Android 的 Text Autosizing
+		"@supports not (height:100dvh)",    // 老内核改用 --app-h
+		"@supports not ((backdrop-filter",  // 顶栏换不透明底
+		"bottom:calc(12px + env(safe-area", // 底部条让开 Home Indicator
+	} {
+		if !strings.Contains(css, frag) {
+			t.Errorf("缺 Android 老内核兜底 %q", frag)
+		}
+	}
+	if !strings.Contains(string(mustReadAsset(t, "app.js")), "--app-h") {
+		t.Error("app.js 没有写入 --app-h：老内核上 .shell 会回落到 100vh，底部被地址栏盖住")
+	}
+}
+
+// inset 简写是 Chrome 87+ 的。X5 不认，position:fixed/absolute 的元素会直接
+// 没有尺寸——弹窗遮罩铺不满、开关轨道消失。必须写四边。
+func TestNoInsetShorthand(t *testing.T) {
+	css := stripCSSComments(string(indexHTML))
+	for _, line := range strings.Split(css, "\n") {
+		if strings.Contains(line, "inset:") {
+			t.Errorf("用了 inset 简写（X5 / Chromium 86 不支持，元素会没有尺寸）: %s",
+				strings.TrimSpace(line))
+		}
+	}
+}
+
+func mustReadAsset(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := scriptAssets.ReadFile(name)
+	if err != nil {
+		t.Fatalf("读不到内嵌资源 %s: %v", name, err)
+	}
+	return b
 }
 
 // ---- 手机端 ----

@@ -4,6 +4,23 @@
 const DEMO = location.hash.includes("demo") || /demo\.html?$/i.test(location.pathname);
 const $ = id => document.getElementById(id);
 
+/* ================= 视口高度兜底 =================
+   微信 X5 这类 Chromium 86 的内核不认 dvh，.shell 会落到 CSS 里的 100vh——
+   那是「地址栏收起时」的高度，底部一截永远被地址栏盖着；而 .main 是内部滚动、
+   页面本身不滚，滑也滑不到，表现就是「显示不全」。
+   这里量一次实际可视高度写进 --app-h，CSS 侧用 @supports 只在老内核上取它。
+   只在方向变化时重量：跟着地址栏伸缩实时改高度，本身就是「整页在闪」的成因。 */
+(function syncAppHeight() {
+  if (window.CSS && CSS.supports && CSS.supports("height", "100dvh")) return;  // 现代内核走 dvh
+  const apply = () => {
+    const vv = window.visualViewport;
+    const h = Math.round((vv && vv.height) || window.innerHeight || 0);
+    if (h > 0) document.documentElement.style.setProperty("--app-h", h + "px");
+  };
+  apply();
+  addEventListener("orientationchange", () => setTimeout(apply, 300));
+})();
+
 /* ================= 事件委托 =================
    以前界面到处是 onclick="fn(...)" 这类内联事件属性。内联属性只能靠 CSP 的
    'unsafe-inline' 放行，而那一条同时也放行了注入的 <script>——等于把 XSS 的
