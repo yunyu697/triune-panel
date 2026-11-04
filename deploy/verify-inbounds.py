@@ -18,6 +18,13 @@
 而这套脚本验证的是**整条链路**——HTTP 接口 → 入库 → 渲染 → 内核校验 →
 进程真的起来 → 端口真的在监听。这一层踩过的坑（UDP 端口按 TCP 探测、
 切内核后 reality 握手目标为空）单元测试全都发现不了。
+
+**它不验证「客户端握不握得上手」。** 这里所有的绿只说明「配置被接受、内核起来了」，
+而 v1.2.0 那个 bug 正好落在这条缝里：sing-box 的 REALITY 渲染漏了
+`tls.server_name`，内核照常启动、端口照常监听、`sing-box check` 也过，
+**每个客户端却都在握手阶段被拒**——这个脚本全绿。握手层的回归在
+`deploy/verify-reality-link.py`（xray 与 sing-box 两个内核都跑，客户端也用真的）。
+改了 REALITY 相关代码，两个都要跑。
 """
 
 import argparse
@@ -296,6 +303,8 @@ def main():
             print(f"  - {t} [{stage} {code}] {json.dumps(r, ensure_ascii=False)[:300]}")
         return 1
     print("全部场景符合预期")
+    print("（注意：本轮只验证「配置被接受、内核起来了」，不验证客户端能不能握手；"
+          "握手层见 deploy/verify-reality-link.py）")
     return 0
 
 

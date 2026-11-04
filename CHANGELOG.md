@@ -8,6 +8,52 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## 未发布
+
+**补上 REALITY 握手层的回归——v1.2.0 那个 bug 之所以一路绿灯发出去，就是因为这一层
+没人测。** 当时的三层回归全都不覆盖「客户端到底握不握得上手」：单元测试验证的是
+「渲染出的 JSON 长这样」；`deploy/verify-inbounds.py` 对 sing-box REALITY 只验证
+「内核起得来」；`deploy/verify-reality-link.py` 只跑 xray 内核，而 xray 的 REALITY
+用 `serverNames` 列表，根本没有 `tls.server_name` 这个字段，照着 xray 的字段写不会
+出错。于是「内核起来了」被当成了「能用了」。
+
+`deploy/verify-reality-link.py` 从「只测 xray 内核」扩成**两个内核都测**：新增
+`--core xray|singbox|both`（默认 `both`）、`--singbox`、`--sni`。每个内核都走完整
+一条链——建入站 → 建用户 → 应用（真内核起进程）→ **读内核实际渲染出的配置做结构
+断言** → 导出 `vless://` → 按 v2rayN 的方式解析链接 → 用链接里的参数拼真客户端 →
+经它的 socks 端口出网。断言从原来的 8 项涨到每内核 14 项（xray）/ 15 项（sing-box）。
+
+其中两条专治这次的病：
+
+  * `渲染：sing-box tls.server_name 非空` —— 就是 v1.2.0 漏掉的那个字段。它放在
+    「真连」之前，结构不对时第一条就点出是哪一项，不用等握手失败再回头猜。
+  * `链接的 sni 与服务端认的 SNI 一致` —— 渲染丢了这个字段，服务端认的 SNI 列表
+    就是空的，这条会跟着红，把「链接没问题、服务端没写进去」这件事直接摆出来。
+
+客户端的选择有讲究：**xray 客户端两个内核都测**（那是 v2rayN / v2rayNG / mihomo 的
+形态，也是用户实际报障的那条路）；**sing-box 客户端只测 sing-box 内核**——xray
+≥ 26.7.11 的 REALITY 服务端默认只接受 26.3.27 以上的客户端，拿 sing-box 客户端去测
+xray 服务端大概率被拒，那是「客户端太老」不是「链接错了」，记成 FAIL 只会制造假红。
+
+**变异验证**（把 `tls.server_name` 从渲染器里摘掉重建，其余一字不改）：4 条断言同时
+变红——结构断言、链接 SNI 一致性、xray 客户端出网（报
+`REALITY: received real certificate (potential MITM or redirection)`）、sing-box
+客户端出网（报 `reality verification failed`）；还原后 30 项全绿。也就是说这个脚本
+现在真的能抓住它，而不是「怎么都能过」。
+
+`deploy/verify-inbounds.py` 不再让人误以为它验过握手：文件头写明「它不验证客户端
+握不握得上手」，跑完也打一行指路（22 个场景全绿只代表「配置被接受、内核起来了」）。
+
+顺带修一个跑不起来的坑：脚本对回环地址的请求不再走代理。开发机上普遍设着
+`HTTP_PROXY`，urllib 会把 `http://127.0.0.1:18080` 也塞进代理，报
+`upstream connect failed: Connection refused`——看起来像面板没起，其实是被代理挡了。
+远端面板仍然照旧走代理。
+
+**验证**：双内核 30 项断言全绿（xray 14 + sing-box 16，含两个客户端各一次真出网）；
+`deploy/verify-inbounds.py` 22 个场景全绿。
+
+---
+
 ## v1.2.0
 
 **sing-box 内核的 REALITY 入站，任何客户端都连不上。** 症状是「面板上建好节点、
