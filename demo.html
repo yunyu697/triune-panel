@@ -5396,6 +5396,7 @@ async function openExportModal(id) {
   exportId = id;
   const warn = $("ex_warn");
   if (warn) { warn.innerHTML = ""; warn.classList.add("hide"); }
+  const notes = [];
   try {
     const all = await req("/api/inbounds");
     const i = all.find(x => x.id === id);
@@ -5403,14 +5404,37 @@ async function openExportModal(id) {
     // 导出的是「客户端该怎么连」，不是「服务端在监听」。入站停用/草稿时
     // 端口根本没有监听，而链接和 Clash 配置看起来完全正常——排查会一路跑到
     // 客户端、防火墙、REALITY 参数上去（3x-ui JSON 导入忘了开开关就是这么中招的）。
-    if (i && warn && (!i.enabled || i.draft)) {
-      warn.classList.remove("hide");
-      warn.innerHTML =
+    if (i && (!i.enabled || i.draft)) {
+      notes.push(
         `<b>⚠ 这条入站${i.draft ? "还是草稿" : "当前已停用"}，端口 ${i.port} 没有监听。</b><br>` +
         `下面的链接/配置参数本身没问题，但连上去一定失败（超时或被拒）。` +
-        `请先在入站列表打开启用开关，点「应用配置」，确认端口在监听后再导出。`;
+        `请先在入站列表打开启用开关，点「应用配置」，确认端口在监听后再导出。`);
     }
+    // 下载之前先说清「这份文件里到底有几个节点」。以前转换失败是静默跳过的，
+    // 于是 vless+xhttp 这类 mihomo 表示不出来的传输会导出一个 proxies 为空的
+    // 文件——客户端连加载都不肯，而界面只说「已下载」。
+    try {
+      const s = await req(`/api/inbounds/${id}/export?format=summary`);
+      const skipHtml = (list, fmt) => (list || []).map(k =>
+        `<div>· <span class="mono">${escHtml(k.name)}</span> — ${escHtml(k.reason)}</div>`).join("");
+      const cs = (s.clash || {}).skipped || [], ss = (s.singbox || {}).skipped || [];
+      if (!s.nodes) {
+        notes.push(`<b>⚠ 这条入站下没有有效用户，导不出任何节点。</b><br>` +
+          `先到「用户」里建一个用户，并在它上面勾选本入站，再回来导出。`);
+      }
+      if (cs.length) {
+        notes.push(`<b>⚠ ${cs.length} 个节点无法转成 Clash 配置</b>（传输在 mihomo 里没有对应类型）。` +
+          `下载的 Clash 文件里 PROXY 组只有 DIRECT——能加载，但等于直连：${skipHtml(cs)}`);
+      }
+      if (ss.length) {
+        notes.push(`<b>⚠ ${ss.length} 个节点无法转成 sing-box 配置：</b>${skipHtml(ss)}`);
+      }
+    } catch (e) { /* 摘要拿不到不影响导出本身 */ }
   } catch(e){ $("ex_name").textContent = "#" + id; }
+  if (warn && notes.length) {
+    warn.classList.remove("hide");
+    warn.innerHTML = notes.join(`<div style="height:8px"></div>`);
+  }
   $("ex_links").value = "";
   openModal("mExport");
 }
@@ -5439,7 +5463,10 @@ async function exportInboundDownload(fmt) {
     const name = ($("ex_name").textContent.split(" (")[0] || "inbound").replace(/[\/\s]/g, "_");
     let blob, fname;
     if (DEMO) {
-      const body = fmt === "clash" ? "proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n"
+      // 演示模式也给一份**能被 mihomo 加载**的最小配置：
+      // 空 proxy-group 会被拒收（`use` or `proxies` missing）
+      const body = fmt === "clash"
+        ? "proxies: []\nproxy-groups:\n  - name: PROXY\n    type: select\n    proxies: [DIRECT]\nrules:\n  - MATCH,PROXY\n"
         : JSON.stringify({ outbounds: [{ type: "direct", tag: "direct" }] }, null, 2);
       blob = new Blob([body], { type: fmt === "clash" ? "text/yaml" : "application/json" });
       fname = fmt === "clash" ? `${name}-clash.yaml` : fmt === "singbox" ? `${name}-singbox.json` : `${name}-inbound.json`;

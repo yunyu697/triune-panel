@@ -83,6 +83,34 @@ criteria not met`（服务端）/ `REALITY Authentication: false`（客户端）
 `/` + 12 位随机串。保存期仍然要求以 `/` 开头（少了斜杠客户端会拿到语义不明的值，
 抓包才看得出来）。
 
+**导出的 Clash 配置可能连加载都加载不了，而文件里一个字的原因都没有。** 节点转换
+失败以前是 `if err == nil` 静默跳过的。入站用了 mihomo 客户端节点里没有对应表示的
+传输（`xhttp` / `httpupgrade` / `kcp` / `quic`，3x-ui 里都很常见）时，导出的 YAML
+里 `proxies` 是空数组、PROXY 组也是空的——而 mihomo 对空组是**硬拒绝**：
+
+```
+proxy group[0]: PROXY: `use` or `proxies` missing
+configuration file ... test failed
+```
+
+于是「下载 Clash 配置」得到的是一个连加载都加载不了的文件，界面上只显示「已下载」，
+真正的原因被吞掉了。现在：
+
+  * 转换失败的节点与原因写进文件头（`# ⚠ 节点「x」没能导出：mihomo 不支持 xhttp
+    传输的客户端节点`）；
+  * 一个节点都没有时 PROXY 组里放 `DIRECT` 占位，让文件至少能加载（否则连打开都
+    打不开），同时明说「等于直连」；
+  * 新增 `?format=summary`，导出弹窗在**下载之前**就把「几个节点、哪些导不出来、
+    入站在不在监听」摊开；
+  * 没有有效用户时也明说（以前只有 links 格式会写「暂无有效用户」）。
+
+顺带把「mihomo 到底能连什么」用真内核重新回归了一遍（`deploy/verify-mihomo.py`，
+5 组 28 项断言，四组真跑 mihomo 经 socks 出网拿到 204）：`vless+ws`、`vmess+ws`、
+`shadowsocks`、`vless+grpc` 都通。**唯一连不了的是 xray 内核上的 `vless+REALITY`**
+——xray ≥ 26.7.11 的 REALITY 服务端只接受 26.3.27 以上的客户端，而 mihomo 把客户端
+版本写死成 1.8.2，与导出的配置无关。那条入站要换到 sing-box 内核，或者客户端换
+xray 系（v2rayN / v2rayNG）。
+
 ---
 
 ## v1.2.2

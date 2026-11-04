@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -34,8 +35,97 @@ func exportNotice(in *model.Inbound) string {
 	return ""
 }
 
-// handleInboundExport 入站导出：GET /api/inbounds/{id}/export?format=links|clash|singbox|meta
+// exportSkip 一个没能导出的节点及原因。
+//
+// 以前转换失败是 `if err == nil` 直接跳过的，什么痕迹都不留。这造成过一个
+// 很难查的现场：入站是 vless + xhttp（3x-ui 的常见组合），而 mihomo 的客户端
+// 节点里没有 xhttp 这种传输，转换必然失败——于是导出的 YAML 里 `proxies` 是
+// 空数组，`proxy-groups` 里那个组也是空的。mihomo 对空组是**硬拒绝**：
+//
+//	proxy group[0]: PROXY: `use` or `proxies` missing
+//	configuration file ... test failed
+//
+// 用户拿到的是一个连加载都加载不了的文件，文件里一个字的原因都没有，界面上
+// 也只说「已下载」。所以现在把失败的节点和原因都记下来，写进产物与界面。
+type exportSkip struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// skipReason 把转换错误压成一句人话。
+// "传输无法导出为客户端节点: mihomo 不支持 xhttp 传输的客户端节点" 里前半句
+// 是哨兵值，对用户没有信息量。
+func skipReason(err error) string {
+	msg := err.Error()
+	if errors.Is(err, link.ErrTransport) {
+		if i := strings.Index(msg, ": "); i >= 0 {
+			return msg[i+2:]
+		}
+	}
+	return msg
+}
+
+// convertAll 逐个转换，失败的收集起来而不是静默跳过。
+func convertAll(nodes []*link.Node, conv func(*link.Node) (map[string]any, error)) ([]map[string]any, []exportSkip) {
+	items := make([]map[string]any, 0, len(nodes))
+	skipped := make([]exportSkip, 0)
+	for _, n := range nodes {
+		item, err := conv(n)
+		if err != nil {
+			skipped = append(skipped, exportSkip{Name: n.Name, Reason: skipReason(err)})
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, skipped
+}
+
+// exportHeader 生成产物文件头的警告注释。
+//
+// YAML / 纯文本支持注释，客户端会跳过——既能说明问题，又不污染内容。
+// 这些话说的是「为什么这份配置连不上」，不说清楚，用户只能去猜。
+func exportHeader(notice string, skipped []exportSkip, empty string) string {
+	var b strings.Builder
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		b.WriteString("# ⚠ " + s + "\n")
+	}
+	add(notice)
+	for _, s := range skipped {
+		add(fmt.Sprintf("节点「%s」没能导出：%s", s.Name, s.Reason))
+	}
+	add(empty)
+	return b.String()
+}
+
+// emptyClashNote 说明「这份 Clash 配置里为什么没有节点」。
+//
+// 没有节点时 PROXY 组里只剩 DIRECT 占位：不给占位的话 mihomo 会拒收整份
+// 配置（`use` or `proxies` missing），用户看到的是「配置文件用不了」，
+// 而真正的原因是上游一个节点都没导出成功。
+func emptyClashNote(nodeCount, proxyCount int, skipped []exportSkip) string {
+	if proxyCount > 0 {
+		return ""
+	}
+	switch {
+	case len(skipped) > 0:
+		return fmt.Sprintf("%d 个节点都没能转成 mihomo 节点（原因见上），"+
+			"所以 PROXY 组里只有 DIRECT——这份配置能加载，但等于直连。"+
+			"换一种传输方式，或者改用 xray 系的客户端。", len(skipped))
+	case nodeCount == 0:
+		return "这条入站下没有有效用户，所以一个节点都导不出来。" +
+			"先到「用户」里建一个用户并勾选本入站，再导出。PROXY 组里只有 DIRECT。"
+	}
+	return ""
+}
+
+// handleInboundExport 入站导出：GET /api/inbounds/{id}/export?format=links|clash|singbox|meta|summary
 // 为该入站关联的所有有效用户生成可分享的节点配置；草稿/停用用户跳过。
+//
+// summary 只回 JSON 结论（几个节点、哪些导不出来、入站在不在监听），
+// 供导出弹窗在**下载之前**就把问题摊开——比事后看文件头有效得多。
 func (a *Server) handleInboundExport(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -81,14 +171,26 @@ func (a *Server) handleInboundExport(w http.ResponseWriter, r *http.Request) {
 	safeName := strings.ReplaceAll(strings.ReplaceAll(name, "/", "_"), " ", "_")
 
 	switch r.URL.Query().Get("format") {
+	case "summary":
+		_, clashSkip := convertAll(nodes, link.ToClash)
+		_, sbSkip := convertAll(nodes, link.ToSingboxOutbound)
+		writeJSON(w, 200, map[string]any{
+			"nodes":   len(nodes),
+			"notice":  notice,
+			"clash":   map[string]any{"skipped": clashSkip},
+			"singbox": map[string]any{"skipped": sbSkip},
+		})
 	case "clash":
-		proxies := []any{}
-		names := []string{}
-		for _, n := range nodes {
-			if p, err := link.ToClash(n); err == nil {
-				proxies = append(proxies, p)
-				names = append(names, p["name"].(string))
-			}
+		items, skipped := convertAll(nodes, link.ToClash)
+		proxies := make([]any, 0, len(items))
+		names := make([]string, 0, len(items))
+		for _, p := range items {
+			proxies = append(proxies, p)
+			names = append(names, p["name"].(string))
+		}
+		if len(names) == 0 {
+			// 空组会被 mihomo 整份拒收；给个占位让它至少能加载，真因写在文件头
+			names = []string{"DIRECT"}
 		}
 		doc := map[string]any{
 			"port": 7890, "socks-port": 7891, "allow-lan": false,
@@ -100,20 +202,17 @@ func (a *Server) handleInboundExport(w http.ResponseWriter, r *http.Request) {
 			"proxies": proxies,
 		}
 		out, _ := yaml.Marshal(doc)
-		// YAML 支持注释：把「这条入站没在监听」写在文件头上，
-		// 配置跟着文件走，比只在界面上提示更难被忽略。
-		if notice != "" {
-			out = append([]byte("# ⚠ "+notice+"\n"), out...)
-		}
+		// YAML 支持注释：把「为什么连不上」写在文件头上，配置跟着文件走，
+		// 比只在界面上提示更难被忽略。
+		head := exportHeader(notice, skipped, emptyClashNote(len(nodes), len(proxies), skipped))
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-clash.yaml", safeName))
-		_, _ = w.Write(out)
+		_, _ = w.Write(append([]byte(head), out...))
 	case "singbox":
-		outbounds := []any{}
-		for _, n := range nodes {
-			if o, err := link.ToSingboxOutbound(n); err == nil {
-				outbounds = append(outbounds, o)
-			}
+		items, _ := convertAll(nodes, link.ToSingboxOutbound)
+		outbounds := make([]any, 0, len(items)+1)
+		for _, o := range items {
+			outbounds = append(outbounds, o)
 		}
 		doc := map[string]any{
 			"outbounds": append(outbounds, map[string]any{"type": "direct", "tag": "direct"}),
