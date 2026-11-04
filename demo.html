@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.4 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- viewport-fit=cover 让页面铺到刘海/Home Indicator 区域；配合下面的
+     env(safe-area-inset-*) 把内容推回安全区，否则 iPhone 底部一排按钮会被横条压住。 -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Triune Panel</title>
 <!-- 加到主屏（PWA）。清单、service worker、图标都由二进制内嵌提供，
      见 internal/webui/pwa/ —— 它们不落在 data/web 里，升级时不会有残件。 -->
@@ -209,7 +211,7 @@ body[data-role="admin"] .need-owner{display:none!important}
 .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 60%,transparent);
   animation:pulse 2.2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
-.content{padding:24px 28px 48px;max-width:1240px;width:100%;margin:0 auto}
+.content{padding:24px 28px calc(48px + env(safe-area-inset-bottom));max-width:1240px;width:100%;margin:0 auto}
 @media (max-width:960px){
   .shell{flex-direction:column}
   .side{width:100%;flex-direction:row;align-items:center;padding:8px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}
@@ -230,8 +232,11 @@ body[data-role="admin"] .need-owner{display:none!important}
   .side-foot .theme-btn{width:auto;padding:7px 9px}
   .side-foot .theme-btn span{display:none}
   .logo b{display:none}
-  .content{padding:18px 16px 40px}
-  .topbar{padding:12px 16px}
+  .content{padding:18px max(16px,env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+  .topbar{padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left))}
+  /* 加到主屏（standalone）时顶部状态栏会压在导航条上，横屏刘海又会切掉左右
+     第一个入口。四边都让开安全区；普通 Safari 下 env() 取 0，桌面无变化。 */
+  .side{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 8px max(8px,env(safe-area-inset-left))}
 }
 
 /* ============ 卡片 ============ */
@@ -266,8 +271,9 @@ body[data-role="admin"] .need-owner{display:none!important}
 /* 设置页常驻操作条：整页十几张卡片，保存按钮滚出视野就找不着了。
    钉在视口底部，按钮跟着当前分区变（基础设置 / 变更通知 / 组件更新），
    左侧小字写明它现在保存的是哪一块，避免按错。 */
-/* bottom 留 12px：贴 0 时底边会被滚动容器裁掉一截，看起来像被切了 */
-.set-bar{position:sticky;bottom:12px;z-index:8;display:flex;gap:12px;align-items:center;
+/* bottom 留 12px：贴 0 时底边会被滚动容器裁掉一截，看起来像被切了。
+   iPhone 的 Home Indicator 还要再让开一截，否则保存按钮正好压在横条底下。 */
+.set-bar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom));z-index:8;display:flex;gap:12px;align-items:center;
   margin:10px 0 0;padding:10px 14px;background:var(--card);
   border:1px solid var(--line);border-radius:var(--r);
   box-shadow:0 -10px 24px -14px rgba(0,0,0,.45)}
@@ -461,6 +467,25 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
   .seg-lg{padding:4px;gap:4px;border-radius:13px}
   .seg-lg button{font-size:14px;padding:9px 15px;gap:7px;border-radius:9px}
   .seg-lg button svg{width:15px;height:15px}
+
+  /* --- 手机专用 --- */
+  /* iOS Safari 遇到 font-size < 16px 的输入控件会自动放大整页，而且不会缩回，
+     填完表单页面就一直处于放大状态。手机上统一抬到 16px，桌面保持 13.5px 的紧凑排版。
+     textarea（YAML / JSON 编辑框）同样会触发缩放，不能漏。
+     必须用 !important：项目里搜索框、规则集策略下拉、2FA 地址框都有内联
+     font-size（还有 app.js 动态生成的 <select class="input gpol">），
+     普通选择器盖不住内联样式，漏一个就还是在 iOS 上放大。 */
+  .input,input:not([type=checkbox]):not([type=radio]):not([type=hidden]),select,textarea,select.sel-sm{font-size:16px!important}
+  /* 触控目标：桌面 34px 高的按钮在手机上很难点准。主要控件抬到 38–42px，
+     但不追求全部 44px——配置生成器一页上百个标签，全抬高会变成无尽长列表。 */
+  .nav-item{min-height:42px}
+  .btn{min-height:38px;padding:9px 14px}
+  .btn.sm{min-height:34px}
+  .seg button{min-height:34px}
+  .tag-chip{min-height:34px}
+  .seg-lg button{min-height:40px}
+  /* 弹窗的窄屏规则放在「============ 弹层 ============」段之后——
+     那里才是 .overlay/.modal 的定义，写在这儿会被后面的同名规则盖掉。 */
 }
 /* 320–380px（小屏安卓 / iPhone SE 一代）连版本号都放不下，标题会被折成
    「配置 / 生成」。版本号在设置 → 运维里仍有，这里让位给标题。 */
@@ -490,6 +515,12 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .mirror-msg b{font-weight:600}
 
 /* ============ 表格 ============ */
+/* 列多的表格在窄屏会被横向截断，界面上却没有任何「还能往右滑」的迹象。
+   app.js 只在真能滑时把提示插进来，且必须是 .tbl-wrap 的兄弟节点——
+   放进滚动容器里会被内容一起带走，滑两下就看不见了。 */
+.tbl-hint{display:none}
+@media (max-width:960px){.tbl-hint{display:block;text-align:center;font-size:11.5px;
+  color:var(--muted);padding:0 0 7px;letter-spacing:.02em}}
 .tbl-wrap{overflow-x:auto;margin:0 -4px;border-radius:var(--r)}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
@@ -551,10 +582,13 @@ td.num{font-variant-numeric:tabular-nums}
 
 /* ============ 弹层 ============ */
 .overlay{position:fixed;inset:0;background:var(--mask);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
-  display:flex;align-items:center;justify-content:center;padding:20px;
+  display:flex;align-items:center;justify-content:center;
+  padding:calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   opacity:0;pointer-events:none;transition:opacity var(--t-fast);z-index:100}
 .overlay.show{opacity:1;pointer-events:auto}
-.modal{width:100%;max-width:580px;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);
+/* vh 在手机上是「地址栏收起」的高度，弹窗底部会被地址栏吃掉；dvh 跟着可视区变。
+   两行都留，不认识 dvh 的老浏览器取前一行。 */
+.modal{width:100%;max-width:580px;max-height:86vh;max-height:86dvh;overflow-y:auto;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:24px;
   transform:translateY(16px) scale(.97);transition:transform var(--t)}
 .overlay.show .modal{transform:none}
@@ -563,8 +597,25 @@ td.num{font-variant-numeric:tabular-nums}
 .modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;font-family:var(--mono);
   font-size:12px;overflow:auto;max-height:46vh;white-space:pre-wrap;word-break:break-all}
 
+/* 手机弹窗：必须写在 .overlay/.modal 定义之后，否则被同名规则盖掉。
+   可用高度直接取 flex 容器的 100%（已经扣掉遮罩内距和安全区），比 86vh 多出
+   一截；底部操作条吸附在滚动容器底部，320×568 的「新增入站」不必滚完整屏
+   表单才看得见「保存」。0 18px 的实心阴影把 padding-bottom 补成同色，
+   滚动时不会从按钮下方露出半截内容。 */
+@media (max-width:640px){
+  .overlay{padding:calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left))}
+  .modal{max-height:100%;padding:18px 16px;border-radius:18px}
+  .modal .foot{position:sticky;bottom:0;z-index:1;background:var(--card);
+    padding:12px 0 0;margin-top:16px;border-top:1px solid var(--line);
+    box-shadow:0 18px 0 var(--card)}
+  .modal pre{max-height:40dvh}
+}
+
 /* ============ Toast ============ */
-.toasts{position:fixed;top:18px;right:18px;z-index:200;display:flex;flex-direction:column;gap:9px;pointer-events:none}
+.toasts{position:fixed;top:calc(18px + env(safe-area-inset-top));right:calc(18px + env(safe-area-inset-right));
+  z-index:200;display:flex;flex-direction:column;gap:9px;pointer-events:none}
+/* 手机横幅：左右各留 12px，别让长提示（导入结果、错误信息）顶出屏幕 */
+@media (max-width:640px){.toasts{left:12px;right:12px}.toast{max-width:none}}
 .toast{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
   box-shadow:var(--shadow-lg);border-radius:var(--r);padding:11px 16px;font-size:13.5px;max-width:400px;
   animation:toastIn .28s cubic-bezier(.34,1.3,.5,1)}
@@ -4340,6 +4391,45 @@ function renderNav() {
   $("nav").innerHTML = html;
 }
 renderNav();
+
+/* ---- 窄屏可用性 ---- */
+/* 导航条在 960px 以下变成横向可滑的一行。切到靠后的页面时，选中的入口可能
+   整个在视口外：用户既看不到「我在哪一页」，也找不到回去的路。
+   只动导航条自己的 scrollLeft，不用 scrollIntoView——那会连 .main 一起滚，
+   页面会莫名跳一下。 */
+function scrollNavToActive() {
+  const nav = $("nav");
+  if (!nav || nav.scrollWidth <= nav.clientWidth + 1) return;
+  const on = nav.querySelector(".nav-item.on");
+  if (!on) return;
+  const nb = nav.getBoundingClientRect(), ob = on.getBoundingClientRect();
+  const left = ob.left - nb.left + nav.scrollLeft;
+  nav.scrollLeft = Math.max(0, left - (nb.width - ob.width) / 2);
+}
+/* 表格列多时 .tbl-wrap 会横向截断，但界面上没有任何「还能往右滑」的迹象，
+   手机上常以为缺的那一列根本不存在。提示必须放在滚动容器**外面**（兄弟节点），
+   放里面会被横向滚动一起带走。只处理当前可见的表格：display:none 的 view
+   量不出 scrollWidth，会被误判成「不用滑」。 */
+function markScrollableTables() {
+  document.querySelectorAll(".view.active .tbl-wrap, .overlay.show .tbl-wrap").forEach(w => {
+    const can = w.scrollWidth > w.clientWidth + 2;
+    let hint = w.previousElementSibling;
+    if (hint && !hint.classList.contains("tbl-hint")) hint = null;
+    if (can && !hint) {
+      const el = document.createElement("div");
+      el.className = "tbl-hint";
+      el.textContent = "← 左右滑动查看全部列 →";
+      w.parentNode.insertBefore(el, w);
+    } else if (!can && hint) hint.remove();
+  });
+}
+let __navResizeTimer;
+addEventListener("resize", () => {
+  clearTimeout(__navResizeTimer);
+  __navResizeTimer = setTimeout(() => { markScrollableTables(); scrollNavToActive(); }, 120);
+});
+requestAnimationFrame(scrollNavToActive);
+
 $("nav").addEventListener("click", e => {
   const b = e.target.closest(".nav-item");
   if (b) goto(b.dataset.v);
@@ -4352,6 +4442,8 @@ function goto(v, sect) {
   CURRENT = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  scrollNavToActive();
+  markScrollableTables();
   $("pageTitle").textContent = TITLES[v];
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
@@ -4376,7 +4468,13 @@ function toast(msg, type = "ok") {
   $("toasts").appendChild(el);
   setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 3000);
 }
-function openModal(id){ $(id).classList.add("show"); }
+function openModal(id){
+  const ov = $(id);
+  ov.classList.add("show");
+  // 上次关掉时停在中段的弹窗，再打开应该从头看；顺带重算表格横滑提示
+  const m = ov.querySelector(".modal"); if (m) m.scrollTop = 0;
+  markScrollableTables();
+}
 function closeModal(id){ $(id).classList.remove("show"); }
 function ask(title, text) {
   return new Promise(resolve => {
@@ -5200,6 +5298,8 @@ async function loadAll() {
   if (!isViewer()) jobs.push(loadSettings(), loadGen(), loadAuth2FA());
   if (isOwner()) jobs.push(loadAdmins());
   await Promise.allSettled(jobs);
+  markScrollableTables();   // 表格内容填进去之后才知道要不要横滑
+  scrollNavToActive();      // 角色过滤后导航项可能变少，重新对齐
 }
 function fmtBytes(b) {
   if (!b) return "0";
@@ -5503,7 +5603,10 @@ const SB_VERS = [
 ];
 let genSBVer = "1.14";
 const GEN_TARGET_NOTES = {
-  client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。",
+  /* 7890 只是导出文件里的默认值。Clash Verge 默认 7897、FlClash 也有自己的设置，
+     它们会覆盖 mixed-port；照着 7890 去配浏览器代理会连到没人监听的端口，
+     现象是「节点在线、网页全打不开」。与 genconfig.go 的文件头提示保持一致。 */
+  client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。端口以客户端界面上显示的为准：Clash Verge 等会用自己的设置覆盖 7890（默认 7897）。",
   "main-router": "主路由模式：启用 TUN 接管全机流量 + DNS 劫持 :53 + 流量嗅探，局域网设备零配置；建议先在单设备上验证配置。",
   "side-router": "旁路由模式：启用 TUN + DNS 劫持 + 局域网监听；把设备的网关和 DNS 指向本机 IP 即可接管，主路由无需改动。"
 };

@@ -195,6 +195,45 @@ function renderNav() {
   $("nav").innerHTML = html;
 }
 renderNav();
+
+/* ---- 窄屏可用性 ---- */
+/* 导航条在 960px 以下变成横向可滑的一行。切到靠后的页面时，选中的入口可能
+   整个在视口外：用户既看不到「我在哪一页」，也找不到回去的路。
+   只动导航条自己的 scrollLeft，不用 scrollIntoView——那会连 .main 一起滚，
+   页面会莫名跳一下。 */
+function scrollNavToActive() {
+  const nav = $("nav");
+  if (!nav || nav.scrollWidth <= nav.clientWidth + 1) return;
+  const on = nav.querySelector(".nav-item.on");
+  if (!on) return;
+  const nb = nav.getBoundingClientRect(), ob = on.getBoundingClientRect();
+  const left = ob.left - nb.left + nav.scrollLeft;
+  nav.scrollLeft = Math.max(0, left - (nb.width - ob.width) / 2);
+}
+/* 表格列多时 .tbl-wrap 会横向截断，但界面上没有任何「还能往右滑」的迹象，
+   手机上常以为缺的那一列根本不存在。提示必须放在滚动容器**外面**（兄弟节点），
+   放里面会被横向滚动一起带走。只处理当前可见的表格：display:none 的 view
+   量不出 scrollWidth，会被误判成「不用滑」。 */
+function markScrollableTables() {
+  document.querySelectorAll(".view.active .tbl-wrap, .overlay.show .tbl-wrap").forEach(w => {
+    const can = w.scrollWidth > w.clientWidth + 2;
+    let hint = w.previousElementSibling;
+    if (hint && !hint.classList.contains("tbl-hint")) hint = null;
+    if (can && !hint) {
+      const el = document.createElement("div");
+      el.className = "tbl-hint";
+      el.textContent = "← 左右滑动查看全部列 →";
+      w.parentNode.insertBefore(el, w);
+    } else if (!can && hint) hint.remove();
+  });
+}
+let __navResizeTimer;
+addEventListener("resize", () => {
+  clearTimeout(__navResizeTimer);
+  __navResizeTimer = setTimeout(() => { markScrollableTables(); scrollNavToActive(); }, 120);
+});
+requestAnimationFrame(scrollNavToActive);
+
 $("nav").addEventListener("click", e => {
   const b = e.target.closest(".nav-item");
   if (b) goto(b.dataset.v);
@@ -207,6 +246,8 @@ function goto(v, sect) {
   CURRENT = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  scrollNavToActive();
+  markScrollableTables();
   $("pageTitle").textContent = TITLES[v];
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
@@ -231,7 +272,13 @@ function toast(msg, type = "ok") {
   $("toasts").appendChild(el);
   setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 3000);
 }
-function openModal(id){ $(id).classList.add("show"); }
+function openModal(id){
+  const ov = $(id);
+  ov.classList.add("show");
+  // 上次关掉时停在中段的弹窗，再打开应该从头看；顺带重算表格横滑提示
+  const m = ov.querySelector(".modal"); if (m) m.scrollTop = 0;
+  markScrollableTables();
+}
 function closeModal(id){ $(id).classList.remove("show"); }
 function ask(title, text) {
   return new Promise(resolve => {
@@ -1055,6 +1102,8 @@ async function loadAll() {
   if (!isViewer()) jobs.push(loadSettings(), loadGen(), loadAuth2FA());
   if (isOwner()) jobs.push(loadAdmins());
   await Promise.allSettled(jobs);
+  markScrollableTables();   // 表格内容填进去之后才知道要不要横滑
+  scrollNavToActive();      // 角色过滤后导航项可能变少，重新对齐
 }
 function fmtBytes(b) {
   if (!b) return "0";
@@ -1358,7 +1407,10 @@ const SB_VERS = [
 ];
 let genSBVer = "1.14";
 const GEN_TARGET_NOTES = {
-  client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。",
+  /* 7890 只是导出文件里的默认值。Clash Verge 默认 7897、FlClash 也有自己的设置，
+     它们会覆盖 mixed-port；照着 7890 去配浏览器代理会连到没人监听的端口，
+     现象是「节点在线、网页全打不开」。与 genconfig.go 的文件头提示保持一致。 */
+  client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。端口以客户端界面上显示的为准：Clash Verge 等会用自己的设置覆盖 7890（默认 7897）。",
   "main-router": "主路由模式：启用 TUN 接管全机流量 + DNS 劫持 :53 + 流量嗅探，局域网设备零配置；建议先在单设备上验证配置。",
   "side-router": "旁路由模式：启用 TUN + DNS 劫持 + 局域网监听；把设备的网关和 DNS 指向本机 IP 即可接管，主路由无需改动。"
 };

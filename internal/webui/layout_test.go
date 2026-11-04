@@ -80,3 +80,65 @@ func TestNoInlineGridColumns(t *testing.T) {
 		}
 	}
 }
+
+// ---- 手机端 ----
+// 这几条同样「改坏了不报错，只会在真机上用不了」，而且桌面预览完全看不出来。
+
+// viewport-fit=cover 是 env(safe-area-inset-*) 生效的前提；少了它，下面所有
+// 让开安全区的写法都取 0，加到主屏后底部按钮会被 Home Indicator 压住。
+func TestMobileSafeArea(t *testing.T) {
+	css := string(indexHTML)
+	if !strings.Contains(css, "initial-scale=1,viewport-fit=cover") {
+		t.Error("viewport 缺 viewport-fit=cover：env(safe-area-inset-*) 会全部取 0")
+	}
+	for _, frag := range []string{
+		"calc(48px + env(safe-area-inset-bottom))",        // .content 底部留白
+		"bottom:calc(12px + env(safe-area-inset-bottom))", // 设置页常驻保存条
+		"padding:max(8px,env(safe-area-inset-top))",       // 窄屏导航条
+	} {
+		if !strings.Contains(css, frag) {
+			t.Errorf("CSS 缺安全区适配 %q：iPhone 上内容会被状态栏/Home Indicator 遮住", frag)
+		}
+	}
+}
+
+// iOS Safari 遇到 font-size < 16px 的输入控件会自动放大整页，且不缩回。
+// 搜索框、规则集策略下拉、2FA 地址框都带内联 font-size，普通选择器盖不住，
+// 所以窄屏那条规则必须是 !important。
+func TestMobileInputFontPreventsIOSZoom(t *testing.T) {
+	if !strings.Contains(string(indexHTML), "font-size:16px!important") {
+		t.Error("窄屏输入控件缺 font-size:16px!important：iOS 上点输入框会放大整页且不会缩回")
+	}
+}
+
+// 小屏弹窗（320×568 的「新增入站」）内容比视口长，底部「保存」原本要滚完
+// 整屏表单才看得见。操作条必须吸附在滚动容器底部。
+func TestMobileModalFootSticky(t *testing.T) {
+	if !strings.Contains(string(indexHTML), ".modal .foot{position:sticky;bottom:0") {
+		t.Error("窄屏弹窗操作条缺 sticky：小屏上「保存」按钮落在视口外")
+	}
+}
+
+// 窄屏导航条是横向可滑的一行，切到靠后的页面时选中项会在视口外；表格被
+// 横向截断时也得给用户「还能往右滑」的提示。两件事都由 app.js 在布局后处理，
+// 只写 CSS 不行（display:none 的 view 量不出 scrollWidth）。
+func TestMobileNavAndTableHints(t *testing.T) {
+	js, err := scriptAssets.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	// 减掉函数定义本身，数的是「真的被调用了几处」：切页、数据加载完、
+	// 窗口缩放，少一处就有一个场景漏掉。只检查函数是否存在会假绿。
+	navCalls := strings.Count(s, "scrollNavToActive()") - strings.Count(s, "function scrollNavToActive()")
+	if navCalls < 3 {
+		t.Errorf("scrollNavToActive 只被调了 %d 处（应至少 3 处：切页/加载完/缩放）", navCalls)
+	}
+	tblCalls := strings.Count(s, "markScrollableTables()") - strings.Count(s, "function markScrollableTables()")
+	if tblCalls < 4 {
+		t.Errorf("markScrollableTables 只被调了 %d 处（应至少 4 处：切页/加载完/开弹窗/缩放）", tblCalls)
+	}
+	if !strings.Contains(s, "class = \"tbl-hint\"") && !strings.Contains(s, "className = \"tbl-hint\"") {
+		t.Error("表格提示元素类名变了，CSS 里的 .tbl-hint 会失配")
+	}
+}
