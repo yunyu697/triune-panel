@@ -1231,7 +1231,7 @@ async function loadInbounds() {
     INB_N = j.length;
     const stInb = $("st_inb"); if (stInb) stInb.textContent = j.length;
     $("ibtbody").innerHTML = j.map(i => { return `<tr>
-      <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}</td>
+      <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}${i.enabled ? "" : ' <span class="badge b-warn" title="未启用：端口没有监听，导出的链接连不上">未启用</span>'}</td>
       <td><span class="badge b-acc">${i.core}</span></td><td>${i.protocol}</td>
       <td class="num">${i.port}</td><td>${i.transport}</td><td>${i.tls}</td>
       <td><label class="sw"><input type="checkbox" ${i.enabled?"checked":""} data-act="toggleInbound" data-args="${escJson([i.id])}" data-el="checked"><i></i></label></td>
@@ -1249,10 +1249,22 @@ async function loadInbounds() {
 let exportId = null;
 async function openExportModal(id) {
   exportId = id;
+  const warn = $("ex_warn");
+  if (warn) { warn.innerHTML = ""; warn.classList.add("hide"); }
   try {
     const all = await req("/api/inbounds");
     const i = all.find(x => x.id === id);
     $("ex_name").textContent = i ? `${i.name} (${i.core}:${i.port})` : "#" + id;
+    // 导出的是「客户端该怎么连」，不是「服务端在监听」。入站停用/草稿时
+    // 端口根本没有监听，而链接和 Clash 配置看起来完全正常——排查会一路跑到
+    // 客户端、防火墙、REALITY 参数上去（3x-ui JSON 导入忘了开开关就是这么中招的）。
+    if (i && warn && (!i.enabled || i.draft)) {
+      warn.classList.remove("hide");
+      warn.innerHTML =
+        `<b>⚠ 这条入站${i.draft ? "还是草稿" : "当前已停用"}，端口 ${i.port} 没有监听。</b><br>` +
+        `下面的链接/配置参数本身没问题，但连上去一定失败（超时或被拒）。` +
+        `请先在入站列表打开启用开关，点「应用配置」，确认端口在监听后再导出。`;
+    }
   } catch(e){ $("ex_name").textContent = "#" + id; }
   $("ex_links").value = "";
   openModal("mExport");
