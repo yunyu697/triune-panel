@@ -253,23 +253,42 @@ func TestMobileContentClearsBottomNav(t *testing.T) {
 	}
 }
 
-// 「应用配置」在手机上是常驻动作：导航条左侧的品牌图标在手机上只是装饰，
-// 让出这块位置给它。必须留在导航条内（不能浮在内容上挡住图表），
-// 且不能被卷进 #nav 的横向滚动区。
-func TestMobilePinnedApplyButton(t *testing.T) {
+// 「应用配置」是每次改完配置都要走的动作（渲染 → 校验 → 原子替换），埋在导航列表里
+// 每次都得翻，所以两端都常驻。
+//
+// 桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，导航滚到哪儿
+// 它都在；早先只给手机做，PC 上还得去「配置」分组里找「应用 / 修订」。
+// 手机：导航条横排，它占最左侧一格（order:-1，DOM 里排在 #nav 之后）。
+// 两处都在导航区域内部——浮在内容上会挡住卡片，还得为它多留一段底部空白。
+func TestPinnedApplyButton(t *testing.T) {
 	css := string(indexHTML)
-	if !strings.Contains(css, ".side-apply{display:none}") {
-		t.Error("缺 .side-apply 的桌面隐藏规则：桌面侧栏会多出一个「应用」按钮")
+	// 桌面：默认就显示，且是侧栏里的一条整宽按钮
+	base := cssRule(t, css, ".side-apply")
+	if strings.Contains(base, "display:none") {
+		t.Error("桌面把「应用」按钮藏起来了：PC 上又得去导航列表里翻「应用 / 修订」")
 	}
-	block := cssBlock(t, string(indexHTML), "@media (max-width:960px){\n  .side .logo{display:none}")
-	for _, frag := range []string{".side .logo{display:none}", ".side-apply{display:inline-flex"} {
+	for _, frag := range []string{"display:inline-flex", "width:100%"} {
+		if !strings.Contains(base, frag) {
+			t.Errorf("桌面「应用」按钮缺 %q：不是侧栏底部那条整宽按钮", frag)
+		}
+	}
+	// DOM 位置：夹在 #nav 与 .side-foot 之间。放进 #nav 会跟着导航一起滚走，
+	// 放到 .side-foot 之后会被账号区挤到视口外。
+	iNav := strings.Index(css, `<nav id="nav"></nav>`)
+	iBtn := strings.Index(css, `id="sideApply"`)
+	iFoot := strings.Index(css, `<div class="side-foot">`)
+	if iNav < 0 || iBtn < 0 || iFoot < 0 {
+		t.Fatalf("侧栏结构变了：nav=%d btn=%d foot=%d", iNav, iBtn, iFoot)
+	}
+	if !(iNav < iBtn && iBtn < iFoot) {
+		t.Error("「应用」按钮必须夹在 #nav 与 .side-foot 之间：放进 #nav 会跟着导航滚走")
+	}
+	// 窄屏：让出品牌图标的位置，并用 order 挪到导航条最左侧
+	block := cssBlock(t, css, "@media (max-width:960px){\n  .side .logo{display:none}")
+	for _, frag := range []string{".side .logo{display:none}", "order:-1", "width:auto"} {
 		if !strings.Contains(block, frag) {
 			t.Errorf("窄屏缺 %q：常驻「应用」按钮没地方放", frag)
 		}
-	}
-	i, j := strings.Index(css, `id="sideApply"`), strings.Index(css, `<nav id="nav">`)
-	if i < 0 || j < 0 || i > j {
-		t.Error("「应用」按钮必须在 #nav 之前（放进去会跟着导航一起横滑走）")
 	}
 }
 

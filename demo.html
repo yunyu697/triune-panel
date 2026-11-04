@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.7 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -335,21 +335,36 @@ body[data-role="admin"] .need-owner{display:none!important}
    导航条底下——点得到的是导航项，不是保存。 */
 @media (max-width:960px){.set-bar{bottom:calc(var(--nav-h,60px) + 10px)}}
 
-/* 手机上「应用配置」常驻：底部导航一行塞不下 11 个入口，最常用的那个不能靠横滑去找。
-   做法是把导航条左侧的品牌图标让出来——它在手机上只剩一个装饰用的盾牌（文字早就
-   藏了），而「应用」是每次改完配置都要点的。放在导航条里而不是浮在内容上，就不会
-   挡住图表，也不用为了它多留一段底部空白。 */
-.side-apply{display:none}
+/* 「应用配置」常驻：渲染 → 校验 → 原子替换是每次改完配置都要走的动作，
+   埋在导航列表里（「应用 / 修订」在「配置」分组第三个）就得每次翻。
+   两个端都在**导航区域内部**给出常驻入口，不浮在内容上——浮层会挡住卡片，
+   还要为它多留一段底部空白。
+   桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，
+          所以导航滚到哪儿它都在。
+   手机：导航条横排，它占最左侧一格（见下面的 @media，order:-1）。 */
+.side-apply{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  width:100%;height:38px;flex:0 0 auto;margin:12px 0 6px;
+  border:none;border-radius:var(--r);cursor:pointer;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));color:var(--on-acc);
+  font:600 13px/1 var(--font);
+  box-shadow:0 6px 14px -9px rgba(20,40,80,.55);
+  transition:box-shadow var(--t-fast),transform var(--t-fast),background var(--t-fast),color var(--t-fast)}
+.side-apply:hover{box-shadow:0 8px 18px -9px rgba(20,40,80,.7)}
+.side-apply:active{transform:translateY(1px)}
+/* 桌面侧栏放得下全称，手机导航条那一格只够两个字 */
+.side-apply .sa-s{display:none}
+/* 已经在应用页时不必再强调，跟导航项一样只留「当前」的观感 */
+body[data-view="apply"] .side-apply{background:var(--acc-soft);color:var(--acc-text);box-shadow:none}
+/* 手机上导航条横排：品牌图标只剩一个装饰用的盾牌（文字早就藏了），这块位置让给
+   「应用」。order:-1 把它挪到最左侧——DOM 里它排在 #nav 之后，因为桌面上要落在
+   导航下面。 */
 @media (max-width:960px){
   .side .logo{display:none}
-  .side-apply{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;
-    height:40px;padding:0 12px;margin-right:4px;border:none;border-radius:10px;
-    background:linear-gradient(135deg,var(--acc),var(--acc2));color:var(--on-acc);
-    font:600 13px/1 var(--font);cursor:pointer;
+  .side-apply{order:-1;width:auto;height:40px;margin:0 4px 0 0;padding:0 12px;
+    gap:5px;border-radius:10px;font-size:13px;
     box-shadow:0 6px 14px -8px rgba(20,40,80,.6)}
-  .side-apply:active{transform:translateY(1px)}
-  /* 已经在应用页时不必再强调，跟导航项一样只留「当前」的观感 */
-  body[data-view="apply"] .side-apply{background:var(--acc-soft);color:var(--acc-text);box-shadow:none}
+  .side-apply .sa-l{display:none}
+  .side-apply .sa-s{display:inline}
 }
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 /* 网格子项默认 min-width:auto（不肯小于内容宽度）。里面一旦有比列还宽的东西，
@@ -803,13 +818,13 @@ canvas{display:block;width:100%}
       <b>Triune Panel</b>
       <span class="logo-v" id="logoVer">—</span>
     </div>
-    <!-- 手机端常驻「应用配置」：导航条左侧的品牌图标在手机上只是装饰，
-         这块位置让给每次改完配置都要点的动作（见 .side-apply 的样式） -->
+    <nav id="nav"></nav>
+    <!-- 常驻「应用配置」：桌面上钉在导航与账号区之间（导航自己滚，它不动），
+         手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。 -->
     <button class="side-apply" id="sideApply" data-act="goto" data-args='["apply"]' aria-label="应用配置">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-      <span>应用</span>
+      <span class="sa-l">应用配置</span><span class="sa-s">应用</span>
     </button>
-    <nav id="nav"></nav>
     <div class="side-foot">
       <div class="whoami" id="whoami" title="当前登录账号与角色">
         <span class="whoami-user" id="whoami_user">—</span>
