@@ -8,7 +8,7 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
-## 未发布
+## v1.2.3
 
 **3x-ui 导入的入站切不到 sing-box 内核。** 导入时把 xray 的入站顶层字段
 `sniffing` / `allocate` 原样存进 settings（这是对的——xray 渲染器要把它们透传下去），
