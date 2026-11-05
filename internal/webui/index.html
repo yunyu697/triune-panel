@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -336,7 +336,9 @@ body[data-role="admin"] .need-owner{display:none!important}
 @media (max-width:960px){.set-bar{bottom:calc(var(--nav-h,60px) + 10px)}}
 
 /* 「应用配置」常驻：渲染 → 校验 → 原子替换是每次改完配置都要走的动作，
-   埋在导航列表里（「应用 / 修订」在「配置」分组第三个）就得每次翻。
+   以前埋在导航列表里（「应用 / 修订」在「配置」分组第三个），点进去还是**切页**
+   ——改完配置点一下，页面被换走，回来还得重新找原处。
+   现在它开的是弹窗（#mApply）：在哪个页面点就在哪个页面开，关掉仍在原处。
    两个端都在**导航区域内部**给出常驻入口，不浮在内容上——浮层会挡住卡片，
    还要为它多留一段底部空白。
    桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，
@@ -353,8 +355,6 @@ body[data-role="admin"] .need-owner{display:none!important}
 .side-apply:active{transform:translateY(1px)}
 /* 桌面侧栏放得下全称，手机导航条那一格只够两个字 */
 .side-apply .sa-s{display:none}
-/* 已经在应用页时不必再强调，跟导航项一样只留「当前」的观感 */
-body[data-view="apply"] .side-apply{background:var(--acc-soft);color:var(--acc-text);box-shadow:none}
 /* 手机上导航条横排：品牌图标只剩一个装饰用的盾牌（文字早就藏了），这块位置让给
    「应用」。order:-1 把它挪到最左侧——DOM 里它排在 #nav 之后，因为桌面上要落在
    导航下面。 */
@@ -688,6 +688,18 @@ td.num{font-variant-numeric:tabular-nums}
 .modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;font-family:var(--mono);
   font-size:12px;overflow:auto;max-height:46vh;white-space:pre-wrap;word-break:break-all}
 
+/* 应用弹窗：预检 / 对比的结果就地展开在同一层，不再叠第二层遮罩。
+   手机上两层弹窗会互相压住，关掉上层之后下层的手势也容易串。 */
+.ap-bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.ap-res{margin-top:14px}
+.ap-res-h{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:13px;flex-wrap:wrap}
+.ap-res pre{max-height:260px;margin:0}
+/* 桌面弹窗 600px 宽，内核下拉撑满整行会空出一大片；手机上又该占满。
+   「修订历史」推到右端，窄屏换行后回到左端，跟上面两个按钮对齐。 */
+.ap-core{max-width:240px}
+.ap-hist{margin-left:auto}
+@media (max-width:640px){.ap-core{max-width:none}.ap-hist{margin-left:0}}
+
 /* 手机弹窗：必须写在 .overlay/.modal 定义之后，否则被同名规则盖掉。
    可用高度直接取 flex 容器的 100%（已经扣掉遮罩内距和安全区），比 86vh 多出
    一截；底部操作条吸附在滚动容器底部，320×568 的「新增入站」不必滚完整屏
@@ -820,8 +832,9 @@ canvas{display:block;width:100%}
     </div>
     <nav id="nav"></nav>
     <!-- 常驻「应用配置」：桌面上钉在导航与账号区之间（导航自己滚，它不动），
-         手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。 -->
-    <button class="side-apply" id="sideApply" data-act="goto" data-args='["apply"]' aria-label="应用配置">
+         手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。
+         点它**开弹窗**（#mApply），不切页——应用是一个动作，不该把当前页换走。 -->
+    <button class="side-apply need-admin" id="sideApply" data-act="openApply" aria-label="应用配置">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
       <span class="sa-l">应用配置</span><span class="sa-s">应用</span>
     </button>
@@ -879,7 +892,7 @@ canvas{display:block;width:100%}
           <div class="hero-act">
             <button class="btn primary" data-act="openInboundModal">+ 新增入站</button>
             <button class="btn" data-act="goto" data-args='["gen"]'>生成配置</button>
-            <button class="btn" data-act="goto" data-args='["apply"]'>应用配置</button>
+            <button class="btn need-admin" data-act="openApply">应用配置</button>
           </div>
         </div>
       </div>
@@ -930,7 +943,7 @@ canvas{display:block;width:100%}
           <button class="quick" data-act="openClientModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
           <button class="quick" data-act="goto" data-args='["import"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>外部节点</button>
           <button class="quick" data-act="goto" data-args='["gen"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
-          <button class="quick" data-act="goto" data-args='["apply"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
+          <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
           <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
         </div>
         <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
@@ -1193,20 +1206,19 @@ canvas{display:block;width:100%}
       </div>
     </section>
 
-    <!-- 应用 / 修订 -->
+    <!-- 修订与日志：不占导航位。应用是「动作」，入口是常驻按钮 + 弹窗（#mApply）；
+         这一页只负责事后查看——哪次应用成功、失败原因、内核实际在说什么。
+         从弹窗里的「修订历史 →」进来。 -->
     <section id="v-apply" class="view">
       <div class="card">
-        <h3>应用配置</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <select id="ap_core" class="input" style="width:140px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
-          <button class="btn" data-act="dryRun">预检（渲染+校验，不生效）</button>
-          <button class="btn" data-act="showDiff" title="对比运行中配置与即将应用的配置差异">对比变更</button>
-          <button class="btn primary" data-act="applyCfg">应用（校验 → 原子替换 → 重启）</button>
-          <button class="btn danger" data-act="rollback">回滚上一份备份</button>
-        </div>
-      </div>
-      <div class="card">
-        <h3>修订历史</h3>
+        <h3>修订历史<span class="spacer"></span>
+          <select id="rev_core" class="input" style="width:130px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+          <button class="btn sm" data-act="loadRevisions">刷新</button>
+        </h3>
+        <p class="muted" style="font-size:12.5px;margin:-4px 0 12px">
+          每次「应用配置」都会留下一条修订；失败时运行中的配置一个字节都不会变。
+          要重新应用，用侧栏（手机是底部导航条）上的「应用配置」按钮，不必回到这一页。
+        </p>
         <div class="tbl-wrap"><table>
           <thead><tr><th>ID</th><th>内核</th><th>状态</th><th>说明</th><th>时间</th><th class="ta-r">详情</th></tr></thead>
           <tbody id="revtbody"></tbody>
@@ -1834,15 +1846,32 @@ canvas{display:block;width:100%}
   </div>
 </div>
 
-<!-- 配置 diff 弹窗 -->
-<div class="overlay" id="mDiff" data-act="closeModal" data-args='["mDiff"]' data-self="1">
-  <div class="modal" style="max-width:720px">
-    <h3>配置变更对比 <span id="df_core" style="font-weight:600"></span></h3>
-    <p class="muted" id="df_stat" style="font-size:13px;margin:0 0 8px"></p>
-    <pre class="log" id="df_body" style="max-height:420px;overflow:auto;font-size:12px"></pre>
+<!-- 应用配置弹窗：任何页面都能打开，关掉后停在原页面（不切页）。
+     预检 / 对比的结果就地展开在下面，不再叠第二层弹窗。 -->
+<div class="overlay" id="mApply" data-act="closeModal" data-args='["mApply"]' data-self="1">
+  <div class="modal" style="max-width:600px">
+    <h3>应用配置</h3>
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">
+      渲染 → 内核校验 → 原子替换 → 重启内核。校验不通过时，运行中的配置一个字节都不会变；
+      通过后该内核会重启一次（1–2 秒中断）。
+    </p>
+    <div class="frm" style="margin-bottom:12px">
+      <div class="ap-core"><label>内核</label>
+        <select id="ap_core" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+      </div>
+    </div>
+    <div class="ap-bar">
+      <button class="btn" data-act="dryRun">预检（不生效）</button>
+      <button class="btn" data-act="showDiff">对比变更</button>
+      <button class="btn ghost ap-hist" data-act="openRevisions">修订历史 →</button>
+    </div>
+    <div class="ap-res hide" id="ap_res">
+      <div class="ap-res-h"><b id="ap_res_title"></b><span class="muted" id="ap_res_sub"></span></div>
+      <pre class="log" id="ap_pre"></pre>
+    </div>
     <div class="foot">
-      <button class="btn" data-act="closeModal" data-args='["mDiff"]'>关闭</button>
-      <button class="btn primary" data-act="diffApply">确认无误，应用</button>
+      <button class="btn danger" data-act="rollback">回滚上一份备份</button>
+      <button class="btn primary" data-act="applyCfg">应用</button>
     </div>
   </div>
 </div>

@@ -283,12 +283,62 @@ func TestPinnedApplyButton(t *testing.T) {
 	if !(iNav < iBtn && iBtn < iFoot) {
 		t.Error("「应用」按钮必须夹在 #nav 与 .side-foot 之间：放进 #nav 会跟着导航滚走")
 	}
+	// 点它是开弹窗，不是切页——应用是动作，不该把当前页换走
+	if !strings.Contains(css, `data-act="openApply"`) {
+		t.Error("常驻按钮仍指向 goto：点一下会切页，应用入口必须开弹窗")
+	}
 	// 窄屏：让出品牌图标的位置，并用 order 挪到导航条最左侧
 	block := cssBlock(t, css, "@media (max-width:960px){\n  .side .logo{display:none}")
 	for _, frag := range []string{".side .logo{display:none}", "order:-1", "width:auto"} {
 		if !strings.Contains(block, frag) {
 			t.Errorf("窄屏缺 %q：常驻「应用」按钮没地方放", frag)
 		}
+	}
+}
+
+// 「应用配置」是动作，不是页面：常驻按钮开弹窗，关掉后仍停在原页面。
+// 以前点它是 goto("apply")——改完配置点一下页面就被换走，回来还得重新找位置；
+// 而「应用 / 修订」占着一个导航位，和它承担的「动作」语义也不对。
+func TestApplyOpensAsModal(t *testing.T) {
+	html := string(indexHTML)
+	js, err := scriptAssets.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+
+	// 1. 导航里不再有它：VIEWS 里那一项必须带 hidden 标记，visibleViews 必须过滤
+	if !strings.Contains(s, `["apply","修订与日志","配置","配置修订历史与内核运行日志", true]`) {
+		t.Error("VIEWS 里的 apply 没标 hidden：导航栏会继续出现「应用 / 修订」，与弹窗重复")
+	}
+	if !strings.Contains(s, "!hidden && (!isViewer()") {
+		t.Error("visibleViews 没过滤 hidden：隐藏页仍会占一个导航位")
+	}
+	// 2. 弹窗存在，按钮开的是弹窗
+	if !strings.Contains(html, `id="mApply"`) {
+		t.Fatal("缺 #mApply 弹窗：常驻按钮没有地方开")
+	}
+	if !strings.Contains(html, `data-act="openApply"`) {
+		t.Error("常驻按钮不是 openApply：点一下会切页")
+	}
+	if strings.Contains(html, `data-act="goto" data-args='["apply"]'`) {
+		t.Error("还有入口在 goto(\"apply\")：应用入口必须统一走弹窗")
+	}
+	if !strings.Contains(s, `openModal("mApply")`) {
+		t.Error("openApply 没有打开 #mApply")
+	}
+	// 3. 应用成功后关掉弹窗：动作做完了，遮罩不该继续压着结果
+	i := strings.Index(s, "async function applyCfg()")
+	j := strings.Index(s, "async function rollback()")
+	if i < 0 || j < i {
+		t.Fatal("applyCfg / rollback 的位置变了，测试切不出函数体")
+	}
+	if !strings.Contains(s[i:j], `closeModal("mApply")`) {
+		t.Error("applyCfg 成功后没关弹窗：应用完还压着遮罩，用户看不到结果")
+	}
+	// 4. 修订历史读自己的内核选择（rev_core），不能再去抢弹窗里的 ap_core
+	if !strings.Contains(s, `const core = $("rev_core").value;`) {
+		t.Error("修订历史还在读 ap_core：弹窗里换个内核，历史列表跟着换，两处打架")
 	}
 }
 

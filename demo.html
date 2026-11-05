@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.8 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.2.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -336,7 +336,9 @@ body[data-role="admin"] .need-owner{display:none!important}
 @media (max-width:960px){.set-bar{bottom:calc(var(--nav-h,60px) + 10px)}}
 
 /* 「应用配置」常驻：渲染 → 校验 → 原子替换是每次改完配置都要走的动作，
-   埋在导航列表里（「应用 / 修订」在「配置」分组第三个）就得每次翻。
+   以前埋在导航列表里（「应用 / 修订」在「配置」分组第三个），点进去还是**切页**
+   ——改完配置点一下，页面被换走，回来还得重新找原处。
+   现在它开的是弹窗（#mApply）：在哪个页面点就在哪个页面开，关掉仍在原处。
    两个端都在**导航区域内部**给出常驻入口，不浮在内容上——浮层会挡住卡片，
    还要为它多留一段底部空白。
    桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，
@@ -353,8 +355,6 @@ body[data-role="admin"] .need-owner{display:none!important}
 .side-apply:active{transform:translateY(1px)}
 /* 桌面侧栏放得下全称，手机导航条那一格只够两个字 */
 .side-apply .sa-s{display:none}
-/* 已经在应用页时不必再强调，跟导航项一样只留「当前」的观感 */
-body[data-view="apply"] .side-apply{background:var(--acc-soft);color:var(--acc-text);box-shadow:none}
 /* 手机上导航条横排：品牌图标只剩一个装饰用的盾牌（文字早就藏了），这块位置让给
    「应用」。order:-1 把它挪到最左侧——DOM 里它排在 #nav 之后，因为桌面上要落在
    导航下面。 */
@@ -688,6 +688,18 @@ td.num{font-variant-numeric:tabular-nums}
 .modal pre{background:var(--hover);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;font-family:var(--mono);
   font-size:12px;overflow:auto;max-height:46vh;white-space:pre-wrap;word-break:break-all}
 
+/* 应用弹窗：预检 / 对比的结果就地展开在同一层，不再叠第二层遮罩。
+   手机上两层弹窗会互相压住，关掉上层之后下层的手势也容易串。 */
+.ap-bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.ap-res{margin-top:14px}
+.ap-res-h{display:flex;align-items:baseline;gap:8px;margin-bottom:7px;font-size:13px;flex-wrap:wrap}
+.ap-res pre{max-height:260px;margin:0}
+/* 桌面弹窗 600px 宽，内核下拉撑满整行会空出一大片；手机上又该占满。
+   「修订历史」推到右端，窄屏换行后回到左端，跟上面两个按钮对齐。 */
+.ap-core{max-width:240px}
+.ap-hist{margin-left:auto}
+@media (max-width:640px){.ap-core{max-width:none}.ap-hist{margin-left:0}}
+
 /* 手机弹窗：必须写在 .overlay/.modal 定义之后，否则被同名规则盖掉。
    可用高度直接取 flex 容器的 100%（已经扣掉遮罩内距和安全区），比 86vh 多出
    一截；底部操作条吸附在滚动容器底部，320×568 的「新增入站」不必滚完整屏
@@ -820,8 +832,9 @@ canvas{display:block;width:100%}
     </div>
     <nav id="nav"></nav>
     <!-- 常驻「应用配置」：桌面上钉在导航与账号区之间（导航自己滚，它不动），
-         手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。 -->
-    <button class="side-apply" id="sideApply" data-act="goto" data-args='["apply"]' aria-label="应用配置">
+         手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。
+         点它**开弹窗**（#mApply），不切页——应用是一个动作，不该把当前页换走。 -->
+    <button class="side-apply need-admin" id="sideApply" data-act="openApply" aria-label="应用配置">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
       <span class="sa-l">应用配置</span><span class="sa-s">应用</span>
     </button>
@@ -879,7 +892,7 @@ canvas{display:block;width:100%}
           <div class="hero-act">
             <button class="btn primary" data-act="openInboundModal">+ 新增入站</button>
             <button class="btn" data-act="goto" data-args='["gen"]'>生成配置</button>
-            <button class="btn" data-act="goto" data-args='["apply"]'>应用配置</button>
+            <button class="btn need-admin" data-act="openApply">应用配置</button>
           </div>
         </div>
       </div>
@@ -930,7 +943,7 @@ canvas{display:block;width:100%}
           <button class="quick" data-act="openClientModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
           <button class="quick" data-act="goto" data-args='["import"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>外部节点</button>
           <button class="quick" data-act="goto" data-args='["gen"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
-          <button class="quick" data-act="goto" data-args='["apply"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
+          <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
           <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
         </div>
         <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
@@ -1193,20 +1206,19 @@ canvas{display:block;width:100%}
       </div>
     </section>
 
-    <!-- 应用 / 修订 -->
+    <!-- 修订与日志：不占导航位。应用是「动作」，入口是常驻按钮 + 弹窗（#mApply）；
+         这一页只负责事后查看——哪次应用成功、失败原因、内核实际在说什么。
+         从弹窗里的「修订历史 →」进来。 -->
     <section id="v-apply" class="view">
       <div class="card">
-        <h3>应用配置</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <select id="ap_core" class="input" style="width:140px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
-          <button class="btn" data-act="dryRun">预检（渲染+校验，不生效）</button>
-          <button class="btn" data-act="showDiff" title="对比运行中配置与即将应用的配置差异">对比变更</button>
-          <button class="btn primary" data-act="applyCfg">应用（校验 → 原子替换 → 重启）</button>
-          <button class="btn danger" data-act="rollback">回滚上一份备份</button>
-        </div>
-      </div>
-      <div class="card">
-        <h3>修订历史</h3>
+        <h3>修订历史<span class="spacer"></span>
+          <select id="rev_core" class="input" style="width:130px"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+          <button class="btn sm" data-act="loadRevisions">刷新</button>
+        </h3>
+        <p class="muted" style="font-size:12.5px;margin:-4px 0 12px">
+          每次「应用配置」都会留下一条修订；失败时运行中的配置一个字节都不会变。
+          要重新应用，用侧栏（手机是底部导航条）上的「应用配置」按钮，不必回到这一页。
+        </p>
         <div class="tbl-wrap"><table>
           <thead><tr><th>ID</th><th>内核</th><th>状态</th><th>说明</th><th>时间</th><th class="ta-r">详情</th></tr></thead>
           <tbody id="revtbody"></tbody>
@@ -1834,15 +1846,32 @@ canvas{display:block;width:100%}
   </div>
 </div>
 
-<!-- 配置 diff 弹窗 -->
-<div class="overlay" id="mDiff" data-act="closeModal" data-args='["mDiff"]' data-self="1">
-  <div class="modal" style="max-width:720px">
-    <h3>配置变更对比 <span id="df_core" style="font-weight:600"></span></h3>
-    <p class="muted" id="df_stat" style="font-size:13px;margin:0 0 8px"></p>
-    <pre class="log" id="df_body" style="max-height:420px;overflow:auto;font-size:12px"></pre>
+<!-- 应用配置弹窗：任何页面都能打开，关掉后停在原页面（不切页）。
+     预检 / 对比的结果就地展开在下面，不再叠第二层弹窗。 -->
+<div class="overlay" id="mApply" data-act="closeModal" data-args='["mApply"]' data-self="1">
+  <div class="modal" style="max-width:600px">
+    <h3>应用配置</h3>
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">
+      渲染 → 内核校验 → 原子替换 → 重启内核。校验不通过时，运行中的配置一个字节都不会变；
+      通过后该内核会重启一次（1–2 秒中断）。
+    </p>
+    <div class="frm" style="margin-bottom:12px">
+      <div class="ap-core"><label>内核</label>
+        <select id="ap_core" class="input"><option>singbox</option><option>xray</option><option>mihomo</option></select>
+      </div>
+    </div>
+    <div class="ap-bar">
+      <button class="btn" data-act="dryRun">预检（不生效）</button>
+      <button class="btn" data-act="showDiff">对比变更</button>
+      <button class="btn ghost ap-hist" data-act="openRevisions">修订历史 →</button>
+    </div>
+    <div class="ap-res hide" id="ap_res">
+      <div class="ap-res-h"><b id="ap_res_title"></b><span class="muted" id="ap_res_sub"></span></div>
+      <pre class="log" id="ap_pre"></pre>
+    </div>
     <div class="foot">
-      <button class="btn" data-act="closeModal" data-args='["mDiff"]'>关闭</button>
-      <button class="btn primary" data-act="diffApply">确认无误，应用</button>
+      <button class="btn danger" data-act="rollback">回滚上一份备份</button>
+      <button class="btn primary" data-act="applyCfg">应用</button>
     </div>
   </div>
 </div>
@@ -4474,7 +4503,9 @@ const VIEWS = [
   ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出；建入站请用「入站 → 新增入站」"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
   ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
-  ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
+  // 第 5 位 true = 不占导航位。「应用」是动作，入口是常驻按钮 + 弹窗（#mApply）；
+  // 这一页只剩修订历史与内核日志，从弹窗里的「修订历史 →」进来。
+  ["apply","修订与日志","配置","配置修订历史与内核运行日志", true],
   ["settings","设置","系统","内核路径、证书、版本管理与主题"],
   ["audit","审计","系统","登录、配置变更与关键操作留痕"]
 ];
@@ -4487,14 +4518,16 @@ const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
    但改不了。「设置」保留，里面只显示「我的账号」「登录设备」两张卡。 */
 const VIEWER_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic", "settings"];
 function visibleViews() {
-  return VIEWS.filter(([k]) => !isViewer() || VIEWER_VIEWS.includes(k));
+  return VIEWS.filter(([k, , , , hidden]) =>
+    !hidden && (!isViewer() || VIEWER_VIEWS.includes(k)));
 }
 
 let CURRENT = "overview";
 function renderNav() {
   const list = visibleViews();
-  // 当前页若因角色变化变得不可见，退回概览
-  if (!list.some(([k]) => k === CURRENT)) CURRENT = "overview";
+  // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
+  // 但停在那页时不该被当成「页面不存在」踢回概览。
+  if (!VIEWS.some(([k]) => k === CURRENT)) CURRENT = "overview";
   let html = "", last = null;
   list.forEach(([v, label, sec]) => {
     if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
@@ -4961,8 +4994,10 @@ async function mockRoute(path, opts) {
   }
   if (api === "settings" && m === "GET") return MDB.settings;
   if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
+  // 预检必须排在 apply 前面：api 只取到 "apply"，rest 才是 "/dry-run"，
+  // 先命中下面那条就会返回「应用成功」的结构，弹窗里显示 undefined。
+  if (api === "apply" && rest === "/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
   if (api === "apply") { MDB.revisions.unshift({id:++REV_N,core:opts.body.core,status:"applied",note:opts.body.note||"demo apply",created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"}); return {revision_id:REV_N,core:opts.body.core,validated:true,restarted:true}; }
-  if (api === "apply/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
   if (api === "rollback") return {restored_from:"revisions/singbox/config.r3.bak"};
   if (api === "switch-core") {
     const b = opts.body;
@@ -8550,16 +8585,15 @@ async function showDiff() {
   const core = $("ap_core").value;
   try {
     const j = await req("/api/config/diff", { method: "POST", body: { core } });
-    $("df_core").textContent = "· " + core;
-    $("df_stat").innerHTML = j.old_missing
-      ? '<span style="color:var(--warn)">尚无运行中的配置文件，应用后将全部新建</span>'
-      : `与运行中配置相比共 <b>${j.changed}</b> 行变更` + (j.changed === 0 ? " —— 当前已是最新，无需应用" : "");
-    $("df_body").innerHTML = (j.diff || []).map(o => {
+    const stat = j.old_missing
+      ? "尚无运行中的配置文件，应用后将全部新建"
+      : `共 ${j.changed} 行变更` + (j.changed === 0 ? " —— 当前已是最新，无需应用" : "");
+    const pre = apResult("变更对比 · " + core, stat);
+    pre.innerHTML = (j.diff || []).map(o => {
       if (o.op === "+") return `<span style="color:var(--ok)">+ ${escHtml(o.text)}</span>`;
       if (o.op === "-") return `<span style="color:var(--err)">- ${escHtml(o.text)}</span>`;
       return `<span style="opacity:.5">  ${escHtml(o.text)}</span>`;
     }).join("\n");
-    openModal("mDiff");
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -10209,24 +10243,51 @@ async function delExternal(id) {
 }
 
 /* ---- 应用 / 修订 / 日志 ---- */
-async function dryRun() {
-  try {
-    const j = await req("/api/apply/dry-run", { method:"POST", body:{ core:$("ap_core").value } });
-    viewContent("预检结果 · " + $("ap_core").value,
-      j.content + "\n\n—— 校验: " + (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验"));
-  } catch (e) { toast(e.message, "err"); }
+/* 「应用配置」是动作，不是页面：任何界面点常驻按钮都开 #mApply，关掉后仍停在
+   原页面。以前是 goto("apply")——改完配置点一下，页面被换走，回来还得重新找位置，
+   用户报的「违反操作逻辑」就是这个。 */
+function openApply() {
+  if (isViewer()) { toast("当前账号为只读角色，无权应用配置", "err"); return; }
+  $("ap_res").classList.add("hide");
+  $("ap_pre").textContent = "";
+  $("ap_res_title").textContent = "";
+  $("ap_res_sub").textContent = "";
+  openModal("mApply");
 }
-/* diff 弹窗里的「确认无误，应用」：先关弹窗再走正常应用流程。
-   这个按钮以前写成 data-args="${escJson(['mDiff');applyCfg(])}"——一段没经过
-   模板求值的字面量，JSON.parse 必然失败，点了只会往控制台丢一条参数错误。 */
-function diffApply() { closeModal("mDiff"); applyCfg(); }
-
+/* 修订历史不占导航位，从弹窗里的「修订历史 →」进来；顺手把内核切到刚操作的那个，
+   否则看的是另一个内核的记录，会以为刚才那次没留下修订。 */
+function openRevisions() {
+  const core = $("ap_core").value;
+  closeModal("mApply");
+  if (core) $("rev_core").value = core;
+  goto("apply");
+}
+/* 预检 / 对比的结果就地展开在弹窗里，不叠第二层遮罩。 */
+function apResult(title, sub) {
+  $("ap_res").classList.remove("hide");
+  $("ap_res_title").textContent = title;
+  $("ap_res_sub").textContent = sub || "";
+  return $("ap_pre");
+}
+async function dryRun() {
+  const core = $("ap_core").value;
+  const pre = apResult("预检 · " + core, "渲染 + 校验，不生效");
+  pre.textContent = "渲染中…";
+  try {
+    const j = await req("/api/apply/dry-run", { method:"POST", body:{ core } });
+    pre.textContent = j.content + "\n\n—— 校验: " +
+      (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验");
+  } catch (e) { pre.textContent = "预检失败：" + e.message; toast(e.message, "err"); }
+}
 async function applyCfg() {
   const core = $("ap_core").value;
   if (!(await ask("应用配置", "将把「" + core + "」的配置渲染 → 内核校验 → 原子替换 → 重启内核。校验失败时运行中的配置不会受任何影响。继续？"))) return;
   try {
     const j = await req("/api/apply", { method:"POST", body:{ core, note:"web apply" } });
     toast(`应用成功 · 修订 #${j.revision_id} · 校验${j.validated?"通过":"跳过"} · 内核${j.restarted?"已重启":"未重启"}`);
+    // 应用完就关掉：这是「做完」的动作，弹窗留着反而挡住结果。当前页面不受影响。
+    closeModal("mApply");
+    $("rev_core").value = core;
     loadRevisions(); loadStatus();
   } catch (e) {
     toast(e.message, "err");
@@ -10237,12 +10298,15 @@ async function applyCfg() {
 async function rollback() {
   if (!(await ask("回滚配置", "将恢复到最近一次自动备份并重启内核，确定？"))) return;
   try { const j = await req("/api/rollback", { method:"POST", body:{ core:$("ap_core").value } });
-    toast("已从 " + j.restored_from + " 恢复"); loadRevisions();
+    toast("已从 " + j.restored_from + " 恢复");
+    $("rev_core").value = $("ap_core").value;
+    loadRevisions();
   } catch (e) { toast(e.message, "err"); }
 }
 async function loadRevisions() {
+  const core = $("rev_core").value;
   try {
-    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=20");
+    const j = await req("/api/revisions?core=" + core + "&limit=20");
     $("revtbody").innerHTML = j.map(r => `<tr>
       <td class="mono">#${r.id}</td><td><span class="badge b-acc">${r.core}</span></td>
       <td><span class="badge ${r.status==="applied"?"b-ok":r.status==="pending"?"b-warn":"b-err"}">${r.status}</span></td>
@@ -10252,8 +10316,9 @@ async function loadRevisions() {
   } catch(e){}
 }
 async function viewRevision(id) {
+  const core = $("rev_core").value;
   try {
-    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=50");
+    const j = await req("/api/revisions?core=" + core + "&limit=50");
     const r = j.find(x => x.id === id);
     if (r) viewContent("修订 #" + r.id + " · " + r.status, r.detail || r.content || "（无详情）");
   } catch(e){}
@@ -11184,6 +11249,8 @@ function applyRole() {
   const u = $("whoami_user"), r = $("whoami_role");
   if (u) u.textContent = ME.user || "—";
   if (r) { r.textContent = ROLE_LABEL[ROLE] || ROLE || ""; r.className = "whoami-role " + (ROLE || ""); }
+  // 只读账号没有应用权限：常驻按钮与概览的两个入口都带 .need-admin，
+  // 由 body[data-role="viewer"] 的规则统一藏掉（见 index.html），不在这里逐个判。
   renderNav();
   // 角色变了，可用的分组也跟着变（只读账号没有「常用」「运维」），
   // 停在设置页时得按新权限重挑一次，否则会停在刚被禁用的那组。

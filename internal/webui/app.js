@@ -181,7 +181,9 @@ const VIEWS = [
   ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出；建入站请用「入站 → 新增入站」"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
   ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
-  ["apply","应用 / 修订","配置","渲染 → 校验 → 原子替换 → 回滚"],
+  // 第 5 位 true = 不占导航位。「应用」是动作，入口是常驻按钮 + 弹窗（#mApply）；
+  // 这一页只剩修订历史与内核日志，从弹窗里的「修订历史 →」进来。
+  ["apply","修订与日志","配置","配置修订历史与内核运行日志", true],
   ["settings","设置","系统","内核路径、证书、版本管理与主题"],
   ["audit","审计","系统","登录、配置变更与关键操作留痕"]
 ];
@@ -194,14 +196,16 @@ const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
    但改不了。「设置」保留，里面只显示「我的账号」「登录设备」两张卡。 */
 const VIEWER_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic", "settings"];
 function visibleViews() {
-  return VIEWS.filter(([k]) => !isViewer() || VIEWER_VIEWS.includes(k));
+  return VIEWS.filter(([k, , , , hidden]) =>
+    !hidden && (!isViewer() || VIEWER_VIEWS.includes(k)));
 }
 
 let CURRENT = "overview";
 function renderNav() {
   const list = visibleViews();
-  // 当前页若因角色变化变得不可见，退回概览
-  if (!list.some(([k]) => k === CURRENT)) CURRENT = "overview";
+  // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
+  // 但停在那页时不该被当成「页面不存在」踢回概览。
+  if (!VIEWS.some(([k]) => k === CURRENT)) CURRENT = "overview";
   let html = "", last = null;
   list.forEach(([v, label, sec]) => {
     if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
@@ -668,8 +672,10 @@ async function mockRoute(path, opts) {
   }
   if (api === "settings" && m === "GET") return MDB.settings;
   if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
+  // 预检必须排在 apply 前面：api 只取到 "apply"，rest 才是 "/dry-run"，
+  // 先命中下面那条就会返回「应用成功」的结构，弹窗里显示 undefined。
+  if (api === "apply" && rest === "/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
   if (api === "apply") { MDB.revisions.unshift({id:++REV_N,core:opts.body.core,status:"applied",note:opts.body.note||"demo apply",created_at:new Date().toISOString().slice(0,19),content:"(修订内容示例)"}); return {revision_id:REV_N,core:opts.body.core,validated:true,restarted:true}; }
-  if (api === "apply/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
   if (api === "rollback") return {restored_from:"revisions/singbox/config.r3.bak"};
   if (api === "switch-core") {
     const b = opts.body;
@@ -4257,16 +4263,15 @@ async function showDiff() {
   const core = $("ap_core").value;
   try {
     const j = await req("/api/config/diff", { method: "POST", body: { core } });
-    $("df_core").textContent = "· " + core;
-    $("df_stat").innerHTML = j.old_missing
-      ? '<span style="color:var(--warn)">尚无运行中的配置文件，应用后将全部新建</span>'
-      : `与运行中配置相比共 <b>${j.changed}</b> 行变更` + (j.changed === 0 ? " —— 当前已是最新，无需应用" : "");
-    $("df_body").innerHTML = (j.diff || []).map(o => {
+    const stat = j.old_missing
+      ? "尚无运行中的配置文件，应用后将全部新建"
+      : `共 ${j.changed} 行变更` + (j.changed === 0 ? " —— 当前已是最新，无需应用" : "");
+    const pre = apResult("变更对比 · " + core, stat);
+    pre.innerHTML = (j.diff || []).map(o => {
       if (o.op === "+") return `<span style="color:var(--ok)">+ ${escHtml(o.text)}</span>`;
       if (o.op === "-") return `<span style="color:var(--err)">- ${escHtml(o.text)}</span>`;
       return `<span style="opacity:.5">  ${escHtml(o.text)}</span>`;
     }).join("\n");
-    openModal("mDiff");
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -5916,24 +5921,51 @@ async function delExternal(id) {
 }
 
 /* ---- 应用 / 修订 / 日志 ---- */
-async function dryRun() {
-  try {
-    const j = await req("/api/apply/dry-run", { method:"POST", body:{ core:$("ap_core").value } });
-    viewContent("预检结果 · " + $("ap_core").value,
-      j.content + "\n\n—— 校验: " + (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验"));
-  } catch (e) { toast(e.message, "err"); }
+/* 「应用配置」是动作，不是页面：任何界面点常驻按钮都开 #mApply，关掉后仍停在
+   原页面。以前是 goto("apply")——改完配置点一下，页面被换走，回来还得重新找位置，
+   用户报的「违反操作逻辑」就是这个。 */
+function openApply() {
+  if (isViewer()) { toast("当前账号为只读角色，无权应用配置", "err"); return; }
+  $("ap_res").classList.add("hide");
+  $("ap_pre").textContent = "";
+  $("ap_res_title").textContent = "";
+  $("ap_res_sub").textContent = "";
+  openModal("mApply");
 }
-/* diff 弹窗里的「确认无误，应用」：先关弹窗再走正常应用流程。
-   这个按钮以前写成 data-args="${escJson(['mDiff');applyCfg(])}"——一段没经过
-   模板求值的字面量，JSON.parse 必然失败，点了只会往控制台丢一条参数错误。 */
-function diffApply() { closeModal("mDiff"); applyCfg(); }
-
+/* 修订历史不占导航位，从弹窗里的「修订历史 →」进来；顺手把内核切到刚操作的那个，
+   否则看的是另一个内核的记录，会以为刚才那次没留下修订。 */
+function openRevisions() {
+  const core = $("ap_core").value;
+  closeModal("mApply");
+  if (core) $("rev_core").value = core;
+  goto("apply");
+}
+/* 预检 / 对比的结果就地展开在弹窗里，不叠第二层遮罩。 */
+function apResult(title, sub) {
+  $("ap_res").classList.remove("hide");
+  $("ap_res_title").textContent = title;
+  $("ap_res_sub").textContent = sub || "";
+  return $("ap_pre");
+}
+async function dryRun() {
+  const core = $("ap_core").value;
+  const pre = apResult("预检 · " + core, "渲染 + 校验，不生效");
+  pre.textContent = "渲染中…";
+  try {
+    const j = await req("/api/apply/dry-run", { method:"POST", body:{ core } });
+    pre.textContent = j.content + "\n\n—— 校验: " +
+      (j.result && j.result.validated ? "通过（内核校验）" : "未配置二进制，跳过校验");
+  } catch (e) { pre.textContent = "预检失败：" + e.message; toast(e.message, "err"); }
+}
 async function applyCfg() {
   const core = $("ap_core").value;
   if (!(await ask("应用配置", "将把「" + core + "」的配置渲染 → 内核校验 → 原子替换 → 重启内核。校验失败时运行中的配置不会受任何影响。继续？"))) return;
   try {
     const j = await req("/api/apply", { method:"POST", body:{ core, note:"web apply" } });
     toast(`应用成功 · 修订 #${j.revision_id} · 校验${j.validated?"通过":"跳过"} · 内核${j.restarted?"已重启":"未重启"}`);
+    // 应用完就关掉：这是「做完」的动作，弹窗留着反而挡住结果。当前页面不受影响。
+    closeModal("mApply");
+    $("rev_core").value = core;
     loadRevisions(); loadStatus();
   } catch (e) {
     toast(e.message, "err");
@@ -5944,12 +5976,15 @@ async function applyCfg() {
 async function rollback() {
   if (!(await ask("回滚配置", "将恢复到最近一次自动备份并重启内核，确定？"))) return;
   try { const j = await req("/api/rollback", { method:"POST", body:{ core:$("ap_core").value } });
-    toast("已从 " + j.restored_from + " 恢复"); loadRevisions();
+    toast("已从 " + j.restored_from + " 恢复");
+    $("rev_core").value = $("ap_core").value;
+    loadRevisions();
   } catch (e) { toast(e.message, "err"); }
 }
 async function loadRevisions() {
+  const core = $("rev_core").value;
   try {
-    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=20");
+    const j = await req("/api/revisions?core=" + core + "&limit=20");
     $("revtbody").innerHTML = j.map(r => `<tr>
       <td class="mono">#${r.id}</td><td><span class="badge b-acc">${r.core}</span></td>
       <td><span class="badge ${r.status==="applied"?"b-ok":r.status==="pending"?"b-warn":"b-err"}">${r.status}</span></td>
@@ -5959,8 +5994,9 @@ async function loadRevisions() {
   } catch(e){}
 }
 async function viewRevision(id) {
+  const core = $("rev_core").value;
   try {
-    const j = await req("/api/revisions?core=" + $("ap_core").value + "&limit=50");
+    const j = await req("/api/revisions?core=" + core + "&limit=50");
     const r = j.find(x => x.id === id);
     if (r) viewContent("修订 #" + r.id + " · " + r.status, r.detail || r.content || "（无详情）");
   } catch(e){}
@@ -6891,6 +6927,8 @@ function applyRole() {
   const u = $("whoami_user"), r = $("whoami_role");
   if (u) u.textContent = ME.user || "—";
   if (r) { r.textContent = ROLE_LABEL[ROLE] || ROLE || ""; r.className = "whoami-role " + (ROLE || ""); }
+  // 只读账号没有应用权限：常驻按钮与概览的两个入口都带 .need-admin，
+  // 由 body[data-role="viewer"] 的规则统一藏掉（见 index.html），不在这里逐个判。
   renderNav();
   // 角色变了，可用的分组也跟着变（只读账号没有「常用」「运维」），
   // 停在设置页时得按新权限重挑一次，否则会停在刚被禁用的那组。
