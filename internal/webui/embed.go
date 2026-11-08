@@ -1,12 +1,16 @@
 // Package webui 提供内置单页管理界面。
-// data/web/index.html 优先使用外置文件（可用于自定义/替换为 Vue 构建产物）；
-// 不存在时把嵌入版写入该位置，保证二进制开箱即用。
 //
-// 升级注意：旧版本（v0.8.0 及以前）落地过的外置 index.html 没有 build 标记，
-// 二进制升级后若不覆盖，面板会一直服务旧 UI（表现为"升级后界面还是旧的"）。
-// 因此嵌入页面头部维护一个 build 标记注释（<!-- triune-panel-web/<ver> -->），
-// 启动时标记缺失或与当前版本不一致即覆盖为嵌入版。
-// 想长期自定义 UI 的用户：替换文件时请把头部 build 标记注释改成当前版本号。
+// 页面只有一个来源：**二进制内嵌的 index.html**。data/web/index.html 不参与
+// 渲染，除非它显式声明为自定义界面（见 CustomUIMarker）。
+//
+// 为什么把这件事做绝：v1.5.0 之前页面是「磁盘优先」的，升级链路上叠了四层
+// 判断——启动落盘、build 标记比对、启动覆盖、响应层回退。每层都在给上一层
+// 兜底，而任意一层失效，用户就会看到「明明升级了、界面还是旧的」，且升级
+// 多少次都不变（旧页面始终躺在磁盘上，判据又恰好认不出它）。
+//
+// 把页面钉死在二进制里之后，这个失效模式在结构上不存在：换了二进制就是换了
+// 界面，没有中间状态。代价是自定义 UI 需要显式声明，这是有意的取舍——
+// 隐式约定换来的是一类查不出来的故障，不值得。
 package webui
 
 import (
@@ -46,11 +50,9 @@ func AssetFile(name string) (data []byte, etag string, err error) {
 
 // pwaAssets 内嵌的 PWA 静态资源：manifest、service worker、图标。
 //
-// 这些**不**落盘到 data/web，和 index.html 的处理方式刻意不同。
-// index.html 落盘是为了允许用户替换成自己的构建产物（见上方说明）；
-// manifest / sw.js / 图标则是二进制的配套文件，必须和当前版本的 UI
-// 严格对应——从内嵌副本直接服务，就不存在「升级后 sw.js 还是上一版」
-// 这种错位，也不会在用户自定义过 UI 的目录里留下一堆孤儿文件。
+// 这些**不**落盘，和下面页面「唯一来源是二进制」是同一个道理：manifest /
+// sw.js / 图标必须和当前版本的 UI 严格对应，从内嵌副本直接服务就不存在
+// 「升级后 sw.js 还是上一版」这种错位，也不会在数据目录里留下孤儿文件。
 //
 //go:embed pwa
 var pwaAssets embed.FS
@@ -81,9 +83,11 @@ func PWAFile(name string) (data []byte, etag string, err error) {
 	return b, `"` + hex.EncodeToString(sum[:8]) + `"`, nil
 }
 
-// webBuildMarker 提取页面头部的 build 标记，如 "v0.8.1"。
-// 标记形如 <!-- triune-panel-web/<ver> -->，随版本发布更新；
-// 允许标记后跟随其他说明文字，因此只锚定前缀不要求闭合箭头紧邻。
+// webBuildMarker 提取页面头部的 build 标记，如 "v1.5.0"。
+// 标记形如 <!-- triune-panel-web/<ver> -->，随版本发布更新。
+//
+// 它现在只用于「说明二进制里带的是哪一版界面」（tp ui 的输出、
+// release.sh 的版本一致性校验），**不再参与渲染决策**——渲染只认内嵌页。
 var webBuildMarker = regexp.MustCompile(`<!--\s*triune-panel-web/([^\s>]+)`)
 
 func embeddedMarker() string {
@@ -93,7 +97,7 @@ func embeddedMarker() string {
 	return ""
 }
 
-// EmbeddedVersion 返回内嵌页面的 build 标记版本（如 "v1.4.1"）。
+// EmbeddedVersion 返回内嵌页面的 build 标记版本（如 "v1.5.0"）。
 // CLI 与测试用它解释「二进制里到底带的是哪一版界面」。
 func EmbeddedVersion() string { return embeddedMarker() }
 
@@ -109,71 +113,29 @@ func PageMarker(page []byte) string {
 	return ""
 }
 
-// builtinPageHints 是「这确实是我们自己的内置页」的特征串。
+// CustomUIMarker 是「这份页面是我自己做的，请用它」的显式声明。
 //
-// 只收 v1.3.0 之后才存在、且自定义 UI 几乎不可能带的形态：脚本外置后
-// 页面必定引用 /assets/app.js；工作台落地后才有 cmdbar / workbench。
-// **不要**用 id="nav" 或标题之类的通用特征——那会误伤自定义 UI，
-// 把它们当成旧内置页顶掉（见包注释里对自定义 UI 的承诺）。
-var builtinPageHints = [][]byte{
-	[]byte("/assets/app.js"),
-	[]byte(`id="cmdbar"`),
-	[]byte(`id="workbench"`),
-}
+// 放在页面里（HTML 注释即可）就把 data/web/index.html 变成自定义界面：
+// 面板原样服务它，并放宽 CSP 以允许内联脚本与内联事件属性。
+//
+// 用显式声明而不是「文件存在就算」或「没有标记就算」，是因为后两者都会让
+// 一个历史遗留文件悄悄接管界面，而那正是「升级后界面没变」的根源。
+const CustomUIMarker = "triune-panel-web/custom"
 
-// LooksLikeBuiltinPage 判断一份页面是不是本项目生成的内置页。
-func LooksLikeBuiltinPage(page []byte) bool {
-	for _, h := range builtinPageHints {
-		if bytes.Contains(page, h) {
-			return true
+// IsCustomUI 判断页面是否被显式声明为自定义 UI。
+func IsCustomUI(page []byte) bool { return bytes.Contains(page, []byte(CustomUIMarker)) }
+
+// ServedPage 返回面板实际要发出的页面，以及它是不是自定义界面。
+//
+// 这是**唯一**的页面来源判定，API 层与 tp ui 都调它，保证「命令说什么、
+// 服务端就做什么」。两个分支之外没有第三种可能，所以不存在「旧页面残留
+// 导致界面不更新」这种情况。
+func ServedPage(dataDir string) (page []byte, custom bool) {
+	if disk, err := os.ReadFile(filepath.Join(dataDir, "web", "index.html")); err == nil {
+		if IsCustomUI(disk) {
+			return disk, true
 		}
 	}
-	return false
-}
-
-// ResolvePage 保证 HTTP 实际发出去的页面不会是上一版。
-//
-// EmbedIfNeeded 在启动时把 data/web/index.html 覆盖成内嵌版，但那一步可能
-// 失败（目录只读、属主不是面板运行用户、只读挂载），而 main 里只记一行日志
-// 就继续服务磁盘文件——用户看到的就是「明明升级了，界面还是旧的」。
-// 这里做第二道防线，不依赖能不能写盘：
-//
-//   - 有标记且版本不同 → 服务内嵌页；
-//   - 没有标记但明显是内置页（引用了 /assets/app.js 等）→ 服务内嵌页。
-//     这一条兜的是更早版本落地的无标记页面：只认「有标记」会把它们
-//     永久留在旧界面（写盘失败时两道防线同时失效）；
-//   - 其余没有标记的页面一律原样返回：那是用户自己替换的自定义 UI，
-//     不能因为缺标记就把它换掉，否则自定义界面会被内置页顶掉、CSP 也会变。
-func ResolvePage(disk []byte) []byte {
-	if len(disk) == 0 {
-		return indexHTML
-	}
-	if m := webBuildMarker.FindSubmatch(disk); len(m) >= 2 {
-		if string(m[1]) != embeddedMarker() {
-			return indexHTML
-		}
-		return disk
-	}
-	if LooksLikeBuiltinPage(disk) {
-		return indexHTML
-	}
-	return disk
-}
-
-// EmbedIfNeeded 确保数据目录下的 UI 文件与当前二进制的内嵌版本一致：
-//   - 文件不存在，或缺少 build 标记（旧版本落地/手工放置），或标记版本
-//     与当前嵌入版不同 → 写入/覆盖为嵌入版（否则升级后界面停留在旧版）；
-//   - 标记与当前版本一致 → 保留（尊重自定义 UI，前提是自定义者保留了标记）。
-func EmbedIfNeeded(dataDir string) error {
-	dir := filepath.Join(dataDir, "web")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	dst := filepath.Join(dir, "index.html")
-	if data, err := os.ReadFile(dst); err == nil {
-		if m := webBuildMarker.FindSubmatch(data); len(m) >= 2 && string(m[1]) == embeddedMarker() {
-			return nil
-		}
-	}
-	return os.WriteFile(dst, indexHTML, 0o644)
+	// 内嵌页是编译期常量，只读；调用方不得原地修改。
+	return indexHTML, false
 }

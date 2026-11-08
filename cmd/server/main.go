@@ -158,11 +158,12 @@ func serve(args []string) {
 	certMgr := certmgr.New(*dataDir, st)
 	srv.CertMgr = certMgr
 
-	// 内置 Web UI（若外置 web 目录不存在则使用嵌入版）
-	if err := webui.EmbedIfNeeded(*dataDir); err != nil {
-		// 写不进去也不能继续服务上一版的 data/web/index.html（症状：升级后
-		// 界面没变）。API 层还有 webui.ResolvePage 兜底，这里把原因说清楚。
-		log.Printf("[ui] 无法更新 data/web/index.html（%v）；将直接服务二进制内嵌界面，请检查目录属主/权限或是否为只读挂载", err)
+	// 内置 Web UI 固定来自二进制内嵌页，不再落盘。旧版把页面写到
+	// data/web/index.html，那份文件一旦某次没被覆盖成功，界面就会永久
+	// 停在旧版本——「升级后界面没变」的结构性成因。现在只有显式声明
+	// custom 的页面才会接管界面，这里记一行，便于排查「到底谁在服务页面」。
+	if _, custom := webui.ServedPage(*dataDir); custom {
+		log.Printf("[ui] 使用 data/web/index.html 的自定义界面（%s）；删掉该文件即回到内嵌界面", webui.CustomUIMarker)
 	}
 
 	// 审计日志保留期清理：启动跑一次，之后每 12 小时一次。

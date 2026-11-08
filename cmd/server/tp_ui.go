@@ -1,15 +1,14 @@
-// tp ui：把「浏览器到底拿到哪一版界面」一次说清。
+// tp ui：说清「浏览器到底会拿到哪一版界面」。
 //
-// 「升级后界面没变」有三层可能：跑着的二进制是旧的、磁盘上的
-// data/web/index.html 是旧的、浏览器或反向代理缓存了旧页面。前两层在这里
-// 都能直接看清，剩下的就只能是缓存——不用再靠猜。
+// v1.5.0 起页面只有一个来源——二进制内嵌页；磁盘上的 data/web/index.html
+// 只有显式声明 custom 时才参与渲染。所以这里不再需要比较「磁盘标记 vs 内嵌
+// 标记」，只需要回答两件事：二进制带的是哪一版、谁在服务页面。
 //
-// 只读优先，与 tp 其它查询命令一致：默认不写任何文件；`tp ui reset` 是
-// 显式修复动作，会把磁盘页面覆盖成当前二进制内嵌的界面，并先留一份 .bak。
+// 只读优先，与 tp 其它查询命令一致：默认不写任何文件；`tp ui reset` 是显式
+// 修复动作，把磁盘上的页面移走（先留 .bak），让界面回到二进制内嵌版。
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,16 +20,18 @@ import (
 )
 
 type uiReport struct {
-	Version      string `json:"version"`
-	DataDir      string `json:"data_dir"`
-	PagePath     string `json:"page_path"`
-	Embedded     string `json:"embedded_marker"`
-	DiskMarker   string `json:"disk_marker"`
-	DiskBytes    int64  `json:"disk_bytes"`
-	DiskModTime  string `json:"disk_mod_time,omitempty"`
-	DiskReadable bool   `json:"disk_readable"`
-	Served       string `json:"served"`
-	Action       string `json:"action"`
+	Version     string `json:"version"`
+	DataDir     string `json:"data_dir"`
+	PagePath    string `json:"page_path"`
+	Embedded    string `json:"embedded_marker"`
+	DiskPresent bool   `json:"disk_present"`
+	DiskMarker  string `json:"disk_marker,omitempty"`
+	DiskBytes   int64  `json:"disk_bytes,omitempty"`
+	DiskModTime string `json:"disk_mod_time,omitempty"`
+	DiskCustom  bool   `json:"disk_custom"`
+	DiskInUse   bool   `json:"disk_in_use"`
+	Served      string `json:"served"`
+	Action      string `json:"action"`
 }
 
 func cmdUI(args []string) {
@@ -56,38 +57,35 @@ func cmdUIStatus(args []string) {
 
 	dir := resolveDataDir(*dataDir)
 	path := filepath.Join(dir, "web", "index.html")
-	disk, readErr := os.ReadFile(path)
-	emb := webui.EmbeddedPage()
+	page, custom := webui.ServedPage(dir)
 
 	rep := uiReport{
-		Version:      Version,
-		DataDir:      dir,
-		PagePath:     path,
-		Embedded:     webui.EmbeddedVersion(),
-		DiskReadable: readErr == nil,
+		Version:  Version,
+		DataDir:  dir,
+		PagePath: path,
+		Embedded: webui.EmbeddedVersion(),
 	}
-	if readErr == nil {
+	if disk, err := os.ReadFile(path); err == nil {
+		rep.DiskPresent = true
 		rep.DiskMarker = webui.PageMarker(disk)
 		rep.DiskBytes = int64(len(disk))
+		rep.DiskCustom = webui.IsCustomUI(disk)
+		rep.DiskInUse = custom
 		if fi, err := os.Stat(path); err == nil {
 			rep.DiskModTime = fi.ModTime().Format("2006-01-02 15:04")
 		}
 	}
 
-	served := webui.ResolvePage(disk)
 	switch {
-	case readErr != nil:
+	case custom:
+		rep.Served = "custom"
+		rep.Action = "正在服务 data/web/index.html 里的自定义界面；想回到内置界面请跑 tp ui reset"
+	case rep.DiskPresent:
 		rep.Served = "embedded"
-		rep.Action = "磁盘页面读不到，/ 会直接服务内嵌页；若浏览器仍是旧界面，问题在浏览器或反向代理缓存"
-	case bytes.Equal(served, disk):
-		rep.Served = "disk"
-		rep.Action = "实际服务的就是磁盘页面；若界面没变，请强制刷新（Ctrl+Shift+R）或绕开反向代理"
-		if rep.DiskMarker == "" {
-			rep.Action = "磁盘页面没有 build 标记、也不像内置页，按自定义 UI 原样保留；要恢复内置界面请跑 tp ui reset"
-		}
+		rep.Action = "磁盘上的页面未声明 custom，已不参与渲染（可以删：tp ui reset）；界面跟随二进制版本"
 	default:
 		rep.Served = "embedded"
-		rep.Action = "磁盘页面不是当前版本，服务端已改为发送内嵌页；请强制刷新或绕开反向代理"
+		rep.Action = "界面跟随二进制版本，升级后必然更新；若浏览器仍是旧界面，请强制刷新或绕开反向代理"
 	}
 
 	if *asJSON {
@@ -98,13 +96,21 @@ func cmdUIStatus(args []string) {
 
 	fmt.Printf("版本      %s\n", rep.Version)
 	fmt.Printf("数据目录  %s\n", rep.DataDir)
-	fmt.Printf("内嵌页面  %s · %s\n", uiOrDash(rep.Embedded), uiBytes(int64(len(emb))))
-	if readErr != nil {
-		fmt.Printf("磁盘页面  %s（读不到: %v）\n", path, readErr)
+	fmt.Printf("内嵌页面  %s · %s\n", uiOrDash(rep.Embedded), uiBytes(int64(len(page))))
+	if !rep.DiskPresent {
+		fmt.Printf("磁盘页面  （不存在）\n")
 	} else {
-		fmt.Printf("磁盘页面  %s · %s · %s\n", uiOrDash(rep.DiskMarker), uiBytes(rep.DiskBytes), rep.DiskModTime)
+		label := uiOrDash(rep.DiskMarker)
+		if rep.DiskCustom {
+			label = "custom"
+		}
+		suffix := "未参与渲染"
+		if rep.DiskInUse {
+			suffix = "正在使用"
+		}
+		fmt.Printf("磁盘页面  %s · %s · %s（%s）\n", label, uiBytes(rep.DiskBytes), rep.DiskModTime, suffix)
 	}
-	fmt.Printf("实际服务  %s\n", uiServedLabel(rep.Served))
+	fmt.Printf("页面来源  %s\n", uiServedLabel(rep.Served))
 	fmt.Printf("结论      %s\n", rep.Action)
 }
 
@@ -116,47 +122,38 @@ func cmdUIReset(args []string) {
 
 	dir := resolveDataDir(*dataDir)
 	path := filepath.Join(dir, "web", "index.html")
-	page := webui.EmbeddedPage()
+	disk, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("磁盘上没有 %s，界面就是二进制内嵌的 %s，无需处理\n", path, webui.EmbeddedVersion())
+		return
+	}
 
-	before := "（文件不存在）"
-	if b, err := os.ReadFile(path); err == nil {
-		before = uiOrDash(webui.PageMarker(b))
-		if bytes.Equal(b, page) {
-			fmt.Printf("磁盘页面已经是内置 %s，无需重写：%s\n", webui.EmbeddedVersion(), path)
-			return
-		}
-		if !confirm(*yes, "把 %s 覆盖为内置界面（原文件另存 .bak）？", path) {
+	if webui.IsCustomUI(disk) {
+		if !confirm(*yes, "%s 是正在使用的自定义界面，确认移除（另存 .bak）？", path) {
 			die(1, "已取消")
 		}
-		// 覆盖前留一份：用户可能改过自定义界面，找回来比重新写好受得多。
-		if err := os.WriteFile(path+".bak", b, 0o644); err != nil {
-			die(1, "备份原页面失败: %v", err)
-		}
-	} else if !confirm(*yes, "在 %s 写入内置界面？", path) {
+	} else if !confirm(*yes, "清理已不参与渲染的残留页面 %s（另存 .bak）？", path) {
 		die(1, "已取消")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		die(1, "创建 web 目录失败: %v", err)
+	// 先备份再删：万一那真是用户改过、只是忘了加 custom 标记的界面，
+	// 从 .bak 里能原样捞回来。
+	if err := os.WriteFile(path+".bak", disk, 0o644); err != nil {
+		die(1, "备份原页面失败: %v", err)
 	}
-	if err := os.WriteFile(path, page, 0o644); err != nil {
-		die(1, "写入页面失败: %v", err)
+	if err := os.Remove(path); err != nil {
+		die(1, "移除页面失败: %v", err)
 	}
 
-	fmt.Printf("已写入 %s\n", path)
-	fmt.Printf("  标记    %s → %s\n", before, uiOrDash(webui.EmbeddedVersion()))
-	fmt.Printf("  大小    %s\n", uiBytes(int64(len(page))))
-	if _, err := os.Stat(path + ".bak"); err == nil {
-		fmt.Printf("  备份    %s.bak\n", path)
-	}
-	// 响应层用同一个 ResolvePage 判定，所以这一步之后服务端发出的必然是
-	// 当前二进制内嵌的界面，不需要重启面板。
-	fmt.Println("  无需重启：服务端从下一个请求起就会发送内嵌界面，浏览器强制刷新即可")
+	fmt.Printf("已移除 %s\n", path)
+	fmt.Printf("  备份      %s.bak\n", path)
+	fmt.Printf("  当前服务  二进制内嵌界面 %s（无需重启）\n", webui.EmbeddedVersion())
+	fmt.Println("想以后继续用自定义界面：把文件放回去，并在里面写上 " + webui.CustomUIMarker)
 }
 
 func uiServedLabel(s string) string {
-	if s == "disk" {
-		return "磁盘页面"
+	if s == "custom" {
+		return "磁盘上的自定义界面（custom）"
 	}
 	return "二进制内嵌页面"
 }

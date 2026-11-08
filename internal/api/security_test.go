@@ -125,14 +125,8 @@ func TestCSPNoInlineScriptForBuiltinUI(t *testing.T) {
 		t.Fatalf("style-src 仍需 'unsafe-inline': %s", csp)
 	}
 
-	if err := webui.EmbedIfNeeded(a.DataDir); err != nil {
-		t.Fatal(err)
-	}
-	page, err := os.ReadFile(filepath.Join(a.DataDir, "web", "index.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if htmlNeedsInlineScript(page) {
+	// 内置 UI 直接从二进制取——页面不再落盘，检查的就是实际会发出的那一份。
+	if htmlNeedsInlineScript(webui.EmbeddedPage()) {
 		t.Fatal("内置 UI 不应再包含内联脚本或内联事件属性（收紧 CSP 后会白屏）")
 	}
 }
@@ -145,7 +139,10 @@ func TestCustomUIGetsRelaxedCSP(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(page, []byte(`<!DOCTYPE html><html><body>
+	// 自定义界面必须显式声明 custom 才会被服务（见 webui.CustomUIMarker）：
+	// 「文件存在」或「没有标记」都不再足以接管界面，否则历史残留的旧页面
+	// 会悄悄压住新界面。
+	if err := os.WriteFile(page, []byte(`<!DOCTYPE html><!-- triune-panel-web/custom --><html><body>
 		<button onclick="doIt()">go</button><script>function doIt(){}</script>
 		</body></html>`), 0o644); err != nil {
 		t.Fatal(err)

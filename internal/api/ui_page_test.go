@@ -9,19 +9,24 @@ import (
 	"testing"
 )
 
-// TestStaleDiskUIPageFallsBackToEmbedded 模拟「升级后 data/web/index.html 没写进去」：
-// 磁盘仍是上一版页面时，HTTP 必须给出当前二进制内嵌的界面，而不是旧页面。
-// 这是「明明升级了，界面还是旧的」最常见的一类服务端成因。
-func TestStaleDiskUIPageFallsBackToEmbedded(t *testing.T) {
-	a := newSecurityTestServer(t)
+// writeDiskPage 在测试服务器的数据目录里放一份 data/web/index.html。
+func writeDiskPage(t *testing.T, a *Server, body string) {
+	t.Helper()
 	page := filepath.Join(a.DataDir, "web", "index.html")
 	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	old := `<!DOCTYPE html><!-- triune-panel-web/v0.0.1 old --><html><body>OLD-UI-SENTINEL</body></html>`
-	if err := os.WriteFile(page, []byte(old), 0o644); err != nil {
+	if err := os.WriteFile(page, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestStaleDiskPageNeverServed 「升级后界面还是旧的」曾经的服务端成因：
+// 磁盘上留着上一版页面，而判据认不出它，于是旧页面被一直发出去。
+// 现在页面只从二进制内嵌出，磁盘文件根本不参与渲染。
+func TestStaleDiskPageNeverServed(t *testing.T) {
+	a := newSecurityTestServer(t)
+	writeDiskPage(t, a, `<!DOCTYPE html><!-- triune-panel-web/v0.0.1 old --><html><body>OLD-UI-SENTINEL</body></html>`)
 
 	w := httptest.NewRecorder()
 	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
@@ -41,51 +46,106 @@ func TestStaleDiskUIPageFallsBackToEmbedded(t *testing.T) {
 	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
 		t.Errorf("首页 Cache-Control=%q，应为 no-cache", cc)
 	}
-	etag := w.Header().Get("ETag")
-	if etag == "" {
+	if w.Header().Get("ETag") == "" {
 		t.Fatal("首页缺少 ETag，中间缓存无法判断是否该换页面")
 	}
-	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'self';") {
-		t.Errorf("回退到内置 UI 后 CSP 应变回严格策略: %s", w.Header().Get("Content-Security-Policy"))
-	}
-
-	// 同一内容带 If-None-Match 应回 304，不再传整页。
-	w2 := httptest.NewRecorder()
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.Header.Set("If-None-Match", etag)
-	a.Handler().ServeHTTP(w2, r2)
-	if w2.Code != http.StatusNotModified {
-		t.Errorf("带相同 ETag 应 304，实际 %d", w2.Code)
-	}
-	if w2.Body.Len() != 0 {
-		t.Errorf("304 不应带响应体，实际 %d 字节", w2.Body.Len())
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self';") {
+		t.Errorf("内置 UI 必须是严格 CSP，实际: %s", csp)
 	}
 }
 
-// TestPageETagChangesWithContent 页面内容变了 ETag 必须跟着变，
-// 否则浏览器/反代拿旧 ETag 会一直收到 304，界面永远停在上一版。
-// 这里用不带标记的自定义页面，顺便确认 ResolvePage 不会误伤自定义 UI。
-func TestPageETagChangesWithContent(t *testing.T) {
+// TestAncientUnmarkedDiskPageNeverServed 是最难认、也是真实踩到的那一类：
+// v0.8.1 之前的页面没有 build 标记、脚本内联、也没有 cmdbar/workbench。
+// 旧判据（比标记 / 看页面形态）对它全部失效，界面永久停在旧版。
+func TestAncientUnmarkedDiskPageNeverServed(t *testing.T) {
 	a := newSecurityTestServer(t)
-	page := filepath.Join(a.DataDir, "web", "index.html")
-	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
-		t.Fatal(err)
+	writeDiskPage(t, a, `<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="utf-8"><title>Triune Panel</title></head>
+<body>ANCIENT-UI-SENTINEL<div id="app"></div>
+<script>fetch("/api/login")</script></body></html>`)
+
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	body := w.Body.String()
+	if strings.Contains(body, "ANCIENT-UI-SENTINEL") {
+		t.Fatal("无标记的早期页面也必须被忽略：它既无标记、也不含任何可识别特征")
 	}
+	if !strings.Contains(body, `id="cmdbar"`) {
+		t.Fatal("应服务当前二进制内嵌页")
+	}
+}
+
+// TestExplicitCustomPageIsServed 显式声明 custom 的页面由磁盘接管，
+// 并保留宽松 CSP（自定义界面可能用内联脚本/内联事件）。
+func TestExplicitCustomPageIsServed(t *testing.T) {
+	a := newSecurityTestServer(t)
+	writeDiskPage(t, a, `<!DOCTYPE html><!-- triune-panel-web/custom -->`+
+		`<html><body><button onclick="x()">go</button><script>function x(){}</script>MY-OWN-UI</body></html>`)
+
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("自定义 UI 应 200，实际 %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "MY-OWN-UI") {
+		t.Fatal("声明 custom 的页面应原样服务")
+	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("自定义 UI 应拿到放宽的 CSP，实际: %s", csp)
+	}
+}
+
+// TestPageETagStableAcrossRequests 同一页面多次请求 ETag 必须一致，
+// 否则每次刷新都当新页面重传，304 形同虚设。
+func TestPageETagStableAcrossRequests(t *testing.T) {
+	a := newSecurityTestServer(t)
 	h := a.Handler()
-	write := func(s string) string {
-		t.Helper()
-		if err := os.WriteFile(page, []byte(s), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	get := func() (etag, body string) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
-		if !strings.Contains(w.Body.String(), "ONE") && !strings.Contains(w.Body.String(), "TWO") {
-			t.Error("无标记的自定义 UI 应原样返回，不该被内嵌页顶掉")
+		return w.Header().Get("ETag"), w.Body.String()
+	}
+	e1, b1 := get()
+	e2, b2 := get()
+	if e1 == "" || e2 == "" {
+		t.Fatal("首页必须有 ETag")
+	}
+	if e1 != e2 {
+		t.Errorf("同一页面 ETag 不稳定：%s vs %s", e1, e2)
+	}
+	if b1 != b2 {
+		t.Error("同一二进制两次响应内容应完全一致")
+	}
+	// 带相同 ETag 应 304，不再传整页。
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("If-None-Match", e1)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotModified {
+		t.Errorf("带相同 ETag 应 304，实际 %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("304 不应带响应体，实际 %d 字节", w.Body.Len())
+	}
+}
+
+// TestCustomPageETagChanges 自定义 UI 改了内容，ETag 必须跟着变。
+func TestCustomPageETagChanges(t *testing.T) {
+	a := newSecurityTestServer(t)
+	h := a.Handler()
+	write := func(body string) string {
+		t.Helper()
+		writeDiskPage(t, a, `<!-- triune-panel-web/custom -->`+body)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+		if !strings.Contains(w.Body.String(), "CUSTOM") {
+			t.Fatal("声明 custom 的页面应原样返回")
 		}
 		return w.Header().Get("ETag")
 	}
-	one := write(`<!DOCTYPE html><html><body>ONE</body></html>`)
-	two := write(`<!DOCTYPE html><html><body>TWO</body></html>`)
+	one := write(`<html><body>CUSTOM-ONE</body></html>`)
+	two := write(`<html><body>CUSTOM-TWO</body></html>`)
 	if one == "" || two == "" {
 		t.Fatal("自定义 UI 也应有 ETag")
 	}
@@ -95,13 +155,8 @@ func TestPageETagChangesWithContent(t *testing.T) {
 }
 
 // TestMissingDiskPageServesEmbedded 磁盘页面读不到时不能 404。
-//
-// 只读挂载、目录被删、属主不对都会让 os.ReadFile 失败；此时若返回 404，
-// 用户看到的是一张空白错误页，比「旧界面」更难判断，也无从下手。内嵌页
-// 与当前二进制严格对应，直接服务它才是这一层的正确退路。
 func TestMissingDiskPageServesEmbedded(t *testing.T) {
 	a := newSecurityTestServer(t)
-	// 刻意不创建 web/index.html
 	w := httptest.NewRecorder()
 	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if w.Code != http.StatusOK {
@@ -109,5 +164,18 @@ func TestMissingDiskPageServesEmbedded(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `id="cmdbar"`) {
 		t.Error("没有拿到内嵌界面")
+	}
+}
+
+// TestUnknownPathStill404 `/` 的兜底不能把未知路径也接管，
+// 否则 /assets/写错名字.js 会拿到 200 + HTML，浏览器按 JS 解析时静默报语法错。
+func TestUnknownPathStill404(t *testing.T) {
+	a := newSecurityTestServer(t)
+	for _, p := range []string{"/assets/nope.js", "/whatever", "/foo/bar"} {
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, httptest.NewRequest("GET", p, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s 应 404，实际 %d", p, w.Code)
+		}
 	}
 }

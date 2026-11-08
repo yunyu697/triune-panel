@@ -22,8 +22,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -231,17 +229,12 @@ func (a *Server) Handler() http.Handler {
 		}
 		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致
 		// "明明升级了，界面还是旧的"。API 走 JSON 不受影响。
-		path := filepath.Join(a.DataDir, "web", "index.html")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			// 读不到（目录被删、只读挂载、属主不对）时不能 404——那会让面板
-			// 变成一张空白错误页，比「旧界面」更难理解。直接服务内嵌页，
-			// 反正它和当前二进制严格对应。
-			data = webui.EmbeddedPage()
-		}
-		// 启动时写盘失败（权限 / 只读挂载）或旧版页面残留时，以当前二进制
-		// 内嵌的 UI 为准。没有标记的自定义 UI 原样保留，见 webui.ResolvePage。
-		data = webui.ResolvePage(data)
+		//
+		// 页面来源只有一个判定（webui.ServedPage）：二进制内嵌页，或显式
+		// 声明 custom 的磁盘页面。旧版是「磁盘优先」，于是「data/web 里躺着
+		// 上一版文件」能长期压住新界面；现在这个变量根本不存在——换了二进制
+		// 就是换了界面，没有中间状态。
+		data, customUI := webui.ServedPage(a.DataDir)
 		w.Header().Set("Cache-Control", "no-cache")
 		// 页面 URL 永远不变，给一个内容 ETag：浏览器与合规反代据此判断
 		// 「这次升级要不要换页面」，而不是靠缓存时间猜。内容变了摘要必变。
@@ -252,10 +245,10 @@ func (a *Server) Handler() http.Handler {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		// 自定义 UI（data/web/index.html 被换成自己的构建产物）可能仍在用内联
-		// 脚本或内联事件属性。对这类页面单独放宽 CSP，否则收紧的那一下会把
-		// 人家整套界面打死；内置 UI 不带这些形态，始终走严格策略。
-		if htmlNeedsInlineScript(data) {
+		// 自定义 UI（显式声明 custom 的磁盘页面）可能仍在用内联脚本或内联
+		// 事件属性，对这类页面放宽 CSP，否则收紧的那一下会把人家整套界面打死；
+		// 内置 UI 不带这些形态，始终走严格策略。
+		if customUI || htmlNeedsInlineScript(data) {
 			w.Header().Set("Content-Security-Policy", cspPolicyLegacyInline)
 		}
 		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(data))
