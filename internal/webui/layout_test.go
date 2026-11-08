@@ -347,7 +347,7 @@ func TestApplyOpensAsModal(t *testing.T) {
 // 两者都只在窄屏关掉。
 func TestMobileDropsHeavyEffects(t *testing.T) {
 	css := string(indexHTML)
-	if !strings.Contains(css, "@media (max-width:960px){.view.active{animation:none}}") {
+	if !strings.Contains(css, "@media (max-width:960px){.view.active.enter{animation:none}}") {
 		t.Error("窄屏没关掉 .view 入场动画：整页合成层在部分 Android GPU 上画不出来")
 	}
 	if !strings.Contains(css, "@media (max-width:960px){.overlay{backdrop-filter:none;-webkit-backdrop-filter:none}}") {

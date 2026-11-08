@@ -209,7 +209,8 @@ func TestViewRestoreOnReload(t *testing.T) {
 	}
 
 	// 4) goto() 持久化的是纠正后的 v；restoreView() 校验非法值并恢复页面。
-	if !strings.Contains(funcBody(src, "function goto(v, sect) {"),
+	//    第三参数 animate=false 同时钉住「刷新恢复不播入场动画」。
+	if !strings.Contains(funcBody(src, "function goto(v, sect, animate = true) {"),
 		`localStorage.setItem("triune_view", v)`) {
 		t.Error("goto() 没有保存当前页，刷新时无从恢复")
 	}
@@ -217,7 +218,7 @@ func TestViewRestoreOnReload(t *testing.T) {
 	for _, s := range []string{
 		`localStorage.getItem("triune_view")`,
 		"VIEWS.some(([k]) => k === v)",
-		"goto(v);",
+		"goto(v, undefined, false);",
 	} {
 		if !strings.Contains(restore, s) {
 			t.Errorf("restoreView() 缺少 %q", s)

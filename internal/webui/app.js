@@ -261,7 +261,9 @@ $("nav").addEventListener("click", e => {
 });
 /* sect 可选：设置页分了三组，从别处「去改某一项」跳过来时要直接落到那一组，
    否则用户按提示进去只看到「常用」，找不到「组件更新」。 */
-function goto(v, sect) {
+/* animate=false 只给刷新恢复用（restoreView）：首屏不播入场动画，
+   见 index.html 的 .view.active.enter 与 html[data-boot] 规则。 */
+function goto(v, sect, animate = true) {
   // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
   if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
   CURRENT = v;
@@ -274,7 +276,13 @@ function goto(v, sect) {
   // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
   document.body.dataset.view = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
-  VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  // 入场动画只给真正切页：刷新恢复（restoreView 传 animate=false）不播，
+  // 否则首帧从 opacity:0 淡入，又是那下整页闪。
+  VIEWS.forEach(([k]) => {
+    const el = $("v-" + k), on = k === v;
+    el.classList.toggle("active", on);
+    el.classList.toggle("enter", !!animate && on);
+  });
   // 切页回到顶部：窄屏是文档滚动、桌面是 .main 内部滚动，两个都归零。
   // 不归零的话从长页切到短页会停在半空，看着像「上面缺了一块」。
   window.scrollTo(0, 0);
@@ -1063,10 +1071,11 @@ function restoreView() {
   try { v = localStorage.getItem("triune_view") || ""; } catch (_) {}
   // 旧版本残留 / 手改的非法值退回概览，别让 TITLES[v] 变成 undefined
   if (!VIEWS.some(([k]) => k === v)) v = "overview";
-  // 先把 .active 摆到与首屏一致的位置：等下 goto() 里的 toggle 不再改动
-  // class，撤掉 data-boot-view 时也就不会补播一次 fadeUp 入场动画。
+  // 先把 .active 摆到与首屏一致的位置：撤掉 data-boot-view 时不会露出
+  // HTML 默认激活的概览页。animate=false 让 goto() 不加 .enter，首屏与
+  // 撤标记之后都不会播 fadeUp（那会让整页从 opacity:0 淡入一下）。
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
-  goto(v);
+  goto(v, undefined, false);
 }
 function showApp(){
   $("login").classList.add("hide");

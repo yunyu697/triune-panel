@@ -1,25 +1,27 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.3.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
 <!-- 首屏引导必须**同步**跑在 <head> 里：等 app.js 从 /api/status 回来再决定
      画什么，就会先闪一帧登录页。见 boot.js 的说明。 -->
 <script>
-/* 首屏引导：在 <head> 里同步决定「第一帧画登录页还是主界面」，
- * 以及「主界面里画哪一页」。
+/* 首屏引导：在 <head> 里同步决定「第一帧画登录页还是主界面」、
+ * 「主界面里画哪一页」，以及「用哪套主题」。
  *
  * 原来 index.html 里登录页默认可见、#app 默认 .hide，而 app.js 要等
  * /api/status 一个网络往返回来才 showApp()——刷新时这一来一回就是用户
- * 看到的「先闪一下登录页，然后跳回主页」。网络慢或面板刚重启时更明显。
- * 第二个问题是 HTML 里 #v-overview 写死带 .active，刷新一律回概览：
- * 上次停在「配置生成」按一下 F5，先画概览，等 app.js 跑完才切回去。
+ * 看到的「先闪一下登录页，然后跳回主页」。第二个问题是 HTML 里
+ * #v-overview 写死带 .active，刷新一律回概览。第三个是主题：
+ * data-mode/data-scheme 写死 light/azure，等 body 末尾的 app.js 跑
+ * initTheme() 才改成用户偏好，而 body 带 background/color transition，
+ * 于是深色用户每次刷新都看着整页从浅色渐变到深色。
  *
- * 这里只做一件事：按本地存下来的会话与页面偏好，给 <html> 打上
- * data-boot / data-boot-view，index.html 的 CSS 据此在**首次绘制之前**
- * 把登录页藏掉、把主界面和上次那一页显示出来。之后 app.js 调
- * showApp() / showLogin() 时会清掉这两个属性，显隐重新由 .hide / .active
- * 全权决定，CSS 的 !important 不会和它打架。
+ * 这里只做一件事：按本地存下来的会话、页面偏好与主题偏好，在**首次绘制
+ * 之前**给 <html> 打上属性，index.html 的 CSS 据此决定显隐与配色。之后
+ * app.js 调 showApp() / showLogin() 时会清掉 data-boot*，显隐重新由
+ * .hide / .active 全权决定；主题属性保留（applyTheme() 会写成同一个值，
+ * 不会触发过渡）。
  *
  * 这不是权限判断：token 可能已过期，真正的校验仍在服务端（/api/status 与
  * 每个 API 的 401）。伪造 localStorage 只能让本机先看到一层没有数据的空壳。
@@ -27,7 +29,8 @@
  * 不会绘制中间态，所以这里不需要复制一份角色白名单。
  *
  * 必须外置：CSP 是 script-src 'self'，内联 <script> 会被浏览器直接忽略。
- * localStorage 在隐私模式 / file:// 下可能抛异常，那时退回「登录页优先」。
+ * localStorage 在隐私模式 / file:// 下可能抛异常，那时退回登录页 / 概览 /
+ * 默认主题。
  */
 
 /* 与 app.js 的 VIEWS 保持一致，由 embed_test.go 的 TestViewRestoreOnReload 钉住。
@@ -37,17 +40,43 @@
 var BOOT_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic",
   "import", "gen", "configs", "apply", "settings", "audit"];
 
+/* 主题白名单与旧版迁移表必须与 app.js 的 MODE_NAME / SCHEMES / LEGACY_THEME
+ * 一致，由 TestFirstPaintTheme 逐项比对。不认的值回落 light/azure：写进
+ * <html> 一个不存在的 scheme，CSS 变量就没了，首帧会画成没有样式的一页。
+ * 旧版把亮暗与配色揉成一个 triune_theme，升级后第一次刷新也要直接画对，
+ * 不能等 app.js 迁移完再跳一次。 */
+var BOOT_MODES = ["light", "dark"];
+var BOOT_SCHEMES = ["azure", "indigo", "forest", "rose", "solar", "steel", "ocean"];
+var BOOT_LEGACY_THEME = {
+  light: ["light", "azure"], dark: ["dark", "azure"], midnight: ["dark", "indigo"],
+  forest: ["dark", "forest"], rose: ["dark", "rose"],
+  solar: ["light", "solar"], steel: ["light", "steel"], ocean: ["light", "ocean"]
+};
+
 (function () {
-  var boot = "guest", view = "";
+  var boot = "guest", view = "", mode = "light", scheme = "azure";
   try {
     if (window.localStorage) {
       if (localStorage.getItem("triune_token")) boot = "app";
       view = localStorage.getItem("triune_view") || "";
+
+      var m = localStorage.getItem("triune_mode");
+      var s = localStorage.getItem("triune_scheme");
+      if (!m && !s) {
+        var legacy = BOOT_LEGACY_THEME[localStorage.getItem("triune_theme") || ""];
+        // 挡掉 "__proto__" 之类命中原型链的键：那会拿到一个对象而不是数组。
+        if (legacy && legacy.length === 2) { m = legacy[0]; s = legacy[1]; }
+      }
+      if (BOOT_MODES.indexOf(m) >= 0) mode = m;
+      if (BOOT_SCHEMES.indexOf(s) >= 0) scheme = s;
     }
-  } catch (e) { /* 存储不可用：保持登录页 / 概览页 */ }
+  } catch (e) { /* 存储不可用：保持登录页 / 概览页 / 默认主题 */ }
 
   var root = document.documentElement;
   root.setAttribute("data-boot", boot);
+  // 主题与登录态无关：登录页也用同一套配色，深色偏好下不该先亮一帧。
+  root.setAttribute("data-mode", mode);
+  root.setAttribute("data-scheme", scheme);
   // 概览是 HTML 默认页，不需要标记；只有停在别处时才需要首帧纠偏，
   // 这样「属性存在但值没匹配上」的风险面只剩这一种情况，且已被白名单挡住。
   if (boot === "app" && view !== "overview" && BOOT_VIEWS.indexOf(view) >= 0) {
@@ -197,6 +226,10 @@ html[data-boot="app"] #app{display:flex!important}
    app.js 的 clearBootFlag() 会撤掉属性，之后仍由 .view.active 决定显隐，
    所以这些 !important 只在页面刚解析的那一小段时间生效。
    新增视图必须在这里补一条，TestViewRestoreOnReload 会盯着清单同步。 */
+/* 首屏一律不播入场动画。HTML 里写死的 .active 会触发 fadeUp（opacity:0 → 1），
+   整页先空白一帧再淡入；原来只有 data-boot-view 存在时压得住，停在概览页
+   刷新（这个属性不设）就照播。正常切页的动画改由 goto() 加 .enter 触发。 */
+html[data-boot] .view{animation:none!important}
 html[data-boot-view] #v-overview{display:none!important}
 html[data-boot-view] .view{animation:none!important}
 html[data-boot-view="inbounds"] #v-inbounds,
@@ -360,13 +393,17 @@ body[data-role="admin"] .need-owner{display:none!important}
 
 /* ============ 卡片 ============ */
 .view{display:none}
-.view.active{display:block;animation:fadeUp .28s cubic-bezier(.16,1,.3,1)}
+/* 入场动画只给「用户主动切页」用：goto() 会给目标页加 .enter 触发。
+   挂在 .view.active 上时，HTML 里写死带 .active 的那一页在刷新首帧就会
+   从 opacity:0 淡入——整页先空白一帧再出现，是刷新时最明显的一下闪。 */
+.view.active{display:block}
+.view.active.enter{animation:fadeUp .28s cubic-bezier(.16,1,.3,1)}
 @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
 /* 手机上不做整页入场动画：一个 view 动辄几千像素高，opacity + transform 会为
    整个页面建一个合成层，部分 Android GPU 上这层直接画不出来——切页后就是
    一片白，等它自己消失也未必恢复。 */
-@media (max-width:960px){.view.active{animation:none}}
+@media (max-width:960px){.view.active.enter{animation:none}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);
   padding:20px 22px;margin-bottom:18px;position:relative;transition:background var(--t),border-color var(--t),box-shadow var(--t)}
 .card::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;border-radius:var(--r-lg) var(--r-lg) 0 0;
@@ -4686,7 +4723,9 @@ $("nav").addEventListener("click", e => {
 });
 /* sect 可选：设置页分了三组，从别处「去改某一项」跳过来时要直接落到那一组，
    否则用户按提示进去只看到「常用」，找不到「组件更新」。 */
-function goto(v, sect) {
+/* animate=false 只给刷新恢复用（restoreView）：首屏不播入场动画，
+   见 index.html 的 .view.active.enter 与 html[data-boot] 规则。 */
+function goto(v, sect, animate = true) {
   // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
   if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
   CURRENT = v;
@@ -4699,7 +4738,13 @@ function goto(v, sect) {
   // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
   document.body.dataset.view = v;
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
-  VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  // 入场动画只给真正切页：刷新恢复（restoreView 传 animate=false）不播，
+  // 否则首帧从 opacity:0 淡入，又是那下整页闪。
+  VIEWS.forEach(([k]) => {
+    const el = $("v-" + k), on = k === v;
+    el.classList.toggle("active", on);
+    el.classList.toggle("enter", !!animate && on);
+  });
   // 切页回到顶部：窄屏是文档滚动、桌面是 .main 内部滚动，两个都归零。
   // 不归零的话从长页切到短页会停在半空，看着像「上面缺了一块」。
   window.scrollTo(0, 0);
@@ -5488,10 +5533,11 @@ function restoreView() {
   try { v = localStorage.getItem("triune_view") || ""; } catch (_) {}
   // 旧版本残留 / 手改的非法值退回概览，别让 TITLES[v] 变成 undefined
   if (!VIEWS.some(([k]) => k === v)) v = "overview";
-  // 先把 .active 摆到与首屏一致的位置：等下 goto() 里的 toggle 不再改动
-  // class，撤掉 data-boot-view 时也就不会补播一次 fadeUp 入场动画。
+  // 先把 .active 摆到与首屏一致的位置：撤掉 data-boot-view 时不会露出
+  // HTML 默认激活的概览页。animate=false 让 goto() 不加 .enter，首屏与
+  // 撤标记之后都不会播 fadeUp（那会让整页从 opacity:0 淡入一下）。
   VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
-  goto(v);
+  goto(v, undefined, false);
 }
 function showApp(){
   $("login").classList.add("hide");
