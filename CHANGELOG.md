@@ -10,10 +10,10 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ## 未发布
 
-### 发布校验：CDN 504 不再误报「发布失败」
+### 发版链：CDN 504 不再误报失败，限流不再掐断校验
 
 - `deploy/verify-release.sh` 下载资产仍优先走用户实际用的公开地址，失败时回退到
-  匿名 API 的 asset 通道，**依旧逐字节比对**；只有两条通道都取不到才判失败。
+  API 的 asset 通道，**依旧逐字节比对**；只有两条通道都取不到才判失败。
   GitHub 边缘节点对刚上传的大文件会间歇返 504（92 字节 HTML），此前会假红。
 - 新增本地基准自洽检查：用 python3 重算 `dist/sha256sums.txt` 与四份二进制，
   防止拿被后续构建覆盖过的目录当基准；所有 HTTP 请求加连接与总超时。
@@ -21,6 +21,27 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
   重跑历史版本校验不再因 `HEAD != tag` 假红。
 - 修掉 `read` 以 tab 为 IFS 时吞掉中间空列导致的字段错位（曾把 asset id 列表
   读进「坏资产」字段）。
+- 元数据与资产请求在有 `gh` token 时用认证额度（匿名 API 只有 60 次/小时，
+  连续发版/校验会撞 403）；**匿名版本索引继续匿名**——面板更新检查走的就是
+  这条。匿名索引 403 时明确报「限流，不是发布失败」并继续跑完资产校验，不再 `die`。
+- 版本号判定统一走 `deploy/check-version.sh`，删掉校验脚本里私抄的正则。
+- `release.sh --resume` 不再只按资产名跳过：用 GitHub API 的 `assets[].digest`
+  与本地产物逐份比 sha256，缺失或不一致都 `--clobber` 覆盖重传，避免半截上传
+  的残件留在 Release 里；读不到资产元数据就停下。
+- `deploy/tests/` 新增四个离线回归（发布校验 504 回退与匿名索引守卫、
+  `install.sh` 下载分支、版本号进位、resume 资产核对），CI 用 glob 循环自动跑，
+  全部桩掉 curl 与 git，不联网、不耗 API 配额；变异验证覆盖「去掉回退」与
+  「索引带 token」两种回滚，都能让用例转红。
+
+### 下载链：官方地址 504 且镜像全挂时还有一条直连
+
+- `install.sh` 一次 API 请求同时取 sha256 与 asset id；所有常规候选失败后，
+  最后走 `api.github.com/.../releases/assets/<id>`（带
+  `Accept: application/octet-stream`，不套第三方镜像前缀），仍过 sha256 与
+  `-version` 终检。
+- 面板自更新与内核组件更新同样支持 API asset 兜底：`ListVersions` 解析
+  `assets[].id` 生成直连地址（跟随自定义 `gh_api_base`），主地址失败才惰性重试，
+  归档后缀沿用主地址以便正确解压。
 
 ## v1.3.2
 

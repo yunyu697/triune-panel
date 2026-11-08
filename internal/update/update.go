@@ -39,9 +39,14 @@ type Release struct {
 	Assets []string `json:"assets,omitempty"`
 	// AssetURLs 资产名 → 下载直链（不序列化：几十个资产塞进 JSON 太吵，
 	// 调用方按需取一个即可，见 api 里的 fillPanelAssetURL）。
-	AssetURLs   map[string]string `json:"-"`
-	Prerelease  bool              `json:"prerelease"`             // 预发布（alpha/beta/rc）
-	PublishedAt string            `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
+	AssetURLs map[string]string `json:"-"`
+	// AssetAPIURLs 资产名 → GitHub API asset 直连地址
+	// （<apiBase>/repos/<owner>/<repo>/releases/assets/<id>）。当主下载地址
+	// github.com/<repo>/releases/download/... 的 CDN 边缘节点间歇 504 时，用它兜底直连。
+	// 与 AssetURLs 一样不序列化：只在服务端下载时用，前端不需要。
+	AssetAPIURLs map[string]string `json:"-"`
+	Prerelease   bool              `json:"prerelease"`             // 预发布（alpha/beta/rc）
+	PublishedAt  string            `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
 	// UpdatedAt 资产最后一次刷新的时间（滚动 tag 用；普通 release 与 PublishedAt 相同）。
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
@@ -215,6 +220,9 @@ type ghReleases []struct {
 	Assets    []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
+		// ID 是 GitHub API 直连下载（/releases/assets/<id>）的唯一凭据；
+		// 缺了它就没法构造兜底地址，见 ListVersions。
+		ID int64 `json:"id"`
 	} `json:"assets"`
 }
 
@@ -227,6 +235,9 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	if apiBase == "" {
 		apiBase = "https://api.github.com"
 	}
+	// 规范化：列表 URL 与 AssetAPIURLs 共用同一个 apiBase，去掉尾斜杠避免拼出 //。
+	// 自定义 gh_api_base（镜像）时，兜底地址也跟着指向该域名，而不是硬编码 api.github.com。
+	apiBase = strings.TrimRight(apiBase, "/")
 	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", apiBase, repo)
 	client := &http.Client{Timeout: 60 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
@@ -269,6 +280,15 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 					rel.AssetURLs = map[string]string{}
 				}
 				rel.AssetURLs[a.Name] = a.BrowserDownloadURL
+			}
+			// 生成 API asset 直连兜底地址。用规范化后的 apiBase（自定义 gh_api_base
+			// 镜像同样正确），id<=0 时不生成。这里绝不套 gh_mirror 之类的第三方
+			// 镜像前缀——那种前缀只拼在 browser_download_url 上，见 ApplyMirror。
+			if a.ID > 0 {
+				if rel.AssetAPIURLs == nil {
+					rel.AssetAPIURLs = map[string]string{}
+				}
+				rel.AssetAPIURLs[a.Name] = fmt.Sprintf("%s/repos/%s/releases/assets/%d", apiBase, repo, a.ID)
 			}
 		}
 		out = append(out, rel)
@@ -365,11 +385,29 @@ func ApplyMirror(rawURL, mirror string) string {
 // Download 下载 url 到 destDir 下的临时文件，返回 (文件路径, sha256, 错误)。
 // wantSha256 非空时强校验。
 func Download(url, wantSha256, destDir string) (string, string, error) {
+	return download(url, wantSha256, destDir, "", urlExt(url))
+}
+
+// download 是 Download / DownloadWithFallback 共用的实现。
+//   - ext：临时文件保留的扩展名（Extract 按后缀选解压算法）。主地址下载时由 URL
+//     推导；API 兜底地址 /releases/assets/<id> 本身没有后缀，需由调用方按主地址补上。
+//   - accept：非空时作为 Accept 头发送。GitHub API 的 asset 端点默认只回 JSON
+//     元数据，必须带 Accept: application/octet-stream 才回二进制字节，否则兜底
+//     下到的是一段 JSON，sha256 必然对不上。
+func download(url, wantSha256, destDir, accept, ext string) (string, string, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", "", err
 	}
 	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("下载失败: %w", err)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+		req.Header.Set("User-Agent", "triune-panel") // GitHub API 强制要求 User-Agent
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("下载失败: %w", err)
 	}
@@ -377,7 +415,7 @@ func Download(url, wantSha256, destDir string) (string, string, error) {
 	if resp.StatusCode != 200 {
 		return "", "", fmt.Errorf("下载失败: HTTP %d (%s)", resp.StatusCode, url)
 	}
-	tmp := filepath.Join(destDir, fmt.Sprintf(".dl-%d%s", time.Now().UnixNano(), urlExt(url)))
+	tmp := filepath.Join(destDir, fmt.Sprintf(".dl-%d%s", time.Now().UnixNano(), ext))
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", "", err
@@ -401,6 +439,34 @@ func Download(url, wantSha256, destDir string) (string, string, error) {
 		return "", got, fmt.Errorf("sha256 不匹配: 期望 %s 实际 %s", wantSha256, got)
 	}
 	return tmp, got, nil
+}
+
+// DownloadWithFallback 先用主地址下载；主地址失败时才调用 resolveFallback 取得
+// GitHub API asset 直连兜底地址，再试一次。调用方须保证该兜底地址**不套**第三方
+// 镜像前缀（ApplyMirror 只能用在本函数之外的主地址上）。
+//
+// resolveFallback 惰性求值：正常更新不会平白多一次 releases API 往返（内核组件
+// 更新要重新拉一次版本列表才能反查到资产 id）。返回 (路径, sha256, 是否走了兜底,
+// 错误)；两次都失败时返回主地址原来的错，不让兜底把根因藏起来。
+func DownloadWithFallback(primaryURL string, resolveFallback func() string, wantSha256, destDir string) (path string, sha string, usedFallback bool, err error) {
+	path, sha, err = Download(primaryURL, wantSha256, destDir)
+	if err == nil {
+		return path, sha, false, nil
+	}
+	if resolveFallback == nil {
+		return "", sha, false, err
+	}
+	apiURL := resolveFallback()
+	if apiURL == "" {
+		return "", sha, false, err
+	}
+	// 兜底地址是 /releases/assets/<id>，本身没有文件后缀；沿用主地址的后缀，
+	// 让后续 Extract 仍能按 .tar.gz / .zip 选对解压算法。
+	path2, sha2, err2 := download(apiURL, wantSha256, destDir, "application/octet-stream", urlExt(primaryURL))
+	if err2 != nil {
+		return "", sha, false, err // 两次都失败，报主地址原来的错
+	}
+	return path2, sha2, true, nil
 }
 
 // urlExt 从下载 URL 提取归档扩展名（.tar.gz / .tgz / .zip / .gz / 其他为空）。

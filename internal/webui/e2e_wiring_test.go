@@ -64,13 +64,27 @@ func TestE2ECIWhitelist(t *testing.T) {
 		}
 	}
 
-	// 3) workflow 循环里点名的每个脚本，必须真的在白名单里（否则 CI 直接
-	//    node: cannot find module，或者更糟：本地有、CI 里没有）。
-	loop := regexp.MustCompile(`(?s)for s in ([^;]+); do`).FindStringSubmatch(ci)
-	if len(loop) != 2 {
-		t.Fatal("ci.yml 里找不到 `for s in ...; do` 离线回归循环")
+	// 3) CI 里有两类离线循环：.e2e 的首屏脚本（逐项点名）与 deploy/tests 的
+	//    发布链回归（glob 自动覆盖新增脚本）。分别校验，别让正则抓错对象。
+	loops := regexp.MustCompile(`(?s)for s in ([^;]+); do`).FindAllStringSubmatch(ci, -1)
+	e2eLoop := ""
+	testsGlob := false
+	for _, m := range loops {
+		if strings.Contains(m[1], "deploy/tests/") {
+			testsGlob = strings.Contains(m[1], "*.sh")
+		} else {
+			e2eLoop = m[1]
+		}
 	}
-	names := strings.Fields(strings.ReplaceAll(loop[1], "\\", " "))
+	if e2eLoop == "" {
+		t.Fatal("ci.yml 里找不到 .e2e 的离线回归循环")
+	}
+	if !testsGlob {
+		t.Error("ci.yml 缺少 deploy/tests/*.sh 的 glob 循环：新增发布链回归不会被跑到")
+	}
+	// 逐项点名的脚本必须真的在白名单里（否则 CI 直接 node: cannot find module，
+	// 或者更糟：本地有、CI 里没有）。
+	names := strings.Fields(strings.ReplaceAll(e2eLoop, "\\", " "))
 	if len(names) < 6 {
 		t.Fatalf("离线回归循环只剩 %d 个脚本: %v", len(names), names)
 	}
@@ -81,6 +95,17 @@ func TestE2ECIWhitelist(t *testing.T) {
 	}
 	if !strings.Contains(ignore, "!.e2e/browser.js") {
 		t.Error("browser.js 没白名单，所有脚本 require(\"./browser\") 在 CI 上都会失败")
+	}
+	// glob 那侧的假绿风险是「脚本被 .gitignore 吃掉，本地有、CI 里没有」。
+	if strings.Contains(ignore, "deploy/tests") {
+		t.Error(".gitignore 提到了 deploy/tests：确认离线回归脚本没有被忽略")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "deploy", "tests"))
+	if err != nil {
+		t.Fatalf("读不到 deploy/tests: %v", err)
+	}
+	if len(entries) < 4 {
+		t.Errorf("deploy/tests 只剩 %d 个文件，发布链离线回归是不是被删了？", len(entries))
 	}
 
 	// 4) 依赖清单也必须入库，否则 npm ci --prefix .e2e 在 CI 上没东西可装。

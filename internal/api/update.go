@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -195,12 +196,17 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dlURL := req.URL
+	// browserDLURL 是**未经镜像改写**的官方下载地址。只有按 version 构造的
+	// URL 才对应 GitHub release 里的资产；用户直接给的自定义 URL 没有对应
+	// release，也就没有 API 直连兜底。
+	browserDLURL := ""
 	if dlURL == "" && req.Version != "" {
 		dlURL, err = update.AssetURL(name, req.Version)
 		if err != nil {
 			fail(w, 400, err.Error())
 			return
 		}
+		browserDLURL = dlURL
 	}
 	if dlURL == "" {
 		fail(w, 400, "需要 version 或 url 字段")
@@ -211,11 +217,18 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	dlURL = update.ApplyMirror(dlURL, mirror)
+	primaryURL := update.ApplyMirror(dlURL, mirror) // 镜像前缀只拼在主地址上
+	// 惰性解析兜底地址：正常下载不额外拉一次 releases API（见 resolveCoreAssetAPIURL）。
+	resolveFallback := func() string {
+		return a.resolveCoreAssetAPIURL(name, req.Version, browserDLURL)
+	}
 
 	downloads := filepath.Join(a.DataDir, "downloads")
 	// ---- 1. 下载 ----
-	archivePath, gotSha, err := update.Download(dlURL, req.Sha256, downloads)
+	archivePath, gotSha, usedFallback, err := update.DownloadWithFallback(primaryURL, resolveFallback, req.Sha256, downloads)
+	if usedFallback {
+		log.Printf("[update] %s 主地址下载失败，已改走 GitHub API asset 直连通道", name)
+	}
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -334,6 +347,36 @@ func (a *Server) handleCoreUpdate(w http.ResponseWriter, r *http.Request) {
 		"restarted":   len(input) > 0,
 	})
 	a.auditOK(r, AuditUpdate, name, fmt.Sprintf("内核更新到 %s（备份 %s）", verOut, backup))
+}
+
+// resolveCoreAssetAPIURL 惰性解析内核资产的 GitHub API asset 直连兜底地址。
+// 只在主下载地址失败时由 DownloadWithFallback 调用，避免给每次正常更新平白
+// 多一次 releases API 往返（尤其 sing-box 的 releases JSON 可达数 MB）。
+//
+// browserDLURL 是未经镜像改写的官方下载地址：用它在该 release 的 AssetURLs 里
+// 反查资产名，再取同名资产的 AssetAPIURLs。找不到 release / 资产就返回空串
+// （不做兜底，保持既有行为）；本方法失败也静默——要报的是主地址原来的错。
+func (a *Server) resolveCoreAssetAPIURL(component, version, browserDLURL string) string {
+	repo, ok := componentRepos[component]
+	if !ok || version == "" || browserDLURL == "" {
+		return ""
+	}
+	rels, err := update.ListVersions(a.ghAPIBase(), repo)
+	if err != nil {
+		return ""
+	}
+	for _, r := range rels {
+		if !update.SameVersion(r.Tag, version) {
+			continue
+		}
+		for name, u := range r.AssetURLs {
+			if u == browserDLURL {
+				return r.AssetAPIURLs[name]
+			}
+		}
+		return "" // 找到 release 但没有与主地址对应的资产
+	}
+	return ""
 }
 
 // POST /api/cores/{name}/rollback {"backup":"20260102-150405.bak"}

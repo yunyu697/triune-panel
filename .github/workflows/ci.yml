@@ -82,7 +82,7 @@ jobs:
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
           shellcheck -S warning -e SC2206 \
             deploy/install.sh deploy/uninstall.sh deploy/check-version.sh \
-            deploy/release.sh deploy/verify-release.sh
+            deploy/release.sh deploy/verify-release.sh deploy/tests/*.sh
 
       - name: 中文标点紧跟变量（$VAR，）
         run: |
@@ -91,7 +91,7 @@ jobs:
           python3 - <<'PY'
           import glob, re, sys
           bad = []
-          for p in glob.glob("deploy/*.sh"):
+          for p in glob.glob("deploy/*.sh") + glob.glob("deploy/tests/*.sh"):
               for i, line in enumerate(open(p, encoding="utf-8"), 1):
                   for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*", line):
                       nxt = line[m.end():m.end() + 1]
@@ -105,6 +105,17 @@ jobs:
               sys.exit(1)
           print("OK：没有变量紧跟中文标点")
           PY
+
+      - name: 发布链离线回归（deploy/tests）
+        # 用 glob 循环：新增脚本自动被跑到，不需要维护白名单。全部桩掉 curl/git，
+        # 不联网、不耗 GitHub API 配额，验证 CDN 504 回退 / 匿名索引 / 断点续跑
+        # / install.sh 下载分支 / 版本号进位这些 Go 单测碰不到的脚本行为。
+        run: |
+          set -euo pipefail
+          for s in deploy/tests/*.sh; do
+            echo "→ ${s}"
+            bash "$s"
+          done
 
   first-paint:
     name: 首屏回归（Playwright / Chromium）

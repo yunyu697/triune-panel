@@ -36,6 +36,36 @@ dist_ok() {
   ( cd dist && shasum -a 256 -c sha256sums.txt >/dev/null 2>&1 )
 }
 
+# 断点续跑时不能只按名字跳过资产：上传到一半的残件同名却字节不对。
+# GitHub API 的 assets[].digest 就是远端 sha256，拿它和本地产物逐份比；
+# 缺失或不一致都 --clobber 覆盖重传，一致才跳过。
+# 依赖全局 VER / REPO / REL_ASSETS / ASSETS（抽函数桩测时由调用方设置）。
+sync_existing_assets() {
+  local digests="" a name remote local_sum
+  digests="$(gh api "repos/${REPO}/releases/tags/${VER}" \
+    --jq '.assets[] | [.name, (.digest // "")] | @tsv')" \
+    || die "读不到 ${VER} 的资产元数据，无法核对已上传资产的字节"
+  for a in "${ASSETS[@]}"; do
+    name="$(basename "$a")"
+    case ",${REL_ASSETS}," in
+      *",${name},"*)
+        remote="$(printf '%s\n' "$digests" | awk -F'\t' -v n="$name" '$1==n{print $2; exit}')"
+        local_sum="$(shasum -a 256 "$a" | awk '{print $1}')"
+        if [[ -z "$remote" ]]; then
+          say "  ! ${name}：API 没给 digest，保守覆盖重传"
+          gh release upload "$VER" "$a" --clobber
+        elif [[ "${remote#sha256:}" != "$local_sum" ]]; then
+          say "  ! ${name}：远端字节不一致，覆盖重传"
+          gh release upload "$VER" "$a" --clobber
+        else
+          say "  ✓ ${name}：远端字节一致"
+        fi
+        ;;
+      *) say "  + 补传 ${name}"; gh release upload "$VER" "$a" ;;
+    esac
+  done
+}
+
 usage() {
   cat <<USAGE
 用法:
@@ -155,7 +185,7 @@ if [[ -n "$NOTES" ]]; then
   NOTE_SRC="文件 $NOTES"
 else
   # 没指定就取 CHANGELOG 里「## <版本>」到下一个二级标题之间的内容
-  NOTES="$(mktemp -t triune-notes)"
+  NOTES="$(mktemp "${TMPDIR:-/tmp}/triune-notes.XXXXXX")"
   trap 'rm -f "$NOTES"' EXIT
   awk -v v="## $VER" 'index($0,v)==1{f=1;next} f&&/^## /{exit} f' CHANGELOG.md > "$NOTES"
   [[ -s "$NOTES" ]] || die "CHANGELOG.md 里没有「## ${VER}」小节，也没有用 --notes 指定说明"
@@ -215,7 +245,7 @@ if [[ $DRY -eq 1 ]]; then
     elif [[ "$REL_DRAFT" == "true" ]]; then
       say "  · Release 已存在但仍是草稿：只补缺的资产，最后 PATCH draft=false 发布"
     else
-      say "  · Release 已存在且已发布：只补缺的资产，不动草稿状态"
+      say "  · Release 已存在且已发布：核对已上传资产的 sha256（不一致覆盖重传）、补缺，不动草稿状态"
     fi
     if [[ -n "$(git ls-remote --tags origin "refs/tags/$VER" 2>/dev/null)" ]]; then
       say "  · 远端 tag 已存在，跳过推送"
@@ -270,14 +300,8 @@ if [[ -z "$REL_ID" ]]; then
   gh release create "$VER" --title "$TITLE" --notes-file "$NOTES" "${ASSETS[@]}"
 else
   [[ $RESUME -eq 1 ]] || die "远端已有 ${VER} 的 Release（断在半路的话用 --resume 续跑）"
-  say "  ! Release 已存在（id=${REL_ID}），只补缺的资产"
-  for a in "${ASSETS[@]}"; do
-    name="$(basename "$a")"
-    case ",${REL_ASSETS}," in
-      *",${name},"*) ;;
-      *) say "  + 补传 ${name}"; gh release upload "$VER" "$a" ;;
-    esac
-  done
+  say "  ! Release 已存在（id=${REL_ID}），核对已上传资产字节并补缺"
+  sync_existing_assets
   if [[ "$REL_DRAFT" == "true" ]]; then
     say "  · 发布草稿"
     printf '{"draft":false}' | gh api --method PATCH "repos/${REPO}/releases/${REL_ID}" --input - >/dev/null

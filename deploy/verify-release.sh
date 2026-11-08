@@ -9,8 +9,10 @@
 # 五个资产全部下载下来与本地 dist/ 逐字节 cmp。
 #
 # 下载优先走用户实际用的 github.com/releases/download；刚上传完大文件时该
-# 边缘节点会间歇返 504（92 字节 HTML），此时回退到匿名 API 的 asset 通道，
+# 边缘节点会间歇返 504（92 字节 HTML），此时回退到 API 的 asset 通道，
 # 仍然逐字节比对——只把「CDN 抽风」和「资产被替换/损坏」区分开。
+# 元数据/资产请求在有 gh token 时用认证额度（匿名 60 次/小时很容易耗尽）；
+# 匿名版本索引必须保持匿名，因为面板更新检查走的就是这条。
 #
 # 前置：刚跑完 release.sh，dist/ 或 deploy/ 里还留着那批二进制。
 # 选项：
@@ -67,7 +69,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$VER" ]] || usage 2
-[[ "$VER" =~ ^v[0-9]+\.[0-9]\.[0-9]$ ]] || die "版本号格式不对: ${VER}（期望形如 v1.3.1）"
+# 版本规则以 deploy/check-version.sh 为唯一来源（CHANGELOG 的「单位数进位制」）。
+# 这里不能再抄一份正则：规则一改就会变成「发版放行、发布校验拒绝」的错位。
+bash "$SELF_DIR/check-version.sh" "$VER" >/dev/null || exit 1
 
 step "预检依赖"
 for c in curl python3 git cmp; do
@@ -95,9 +99,25 @@ done
 sorted() { printf '%s\n' "$@" | LC_ALL=C sort | tr '\n' ' '; }
 WANT_ASSETS="$(sorted "${EXPECT[@]}")"
 
-# 元数据与资产都设总超时：release 刚传完时 CDN 偶尔会把连接挂住，
-# 没有 --max-time 时校验脚本能一直卡着不返回（看着像「CI 挂了」）。
-get() { curl -fsSL --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 2 -A "$UA" "$@"; }
+# GitHub 匿名 API 只有 60 次/小时：连续发版/校验很容易撞 403，脚本会把限流
+# 误报成「草稿 Release」。元数据与资产下载能用 gh token 就用（认证 5000/h）；
+# 但**匿名版本索引必须保持匿名**——面板更新检查走的就是这条，带 token 会
+# 掩盖「匿名看不到」的真实故障。所以 get 带认证、get_anon 一律不带。
+AUTH_TOKEN=""
+if command -v gh >/dev/null 2>&1; then
+  AUTH_TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+# 所有请求都设超时：release 刚传完时 CDN 偶尔把连接挂住，没有 --max-time
+# 会一直卡着不返回（看着像「CI 挂了」）。
+CURL_OPTS=(-fsSL --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 2 -A "$UA")
+get() {
+  if [[ -n "$AUTH_TOKEN" ]]; then
+    curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${AUTH_TOKEN}" "$@"
+  else
+    curl "${CURL_OPTS[@]}" "$@"
+  fi
+}
+get_anon() { curl "${CURL_OPTS[@]}" "$@"; }
 
 step "Release 元数据"
 if ! META="$(get "$API/releases/tags/$VER" 2>/dev/null)"; then
@@ -146,7 +166,12 @@ fi
 ck "所有资产都是 uploaded 且非空" "" "$BAD_ASSETS"
 
 step "匿名版本索引（面板更新检查走的就是这条）"
-IDX="$(get "$API/releases?per_page=30")" || die "拉不到匿名 /releases?per_page=30"
+# 匿名 403 是限流，不是发布失败：记一条 FAIL 但继续把后面的资产校验跑完。
+# 不能用 die 掐断整份校验，也不能拿带 token 的结果冒充「匿名可见」。
+if ! IDX="$(get_anon "$API/releases?per_page=30" 2>/dev/null)"; then
+  bad "匿名版本列表不可读（匿名 API 403/限流 60 次每小时，或网络故障；不是发布失败）"
+  IDX="[]"
+fi
 IDX_INFO="$(printf '%s' "$IDX" | python3 -c '
 import json, sys
 rs = json.load(sys.stdin)
@@ -161,8 +186,13 @@ ck "匿名列表第一条就是 ${VER}" "$VER" "$FIRST"
 if [[ "$N_VIS" -gt 0 ]]; then IDX_OK=true; else IDX_OK=false; fi
 ck "匿名列表不为空" "true" "$IDX_OK"
 ck "没有残留的草稿 Release" "" "$DRAFTS"
-LATEST="$(get "$API/releases/latest" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))')" \
-  || die "拉不到 /releases/latest"
+if ! LATEST_JSON="$(get_anon "$API/releases/latest" 2>/dev/null)"; then
+  bad "/releases/latest 不可读（匿名限流或网络故障；不是发布失败）"
+  LATEST=""
+else
+  LATEST="$(printf '%s' "$LATEST_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))')" \
+    || die "解析 /releases/latest 失败"
+fi
 ck "/releases/latest 指向 ${VER}" "$VER" "$LATEST"
 
 step "tag 与提交"
@@ -197,7 +227,7 @@ if [[ $NO_DL -eq 1 ]]; then
 elif [[ -z "$LOCAL_DIR" ]]; then
   bad "dist/ 与 deploy/ 里都没有 sha256sums.txt，没法比对（发版产物被清掉了？）"
 else
-  TMP="$(mktemp -d -t triune-verify)"
+  TMP="$(mktemp -d "${TMPDIR:-/tmp}/triune-verify.XXXXXX")"
   trap 'rm -rf "$TMP"' EXIT
   say "  本地基准目录 ${LOCAL_DIR}/"
   step "本地基准自洽"
@@ -240,7 +270,7 @@ PY
       continue
     fi
     url="https://github.com/${REPO}/releases/download/${VER}/${name}"
-    if ! get "$url" -o "$TMP/$name"; then
+    if ! get_anon "$url" -o "$TMP/$name"; then
       # github.com/releases/download 的边缘节点对刚上传的资产会间歇返 504
       # （92 字节 HTML，同一 URL 重试时 200/504 随机）。换匿名 API 的 asset
       # 通道再取一次，依旧逐字节 cmp —— 只把「CDN 抽风」与「资产被替换/损坏」

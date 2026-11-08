@@ -163,6 +163,7 @@ func runUpdateOnline(dataDir, want string, allowPre, checkOnly, dryRun, yes bool
 
 	// 取下载地址：索引清单直接给 url，GitHub 要按平台从资产里挑
 	url := target.URL
+	apiURL := "" // GitHub API asset 直连兜底地址：绝不套第三方镜像前缀
 	if url == "" {
 		name := panelAssetName()
 		url = target.AssetURLs[name]
@@ -170,9 +171,10 @@ func runUpdateOnline(dataDir, want string, allowPre, checkOnly, dryRun, yes bool
 			die(1, "版本 %s 里没有本平台的资产 %s\n  可用资产：%s\n  这台机器的平台是 %s/%s",
 				target.Tag, name, strings.Join(target.Assets, ", "), runtime.GOOS, runtime.GOARCH)
 		}
+		apiURL = target.AssetAPIURLs[name]
 	}
 	if mirror != "" {
-		url = update.ApplyMirror(url, mirror)
+		url = update.ApplyMirror(url, mirror) // 镜像前缀只拼在主地址上
 	}
 
 	sum := target.Sha256
@@ -194,7 +196,10 @@ func runUpdateOnline(dataDir, want string, allowPre, checkOnly, dryRun, yes bool
 	defer os.RemoveAll(tmp)
 
 	fmt.Printf("  下载 %s …\n", filepath.Base(strings.Split(url, "?")[0]))
-	bin, gotSum, err := update.Download(url, sum, tmp)
+	bin, gotSum, usedFallback, err := update.DownloadWithFallback(url, func() string { return apiURL }, sum, tmp)
+	if usedFallback {
+		fmt.Printf("  主地址下载失败，已改走 GitHub API asset 直连通道 …\n")
+	}
 	if err != nil {
 		die(1, "下载失败: %v\n  网络受限时可以加 --mirror https://ghfast.top 之类的镜像前缀", err)
 	}
@@ -240,16 +245,35 @@ func printUpdateCheck(target, latest update.Release) {
 
 // fetchSum 从 release 的 sha256sums.txt 里取指定资产的哈希。
 // 拿不到就返回空串——由调用方决定是否放行（索引清单可能自带 sha256）。
+// 与主下载同一条可靠性思路：主地址失败时，若该资产有 API 直连地址就再取一次
+// （不套镜像）。API asset 端点要带 Accept: application/octet-stream 才回文件字节。
 func fetchSum(rel update.Release, asset string, mirror string) string {
 	u := rel.AssetURLs["sha256sums.txt"]
 	if u == "" {
 		return ""
 	}
-	if mirror != "" {
-		u = update.ApplyMirror(u, mirror)
+	if s := fetchSumOnce(update.ApplyMirror(u, mirror), "", asset); s != "" {
+		return s
 	}
+	if api := rel.AssetAPIURLs["sha256sums.txt"]; api != "" {
+		return fetchSumOnce(api, "application/octet-stream", asset)
+	}
+	return ""
+}
+
+// fetchSumOnce 拉一次 sha256sums.txt 并解析出 asset 的哈希；accept 非空时作为
+// Accept 头发送（API 直连需要）。任何一步失败都返回空串，由 fetchSum 决定是否兜底。
+func fetchSumOnce(rawURL, accept, asset string) string {
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(u)
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return ""
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+		req.Header.Set("User-Agent", "triune-panel")
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}

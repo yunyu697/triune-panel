@@ -128,3 +128,43 @@ func TestUpdateVersionsMarksPrereleaseByTag(t *testing.T) {
 		t.Errorf("v2.0.0-beta.3 未勾 prerelease 也应被归为预发布，稳定版只剩 v1.9.0，实际 %v", stable)
 	}
 }
+
+// TestResolveCoreAssetAPIURL 回归「内核组件更新的下载兜底」：主下载 URL 504 时，
+// 后端要能从 releases API 反查到对应资产的 GitHub API 直连地址。回滚掉
+// AssetAPIURLs 解析 / resolveCoreAssetAPIURL，这个用例会编译失败或转红。
+func TestResolveCoreAssetAPIURL(t *testing.T) {
+	const bdl = "https://github.com/SagerNet/sing-box/releases/download/v1.15.0/sing-box-1.15.0-linux-amd64.tar.gz"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// apiBase 尾斜杠要被规范化掉，否则列表 URL 会拼成 //repos/...
+		if r.URL.Path != "/repos/SagerNet/sing-box/releases" {
+			t.Errorf("列表请求路径应规范化，实际 %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"tag_name": "v1.15.0", "published_at": "2026-01-01T00:00:00Z",
+				"assets": []map[string]any{
+					{"name": "sing-box-1.15.0-linux-amd64.tar.gz", "id": 777, "browser_download_url": bdl},
+					{"name": "sha256sums.txt", "id": 778, "browser_download_url": "https://github.com/SagerNet/sing-box/releases/download/v1.15.0/sha256sums.txt"},
+				}},
+		})
+	}))
+	defer srv.Close()
+
+	a := newRoleTestServer(t)
+	// 带尾斜杠：验证自定义 gh_api_base 的规范化同样作用于兜底地址
+	if err := a.Store.SetSetting("gh_api_base", srv.URL+"/"); err != nil {
+		t.Fatal(err)
+	}
+	got := a.resolveCoreAssetAPIURL("singbox", "v1.15.0", bdl)
+	want := srv.URL + "/repos/SagerNet/sing-box/releases/assets/777"
+	if got != want {
+		t.Fatalf("反查出的兜底地址不对，期望 %q 实际 %q", want, got)
+	}
+	// 用户直接给的自定义 URL（没有 version）不该凭空找出兜底地址
+	if got := a.resolveCoreAssetAPIURL("singbox", "", "https://example.com/x.tar.gz"); got != "" {
+		t.Errorf("自定义 URL 不应有 API 兜底，实际 %q", got)
+	}
+	// 版本对不上也不该给地址
+	if got := a.resolveCoreAssetAPIURL("singbox", "v9.9.9", bdl); got != "" {
+		t.Errorf("找不到目标 release 时应返回空串，实际 %q", got)
+	}
+}

@@ -39,7 +39,8 @@
 #   （默认生成随机密码并关闭二次验证；保留 2FA 加 --keep-2fa）
 #
 # 下载源 = GitHub 原始地址 + 多个加速镜像，写在同一个候选池里；
-# 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优。
+# 运行时并行探测全部候选，自动选择最快的源下载，失败自动切换次优；
+# 官方地址 504 且镜像全不可用时，最后再试 GitHub API 的 asset 直连。
 # 也可手动指定镜像跳过探测:  curl -fsSL .../install.sh | sudo GH_PROXY=https://ghfast.top bash
 #
 # ★ 防"装到旧版本"三件套（重要）:
@@ -211,13 +212,23 @@ resolve_latest_tag() {
 }
 
 # 读取目标版本对应资产的 sha256（优先 API，其次 sha256sums.txt 资产）
-resolve_sha256() { # resolve_sha256 <tag> <bin_name>
-  local tag="$1" bin="$2" sha=""
-  sha=$(curl -fsSL --connect-timeout 8 --max-time 25 \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$REPO/releases/tags/$tag" 2>/dev/null \
-        | tr '{' '\n' | grep -F "\"name\": \"$bin\"" \
-        | grep -m1 '"digest"' | sed -E 's/.*"sha256:([0-9a-f]{64})".*/\1/') || true
+resolve_sha256() { # resolve_sha256 <tag> <bin_name> [release_json]
+  # 第三参数是调用方已经取到的 /releases/tags/<tag> JSON：一次请求同时拿
+  # 校验和与 asset id，别为了兜底地址再打一次匿名 API（限额只有 60/h）。
+  local tag="$1" bin="$2" sha="" meta=""
+  # 传了第三参数就表示调用方已经取过元数据（哪怕为空、取失败），别再打一次
+  # 匿名 API；旧的两参数调用仍保持「自己取」的行为。
+  if [[ $# -ge 3 ]]; then
+    meta="${3:-}"
+  else
+    meta=$(curl -fsSL --connect-timeout 8 --max-time 25 \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/$REPO/releases/tags/$tag" 2>/dev/null) || true
+  fi
+  if [[ -n "$meta" ]]; then
+    sha=$(printf '%s' "$meta" | tr '{' '\n' | grep -F "\"name\": \"$bin\"" \
+          | grep -m1 '"digest"' | sed -E 's/.*"sha256:([0-9a-f]{64})".*/\1/') || true
+  fi
   if [[ -n "$sha" ]]; then printf '%s' "$sha"; return 0; fi
 
   # 退路：Release 附带的 sha256sums.txt
@@ -228,6 +239,18 @@ resolve_sha256() { # resolve_sha256 <tag> <bin_name>
   if [[ -n "$sha" ]]; then printf '%s' "$sha"; return 0; fi
 
   return 1
+}
+
+# 从同一份 Release JSON 里取出资产的 id，拼成 API 直连兜底地址。
+# github.com/.../releases/download 的边缘节点会间歇 504；api.github.com 的
+# asset 端点走的是对象存储，通常还活着。id<=0 或解析不到就返回 1（不兜底）。
+resolve_asset_id() { # resolve_asset_id <bin_name> <release_json>
+  local bin="$1" json="${2:-}" id=""
+  [[ -n "$json" ]] || return 1
+  id=$(printf '%s' "$json" | tr '{' '\n' | grep -F "\"name\": \"$bin\"" \
+      | grep -m1 '"id"' | sed -E 's/.*"id": *([0-9]+).*/\1/') || true
+  [[ "$id" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$id"
 }
 
 # 计算本地文件 sha256（兼容 sha256sum / shasum / openssl）
@@ -273,9 +296,28 @@ rank_sources() { # rank_sources <探测URL>
 }
 
 # ---- 下载：按择优顺序尝试；任一源失败（下载失败/校验不过）自动换下一个 ----
-# 用法: dl <输出文件> <期望sha256> <URL>
-dl() { # dl <输出文件> <期望sha256> <完整URL>
-  local out="$1" want_sha="$2" url="$3"
+# 用法: dl <输出文件> <期望sha256> <URL> [API 兜底 URL]
+# 最后一个候选是 GitHub API 的 asset 直连：官方 releases/download 边缘 504、
+# 加速镜像又都不可用的时候，至少还有一条不依赖第三方镜像的路。
+# ---- 完整性校验：sha256 不符说明拿到的是损坏/旧内容，必须换源 ----
+dl_verify_sha() { # dl_verify_sha <文件> <期望sha256> → 0 通过/无校验，1 不匹配
+  local f="$1" want="$2" got
+  [[ -n "$want" ]] || return 0
+  got=$(file_sha256 "$f" || true)
+  if [[ -z "$got" ]]; then
+    echo "  ✗ 无法计算 sha256（缺少 sha256sum/shasum/openssl），跳过校验"
+    return 0
+  fi
+  if [[ "$got" != "$want" ]]; then
+    echo "  ✗ sha256 不匹配（期望 ${want:0:16}… 实得 ${got:0:16}…）—— 该源返回的不是当前版本，换下一个源"
+    return 1
+  fi
+  echo "  ✓ sha256 校验通过"
+  return 0
+}
+
+dl() { # dl <输出文件> <期望sha256> <完整URL> [API 兜底URL]
+  local out="$1" want_sha="$2" url="$3" api_url="${4:-}"
   local base ordered=()
   if [[ -n "$GH_PROXY" ]]; then
     ordered=("${GH_PROXY%/}/")
@@ -299,20 +341,23 @@ dl() { # dl <输出文件> <期望sha256> <完整URL>
       echo "  ✗ 下载失败，尝试下一个源"
       continue
     fi
-    # ---- 完整性校验：sha256 不符说明拿到的是损坏/旧内容，必须换源 ----
-    if [[ -n "$want_sha" ]]; then
-      local got; got=$(file_sha256 "$out" || true)
-      if [[ -z "$got" ]]; then
-        echo "  ✗ 无法计算 sha256（缺少 sha256sum/shasum/openssl），跳过校验"
-      elif [[ "$got" != "$want_sha" ]]; then
-        echo "  ✗ sha256 不匹配（期望 ${want_sha:0:16}… 实得 ${got:0:16}…）—— 该源返回的不是当前版本，换下一个源"
-        continue
-      else
-        echo "  ✓ sha256 校验通过"
-      fi
+    if ! dl_verify_sha "$out" "$want_sha"; then
+      continue
     fi
     return 0
   done
+  # 所有常规候选都失败，最后试一次 API asset 直连（不套任何镜像前缀）。
+  if [[ -n "$api_url" ]]; then
+    echo "→ 下载 GitHub API 直连（不走镜像）${api_url}"
+    rm -f "$out"
+    # asset 端点必须带这个 Accept 才回二进制，否则下到的是 JSON 元数据。
+    if curl -fL --connect-timeout 8 --retry 1 \
+         --speed-time 15 --speed-limit 10240 \
+         -H 'Accept: application/octet-stream' \
+         -o "$out" "$api_url" 2>/dev/null && dl_verify_sha "$out" "$want_sha"; then
+      return 0
+    fi
+  fi
   return 1
 }
 
@@ -368,9 +413,13 @@ else
     echo "→ 最新版本: $TAG"
   fi
 
-  # ---- 步骤2：取期望 sha256 ----
-  echo "→ 正在获取 $TAG 的校验和..."
-  WANT_SHA=$(resolve_sha256 "$TAG" "$BIN_NAME" || true)
+  # ---- 步骤2：一次取 Release 元数据，同时拿到校验和与 asset id ----
+  echo "→ 正在获取 ${TAG} 的校验和..."
+  REL_JSON="$(curl -fsSL --connect-timeout 8 --max-time 25 \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null)" || REL_JSON=""
+  WANT_SHA=$(resolve_sha256 "$TAG" "$BIN_NAME" "$REL_JSON" || true)
+  ASSET_ID=$(resolve_asset_id "$BIN_NAME" "$REL_JSON" || true)
   if [[ -n "$WANT_SHA" ]]; then
     echo "  sha256: ${WANT_SHA:0:16}…"
   else
@@ -378,9 +427,13 @@ else
   fi
 
   # ---- 步骤3：按固定 tag URL 下载（不用 latest，避免镜像缓存旧版本）----
-  ASSET_URL="https://github.com/$REPO/releases/download/$TAG/$BIN_NAME"
+  ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/${BIN_NAME}"
+  API_ASSET_URL=""
+  if [[ -n "$ASSET_ID" ]]; then
+    API_ASSET_URL="https://api.github.com/repos/${REPO}/releases/assets/${ASSET_ID}"
+  fi
   echo "→ 正在探测下载源（GitHub 原始地址 + ${#MIRRORS[@]} 个镜像，自动择优）..."
-  dl "$TMP_BIN" "$WANT_SHA" "$ASSET_URL" \
+  dl "$TMP_BIN" "$WANT_SHA" "$ASSET_URL" "$API_ASSET_URL" \
      || { echo "✘ 全部下载源均失败或校验不通过";
           echo "  请检查网络；若仓库为私有，匿名无法拉取，请将仓库设为 Public 或改用离线安装";
           rm -f "$TMP_BIN"; exit 1; }
