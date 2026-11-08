@@ -48,6 +48,7 @@ var tpCommands = []tpCmd{
 	{name: "rollback", desc: "把内核配置回滚到上一份备份", run: cmdRollback},
 
 	{name: "doctor", desc: "环境自检", run: cmdDoctor},
+	{name: "ui", desc: "查看/修复面板界面来源（ui reset）", run: cmdUI},
 	{name: "backup", desc: "备份数据目录", run: cmdBackup},
 	{name: "restore", desc: "从备份恢复", run: cmdRestore},
 	{name: "passwd", desc: "重置管理密码", run: cmdResetPassword},
@@ -320,7 +321,7 @@ func confirm(yes bool, format string, a ...any) bool {
 // invokedAsTP 判断二进制是不是以 tp 这个名字被调用的（安装脚本会软链）。
 //
 // 这个判断决定「不带参数」的含义：triune-panel 不带参数是启动服务
-//（systemd 的 ExecStart 依赖它），tp 不带参数是看状态。
+// （systemd 的 ExecStart 依赖它），tp 不带参数是看状态。
 func invokedAsTP() bool {
 	return filepath.Base(os.Args[0]) == "tp"
 }

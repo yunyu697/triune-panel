@@ -93,3 +93,21 @@ func TestPageETagChangesWithContent(t *testing.T) {
 		t.Error("页面内容变了 ETag 却没变，缓存会一直 304")
 	}
 }
+
+// TestMissingDiskPageServesEmbedded 磁盘页面读不到时不能 404。
+//
+// 只读挂载、目录被删、属主不对都会让 os.ReadFile 失败；此时若返回 404，
+// 用户看到的是一张空白错误页，比「旧界面」更难判断，也无从下手。内嵌页
+// 与当前二进制严格对应，直接服务它才是这一层的正确退路。
+func TestMissingDiskPageServesEmbedded(t *testing.T) {
+	a := newSecurityTestServer(t)
+	// 刻意不创建 web/index.html
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("磁盘页面缺失时应服务内嵌页（200），实际 %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `id="cmdbar"`) {
+		t.Error("没有拿到内嵌界面")
+	}
+}

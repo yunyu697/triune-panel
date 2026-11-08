@@ -222,13 +222,22 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /assets/boot.js", a.handleAsset("boot.js"))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// 只服务页面本身。未知路径必须 404：`/` 是 mux 的兜底，若在这里
+		// 返回页面，/assets/写错名字.js 会拿到 200 + text/html，浏览器按
+		// text/javascript 解析时静默报语法错，比明确的 404 难查得多。
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			http.NotFound(w, r)
+			return
+		}
 		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致
 		// "明明升级了，界面还是旧的"。API 走 JSON 不受影响。
 		path := filepath.Join(a.DataDir, "web", "index.html")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			http.NotFound(w, r)
-			return
+			// 读不到（目录被删、只读挂载、属主不对）时不能 404——那会让面板
+			// 变成一张空白错误页，比「旧界面」更难理解。直接服务内嵌页，
+			// 反正它和当前二进制严格对应。
+			data = webui.EmbeddedPage()
 		}
 		// 启动时写盘失败（权限 / 只读挂载）或旧版页面残留时，以当前二进制
 		// 内嵌的 UI 为准。没有标记的自定义 UI 原样保留，见 webui.ResolvePage。

@@ -10,6 +10,7 @@
 package webui
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	_ "embed"
@@ -92,18 +93,68 @@ func embeddedMarker() string {
 	return ""
 }
 
+// EmbeddedVersion 返回内嵌页面的 build 标记版本（如 "v1.4.1"）。
+// CLI 与测试用它解释「二进制里到底带的是哪一版界面」。
+func EmbeddedVersion() string { return embeddedMarker() }
+
+// EmbeddedPage 返回内嵌页面的副本。
+// 调用方拿到的是独立切片，改它不会污染后续响应。
+func EmbeddedPage() []byte { return append([]byte(nil), indexHTML...) }
+
+// PageMarker 提取任意页面里的 build 标记；没有标记时返回空串。
+func PageMarker(page []byte) string {
+	if m := webBuildMarker.FindSubmatch(page); len(m) >= 2 {
+		return string(m[1])
+	}
+	return ""
+}
+
+// builtinPageHints 是「这确实是我们自己的内置页」的特征串。
+//
+// 只收 v1.3.0 之后才存在、且自定义 UI 几乎不可能带的形态：脚本外置后
+// 页面必定引用 /assets/app.js；工作台落地后才有 cmdbar / workbench。
+// **不要**用 id="nav" 或标题之类的通用特征——那会误伤自定义 UI，
+// 把它们当成旧内置页顶掉（见包注释里对自定义 UI 的承诺）。
+var builtinPageHints = [][]byte{
+	[]byte("/assets/app.js"),
+	[]byte(`id="cmdbar"`),
+	[]byte(`id="workbench"`),
+}
+
+// LooksLikeBuiltinPage 判断一份页面是不是本项目生成的内置页。
+func LooksLikeBuiltinPage(page []byte) bool {
+	for _, h := range builtinPageHints {
+		if bytes.Contains(page, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolvePage 保证 HTTP 实际发出去的页面不会是上一版。
 //
 // EmbedIfNeeded 在启动时把 data/web/index.html 覆盖成内嵌版，但那一步可能
 // 失败（目录只读、属主不是面板运行用户、只读挂载），而 main 里只记一行日志
 // 就继续服务磁盘文件——用户看到的就是「明明升级了，界面还是旧的」。
-// 这里做第二道防线：磁盘页面带 build 标记且版本与当前二进制不一致时，
-// 直接用内嵌页面响应，不依赖能不能写盘。
+// 这里做第二道防线，不依赖能不能写盘：
 //
-// 没有标记的页面一律原样返回：那是用户自己替换的自定义 UI（见包注释），
-// 不能因为缺标记就把它换掉，否则自定义界面会被内置页顶掉、连 CSP 都会变。
+//   - 有标记且版本不同 → 服务内嵌页；
+//   - 没有标记但明显是内置页（引用了 /assets/app.js 等）→ 服务内嵌页。
+//     这一条兜的是更早版本落地的无标记页面：只认「有标记」会把它们
+//     永久留在旧界面（写盘失败时两道防线同时失效）；
+//   - 其余没有标记的页面一律原样返回：那是用户自己替换的自定义 UI，
+//     不能因为缺标记就把它换掉，否则自定义界面会被内置页顶掉、CSP 也会变。
 func ResolvePage(disk []byte) []byte {
-	if m := webBuildMarker.FindSubmatch(disk); len(m) >= 2 && string(m[1]) != embeddedMarker() {
+	if len(disk) == 0 {
+		return indexHTML
+	}
+	if m := webBuildMarker.FindSubmatch(disk); len(m) >= 2 {
+		if string(m[1]) != embeddedMarker() {
+			return indexHTML
+		}
+		return disk
+	}
+	if LooksLikeBuiltinPage(disk) {
 		return indexHTML
 	}
 	return disk
