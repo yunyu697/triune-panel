@@ -117,7 +117,17 @@ case "${1:-}" in
   *) exit 1 ;;
 esac
 STUB
-chmod +x "$TMP/bin/curl" "$TMP/bin/git"
+cat > "$TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+# 桩：让校验器一定拿到 token。CI runner 没有 gh 登录时，变异版「索引带 token」
+# 恰好也不带 token，守卫就测不出问题——回归不能依赖运行环境有没有凭证。
+if [[ "${1:-}" == "auth" && "${2:-}" == "token" ]]; then
+  printf 'stub-token-for-verify\n'
+  exit 0
+fi
+exit 1
+STUB
+chmod +x "$TMP/bin/curl" "$TMP/bin/git" "$TMP/bin/gh"
 
 PASS=0
 FAIL=0
