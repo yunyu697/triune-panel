@@ -155,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           for s in first-paint-flicker view-restore theme-switch-flicker \
-                   section-restore bypass-server layout-check; do
+                   section-restore bypass-server layout-check backups-hostopt; do
             echo "→ ${s}"
             node ".e2e/${s}.js"
           done

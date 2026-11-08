@@ -45,6 +45,8 @@ const (
 	AuditDeny          = "rbac.deny"      // 越权访问被拒
 	AuditConfig        = "config"         // 保存 / 覆盖 / 下载 / 删除客户端配置
 	AuditTag           = "tag"            // 自定义规则标签增删改
+	AuditBackupPrune   = "backup.prune"   // 旧备份清理（手动或自动）
+	AuditHostOpt       = "hostopt"        // 主机网络优化：应用 / 撤销 BBR
 )
 
 // audit 记录一条审计，操作人取自当前登录账号（匿名请求为空）。

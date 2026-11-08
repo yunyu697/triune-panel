@@ -170,7 +170,11 @@ const ICONS = {
   apply:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   configs:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-  audit:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/>'
+  audit:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/>',
+  // 备份管理：叠放的磁盘 + 时钟，和「配置管理」的下载托盘区分开
+  backups:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/><path d="M12 12v4l2.5 1.5"/>',
+  // 主机优化：主板 + 提速折线
+  hostopt:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 12l3-4 3 3 4-5"/>'
 };
 const VIEWS = [
   ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
@@ -185,7 +189,9 @@ const VIEWS = [
   // 这一页只剩修订历史与内核日志，从弹窗里的「修订历史 →」进来。
   ["apply","修订与日志","配置","配置修订历史与内核运行日志", true],
   ["settings","设置","系统","内核路径、证书、版本管理与主题"],
-  ["audit","审计","系统","登录、配置变更与关键操作留痕"]
+  ["audit","审计","系统","登录、配置变更与关键操作留痕"],
+  ["backups","备份管理","系统","四类旧版本文件统一盘点、保留策略与容量清理"],
+  ["hostopt","主机优化","系统","BBR 与拥塞控制只读体检，默认不改系统设置"]
 ];
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
@@ -296,6 +302,8 @@ function goto(v, sect, animate = true) {
   if (v === "overview") setTimeout(loadOverview, 30);
   if (v === "outbounds") loadOutbounds();
   if (v === "audit") loadAudit();
+  if (v === "backups") loadBackupInventory();
+  if (v === "hostopt") loadHostOpt();
   if (v === "configs") loadSavedConfigs();
   if (v === "settings") {
     /* 分组必须在**当前这个 JS 任务**里恢复。原来 setSectSaved() 排在下面的
@@ -576,7 +584,53 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0"},
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
+      backup_keep_count:"0",backup_max_mb:"0",backup_max_days:"0",backup_auto_prune:"0"},
+    // 备份容量治理与主机体检的演示数据：让离线 demo 也能完整走一遍预览→清理、
+    // 检测→应用→撤销，而不是点进去一片空白。
+    backupInventory:{
+      entries:[
+        {key:"data/data/triune-data-20261101-030000.tar.gz",name:"triune-data-20261101-030000.tar.gz",category:"data",group:"data",size:48234496,mod_time:"2026-11-01T03:00:00Z",age_days:7},
+        {key:"data/data/triune-data-20261104-030000.tar.gz",name:"triune-data-20261104-030000.tar.gz",category:"data",group:"data",size:48951296,mod_time:"2026-11-04T03:00:00Z",age_days:4},
+        {key:"data/data/triune-data-20261108-030000.tar.gz",name:"triune-data-20261108-030000.tar.gz",category:"data",group:"data",size:49123328,mod_time:"2026-11-08T03:00:00Z",age_days:0},
+        {key:"panel/panel/v1.3.1-20261104-030000.bak",name:"v1.3.1-20261104-030000.bak",category:"panel",group:"panel",size:15683746,mod_time:"2026-11-04T03:00:00Z",age_days:4},
+        {key:"panel/panel/v1.3.2-20261108-030000.bak",name:"v1.3.2-20261108-030000.bak",category:"panel",group:"panel",size:15719152,mod_time:"2026-11-08T03:00:00Z",age_days:0},
+        {key:"core/xray/20261104-030000.bak",name:"20261104-030000.bak",category:"core",group:"xray",size:32833408,mod_time:"2026-11-04T03:00:00Z",age_days:4},
+        {key:"core/xray/20261108-030000.bak",name:"20261108-030000.bak",category:"core",group:"xray",size:32901120,mod_time:"2026-11-08T03:00:00Z",age_days:0},
+        {key:"revision/xray/20261104-030000.json.bak",name:"20261104-030000.json.bak",category:"revision",group:"xray",size:8192,mod_time:"2026-11-04T03:00:00Z",age_days:4},
+        {key:"revision/xray/20261108-030000.json.bak",name:"20261108-030000.json.bak",category:"revision",group:"xray",size:8448,mod_time:"2026-11-08T03:00:00Z",age_days:0}
+      ],
+      summary:{total_bytes:243451886,count:9,
+        by_category:{data:146309120,panel:31402898,core:65734528,revision:16640},
+        disk_free:12884901888,disk_total:21474836480,
+        hint:"共 9 份、占用 232.2 MB；数据归档 3 份占 139.5 MB。归档会把 cores/ 下的内核二进制一起打包，份数越多越占空间。每个分类至少保留最新一份，清理不会把回滚能力清空。",
+        roots:["/opt/triune-panel/data/backups","/opt/triune-panel/backups"]},
+      policy:{keep_count:0,max_mb:0,max_days:0,auto_prune:false},planned:[]
+    },
+    hostOpt:{
+      platform:"linux",kernel:"6.8.0-45-generic",current_cc:"cubic",
+      available_cc:["reno","cubic","bbr"],bbr_module:true,default_qdisc:"pfifo_fast",
+      qdisc_detail:"qdisc pfifo_fast 0: dev eth0 root refcnt 2 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1",
+      in_container:false,is_root:true,
+      checks:[
+        {name:"内核版本 ≥ 4.9",ok:true,warn:false,detail:"内核 6.8.0-45-generic，支持 BBR"},
+        {name:"BBR 可用",ok:true,warn:false,detail:"tcp_bbr 模块已加载，available_congestion_control 含 bbr"},
+        {name:"当前拥塞控制已是 bbr",ok:false,warn:false,detail:"当前 tcp_congestion_control = cubic"},
+        {name:"默认 qdisc 为 fq/fq_codel",ok:false,warn:false,detail:"net.core.default_qdisc = pfifo_fast"},
+        {name:"tc 实测 qdisc",ok:false,warn:false,detail:"eth0 当前为 pfifo_fast"},
+        {name:"当前不在容器里",ok:true,warn:false,detail:"未检测到 docker / k8s / lxc / OpenVZ 特征"},
+        {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"}
+      ],
+      suggested:[
+        "# 手动开启 BBR（等价面板的「应用」）",
+        "printf 'net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n' | sudo tee /etc/sysctl.d/99-bbr.conf",
+        "sudo sysctl --system",
+        "# 验证",
+        "sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc",
+        "sudo tc qdisc show dev eth0"
+      ],
+      apply_enabled:true,reason:"",applied:false,config_path:"/etc/sysctl.d/99-triune-bbr.conf"
+    },
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
       {id:2,username:"ops-lin",role:"admin",enabled:true,has_totp:false,last_ip:"198.51.100.23",last_login:"2026-10-30 22:41:05",created_at:"2026-10-12 14:20:00"},
@@ -738,6 +792,46 @@ async function mockRoute(path, opts) {
   }
   if (api === "settings" && m === "GET") return MDB.settings;
   if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
+  if (api === "backups" && rest === "/inventory") {
+    const inv = MDB.backupInventory, st = MDB.settings;
+    inv.policy = { keep_count:+st.backup_keep_count || 0, max_mb:+st.backup_max_mb || 0,
+      max_days:+st.backup_max_days || 0, auto_prune:st.backup_auto_prune === "1" };
+    // 演示版按天数预演，并守住「每组最新一份」这条硬底线
+    const newest = {};
+    inv.entries.forEach(e => {
+      const g = e.category + "/" + e.group;
+      if (!newest[g] || e.mod_time > newest[g].mod_time) newest[g] = e;
+    });
+    const p = inv.policy;
+    inv.planned = inv.entries.filter(e => newest[e.category + "/" + e.group] !== e &&
+      ((p.max_days > 0 && e.age_days > p.max_days) || p.keep_count > 0 || p.max_mb > 0));
+    return inv;
+  }
+  if (api === "backups" && rest === "/prune") {
+    const inv = MDB.backupInventory, b = opts.body || {}, keys = b.keys || [];
+    const planned = keys.length ? inv.entries.filter(e => keys.includes(e.key)) : (inv.planned || []);
+    if (b.dry_run || !b.confirm) return { dry_run:true, planned, failed:[] };
+    const gone = new Set(planned.map(e => e.key));
+    const removed = inv.entries.filter(e => gone.has(e.key));
+    inv.entries = inv.entries.filter(e => !gone.has(e.key));
+    inv.summary.count = inv.entries.length;
+    inv.summary.total_bytes = inv.entries.reduce((s, e) => s + e.size, 0);
+    inv.planned = [];
+    return { dry_run:false, removed, failed:[],
+      freed:removed.reduce((s, e) => s + e.size, 0),
+      summary:inv.summary, planned:[], policy:inv.policy };
+  }
+  if (api === "host-opt" && m === "GET") return MDB.hostOpt;
+  if (api === "host-opt" && rest === "/apply") {
+    if (opts.body?.confirm !== "APPLY BBR") throw new Error("需要显式确认");
+    Object.assign(MDB.hostOpt, { applied:true, current_cc:"bbr", default_qdisc:"fq" });
+    return MDB.hostOpt;
+  }
+  if (api === "host-opt" && rest === "/revert") {
+    if (opts.body?.confirm !== "REVERT BBR") throw new Error("需要显式确认");
+    Object.assign(MDB.hostOpt, { applied:false, current_cc:"cubic", default_qdisc:"pfifo_fast" });
+    return MDB.hostOpt;
+  }
   // 预检必须排在 apply 前面：api 只取到 "apply"，rest 才是 "/dry-run"，
   // 先命中下面那条就会返回「应用成功」的结构，弹窗里显示 undefined。
   if (api === "apply" && rest === "/dry-run") return {content:'{\n  "log": { "level": "info", "timestamp": true },\n  "inbounds": [\n    { "type": "vless", "tag": "hk-01-reality", "listen": "::", "listen_port": 443, "users": [ ... ] }\n  ],\n  "outbounds": [ { "type": "direct", "tag": "direct" } ],\n  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }\n}',result:{validated:true}};
@@ -1254,6 +1348,207 @@ function fmtBytes(b) {
   const u = ["B","KB","MB","GB","TB"]; let i = 0;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
   return b.toFixed(i ? 2 : 0) + " " + u[i];
+}
+
+/* ================= 备份管理 =================
+   四类旧版本文件（数据归档 / 面板 .bak / 内核 .bak / 配置修订 .bak）统一成一个
+   视图。删除一律走后端的白名单复核：这里只回传 key，不拼路径、不自行判断
+   哪些文件能删。策略输入框只在首次进入时回填，避免「刷新一下把没保存的编辑冲掉」。 */
+const BK_CAT_LABEL = { data:"数据归档", panel:"面板版本", core:"内核版本", revision:"配置修订" };
+let BK_POLICY_LOADED = false;
+
+async function loadBackupInventory() {
+  try {
+    renderBackupInventory(await req("/api/backups/inventory"));
+  } catch (e) {
+    const el = $("bk_summary");
+    if (el) el.textContent = "加载失败：" + e.message;
+  }
+}
+
+function renderBackupInventory(j) {
+  const s = j.summary || {}, p = j.policy || {}, cat = s.by_category || {};
+  const catText = Object.keys(BK_CAT_LABEL)
+    .map(k => `${BK_CAT_LABEL[k]} ${fmtBytes(cat[k] || 0)}`).join(" · ");
+  $("bk_summary").innerHTML = `<b style="font-size:20px">${fmtBytes(s.total_bytes || 0)}</b>` +
+    `<span class="muted"> / ${s.count || 0} 份</span>` +
+    `<div style="margin-top:6px">${escHtml(catText)}</div>` +
+    `<div class="muted" style="margin-top:6px">磁盘可用 ` +
+    `${s.disk_free ? fmtBytes(s.disk_free) : "未知"}${s.disk_total ? " / 共 " + fmtBytes(s.disk_total) : ""}</div>`;
+  $("bk_hint").textContent = s.hint || "";
+  if (!BK_POLICY_LOADED) {
+    $("bk_keep").value = p.keep_count ?? 0;
+    $("bk_maxmb").value = p.max_mb ?? 0;
+    $("bk_maxdays").value = p.max_days ?? 0;
+    $("bk_auto").checked = !!p.auto_prune;
+    BK_POLICY_LOADED = true;
+  }
+  $("bk_policy_hint").textContent = p.auto_prune
+    ? "后台自动清理已开启（启动 10 分钟后首次检查，之后每 6 小时一次）"
+    : "后台自动清理关闭：只在你点「按策略清理」时才删";
+  renderBackupTable(j.entries || []);
+  renderBackupPreview(j.planned || [], []);
+}
+
+function renderBackupTable(entries) {
+  $("bk_body").innerHTML = entries.map(e => `<tr>
+    <td><input type="checkbox" class="bk-sel" value="${escHtml(e.key)}"></td>
+    <td>${escHtml(BK_CAT_LABEL[e.category] || e.category)}</td>
+    <td class="mono">${escHtml(e.group)}</td>
+    <td class="mono">${escHtml(e.name)}</td>
+    <td>${fmtBytes(e.size)}</td>
+    <td class="muted">${escHtml(String(e.mod_time || "").replace("T", " ").slice(0, 19))}</td>
+    <td>${Number(e.age_days) || 0}</td>
+    <td class="ta-r"><button class="btn sm danger" data-act="deleteOneBackup" data-args="${escJson([e.key])}">删除</button></td>
+  </tr>`).join("") || `<tr><td colspan="8" class="muted">还没有面板生成的备份文件。</td></tr>`;
+  markScrollableTables();
+}
+
+function renderBackupPreview(planned, failed) {
+  const box = $("bk_preview");
+  if (!box) return;
+  planned = planned || []; failed = failed || [];
+  if (!planned.length && !failed.length) {
+    box.innerHTML = `<p class="muted">按当前策略没有需要清理的条目。</p>`;
+    return;
+  }
+  const freed = planned.reduce((sum, e) => sum + (Number(e.size) || 0), 0);
+  const shown = planned.slice(0, 8).map(e => escHtml(e.name)).join("、");
+  box.innerHTML = `<div style="padding:10px 12px;border-radius:9px;font-size:13px;line-height:1.7;
+      background:color-mix(in srgb,var(--warn) 10%,transparent);
+      border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)">
+      <b>将清理 ${planned.length} 份，约 ${fmtBytes(freed)}</b>
+      <div class="muted">${shown}${planned.length > 8 ? " …" : ""}</div></div>` +
+    (failed.length ? `<div class="muted" style="margin-top:8px">${failed.map(x => escHtml(x)).join("；")}</div>` : "");
+}
+
+async function saveBackupPolicy() {
+  const body = {
+    backup_keep_count: String(Math.max(0, +$("bk_keep").value || 0)),
+    backup_max_mb: String(Math.max(0, +$("bk_maxmb").value || 0)),
+    backup_max_days: String(Math.max(0, +$("bk_maxdays").value || 0)),
+    backup_auto_prune: $("bk_auto").checked ? "1" : "0"
+  };
+  try {
+    await req("/api/settings", { method:"PUT", body });
+    toast("保留策略已保存");
+    BK_POLICY_LOADED = false;   // 回填成刚提交的服务器真值
+    await loadBackupInventory();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function previewBackupPrune() {
+  try {
+    const j = await req("/api/backups/prune", { method:"POST", body:{ dry_run:true } });
+    renderBackupPreview(j.planned || [], j.failed || []);
+    toast(`按当前策略将清理 ${(j.planned || []).length} 份`, "info");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function runBackupPrune() {
+  let pre;
+  try { pre = await req("/api/backups/prune", { method:"POST", body:{ dry_run:true } }); }
+  catch (e) { return toast(e.message, "err"); }
+  const list = pre.planned || [];
+  renderBackupPreview(list, pre.failed || []);
+  if (!list.length) return toast("按当前策略没有要清理的条目", "info");
+  const freed = list.reduce((sum, e) => sum + (Number(e.size) || 0), 0);
+  if (!await ask("按策略清理备份",
+    `将删除 ${list.length} 份旧备份，释放约 ${fmtBytes(freed)}。每个分类至少保留最新一份，删除后无法恢复。确定继续？`)) return;
+  await doBackupPrune([]);
+}
+
+async function deleteSelectedBackups() {
+  const keys = Array.from(document.querySelectorAll("#bk_body .bk-sel:checked")).map(x => x.value);
+  if (!keys.length) return toast("请先勾选要删除的备份", "warn");
+  if (!await ask("删除备份", `确定删除选中的 ${keys.length} 份备份？删除后无法恢复；每个分类的最新一份会被保留。`)) return;
+  await doBackupPrune(keys);
+}
+
+async function deleteOneBackup(key) {
+  if (!await ask("删除备份", `确定删除这一份备份？删除后无法恢复。\n${key}`)) return;
+  await doBackupPrune([key]);
+}
+
+async function doBackupPrune(keys) {
+  try {
+    const j = await req("/api/backups/prune", { method:"POST", body:{ confirm:true, keys } });
+    toast(`已清理 ${(j.removed || []).length} 份，释放 ${fmtBytes(j.freed || 0)}`);
+    await loadBackupInventory();
+    if ((j.failed || []).length) viewContent("部分条目未清理", (j.failed || []).join("\n"));
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 主机优化（BBR） =================
+   体检只读；两个写动作必须回传后端约定的确认字面量，并且只给超级管理员看按钮。
+   这里不做任何「自动优化」——用户不点，系统设置永远不会被改。 */
+let HO_REPORT = null;
+
+async function loadHostOpt() {
+  try {
+    HO_REPORT = await req("/api/host-opt");
+    renderHostOpt(HO_REPORT);
+  } catch (e) {
+    const el = $("ho_meta");
+    if (el) el.textContent = "检测失败：" + e.message;
+  }
+}
+
+function renderHostOpt(j) {
+  const kv = [
+    ["平台 / 内核", `${j.platform || "—"} ${j.kernel || ""}`],
+    ["当前拥塞控制", j.current_cc || "读取失败"],
+    ["可用算法", (j.available_cc || []).join(" ") || "读取失败"],
+    ["默认 qdisc", j.default_qdisc || "读取失败"],
+    ["tc 实测", j.qdisc_detail || "—"],
+    ["运行环境", `${j.in_container ? "容器内" : "物理机 / 虚拟机"}，${j.is_root ? "root" : "非 root"}`],
+    ["面板配置", j.applied ? "已应用，可撤销" : "未应用"]
+  ];
+  // 不用 table / 固定 min-width：tc qdisc 这种一长串英文在 320px 屏上会把
+  // 整张卡片撑出横向滚动条。flex-wrap + min-width:0 + word-break 让每项自己换行。
+  $("ho_meta").innerHTML = kv.map(([k, v]) =>
+    `<div style="display:flex;flex-wrap:wrap;gap:2px 12px;padding:6px 0;border-bottom:1px solid var(--line)">
+       <span class="muted" style="flex:0 0 128px">${escHtml(k)}</span>
+       <span class="mono" style="flex:1 1 140px;min-width:0;word-break:break-word">${escHtml(v)}</span>
+     </div>`).join("");
+  $("ho_checks").innerHTML = (j.checks || []).map(c => {
+    const mark = c.ok ? "✓" : (c.warn ? "!" : "✕");
+    const color = c.ok ? "var(--ok, var(--acc))" : (c.warn ? "var(--warn)" : "var(--err, #d44)");
+    return `<div style="display:flex;flex-wrap:wrap;gap:3px 9px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line)">
+      <b style="color:${color};width:16px;flex:none">${mark}</b>
+      <span style="flex:1 1 150px;min-width:0">${escHtml(c.name)}</span>
+      <span class="muted" style="flex:1 1 100%;min-width:0;word-break:break-word">${escHtml(c.detail || "")}</span>
+    </div>`;
+  }).join("");
+  $("ho_reason").textContent = (j.apply_enabled
+    ? "此主机可以由面板应用 BBR；应用前会备份原值，生效失败自动整体回滚。"
+    : (j.reason || "当前主机不支持由面板应用，请按下面的命令手动处理。")) +
+    (!isOwner() && j.apply_enabled ? "（应用与撤销仅超级管理员可操作）" : "");
+  $("ho_cmds").textContent = (j.suggested || []).join("\n");
+  const canAct = isOwner();
+  $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled || !!j.applied);
+  $("ho_revert").classList.toggle("hide", !canAct || !j.applied);
+}
+
+async function hostOptApply() {
+  if (!await ask("应用 BBR",
+    "面板将写入 /etc/sysctl.d/99-triune-bbr.conf 并立即生效（net.core.default_qdisc=fq、" +
+    "net.ipv4.tcp_congestion_control=bbr）。应用前会备份原值，生效失败自动整体回滚。确定继续？")) return;
+  try {
+    await req("/api/host-opt/apply", { method:"POST", body:{ confirm:"APPLY BBR" } });
+    toast("已应用 BBR");
+    await loadHostOpt();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function hostOptRevert() {
+  if (!await ask("撤销 BBR 改动",
+    "将恢复应用前的拥塞控制与 qdisc 原值，并删除面板写入的配置文件。确定继续？")) return;
+  try {
+    await req("/api/host-opt/revert", { method:"POST", body:{ confirm:"REVERT BBR" } });
+    toast("已撤销面板的 BBR 改动");
+    await loadHostOpt();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 /* ---- 实时速率 ---- */

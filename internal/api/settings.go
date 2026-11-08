@@ -72,7 +72,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 生成客户端配置时规则集的下载源（默认 official，见 rulemirror.go）
 		MirrorSetting, MirrorPrefixSetting,
 		// 面板是否用 TLS 监听（"1" 开，改了要重启；见 paneltls.go）
-		SettingPanelHTTPS} {
+		SettingPanelHTTPS,
+		// 备份容量治理策略（见 backups.go）
+		SettingBackupKeepCount, SettingBackupMaxMB, SettingBackupMaxDays, SettingBackupAutoPrune} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -136,6 +138,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		MirrorSetting: true, MirrorPrefixSetting: true,
 		// 面板 HTTPS 开关：只落库，真正生效在下次启动（certmgr 不管面板自己）
 		SettingPanelHTTPS: true,
+		// 备份容量治理：份数 / 总容量(MB) / 天数 / 是否允许后台自动清理（默认关）
+		SettingBackupKeepCount: true, SettingBackupMaxMB: true,
+		SettingBackupMaxDays: true, SettingBackupAutoPrune: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
@@ -160,6 +165,12 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	// 变成一个「开了但没生效」的静默状态。
 	if v, ok := m[SettingPanelHTTPS]; ok && v != "" && v != "0" && v != "1" {
 		fail(w, 400, "panel_https 只能是 1 或 0")
+		return
+	}
+	// 备份策略是「会删文件」的设置，非法值必须先拒掉：写进库再被 clamp 成 0
+	// 会变成「用户以为设了上限，其实什么都没发生」的静默失效。
+	if err := validateBackupSettings(m); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	var changedKeys []string

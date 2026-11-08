@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.3.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -171,7 +171,9 @@ html[data-boot-view="gen"] #v-gen,
 html[data-boot-view="configs"] #v-configs,
 html[data-boot-view="apply"] #v-apply,
 html[data-boot-view="settings"] #v-settings,
-html[data-boot-view="audit"] #v-audit{display:block!important}
+html[data-boot-view="audit"] #v-audit,
+html[data-boot-view="backups"] #v-backups,
+html[data-boot-view="hostopt"] #v-hostopt{display:block!important}
 /* 首屏设置页分组恢复（配合 boot.js 的 data-boot-sect）：HTML 里三组卡片
    默认全可见、「常用」按钮写死 .on，app.js 的 setSectSaved() 原来还排在
    goto() 的 30ms 定时器里——停在「运维」刷新就会先画一帧「常用」。
@@ -1696,6 +1698,81 @@ canvas{display:block;width:100%}
           <button class="btn sm danger need-owner" data-act="clearAudit">清空审计</button>
           <span class="muted" id="au_msg"></span>
         </div>
+      </div>
+    </section>
+
+    <!-- 备份管理：四类旧版本文件统一成一个视图 + 容量治理 -->
+    <section id="v-backups" class="view">
+      <div class="card">
+        <h3>占用总览<span class="spacer"></span>
+          <button class="btn sm" data-act="loadBackupInventory">刷新</button>
+        </h3>
+        <div id="bk_summary" class="muted">加载中…</div>
+        <p id="bk_hint" class="muted" style="margin-top:10px;line-height:1.7"></p>
+      </div>
+      <div class="card">
+        <h3>保留与清理策略<span class="spacer"></span>
+          <button class="btn sm primary" data-act="saveBackupPolicy">保存策略</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          三个条件取「或」，任一命中即可清理；<b>每个分类至少保留最新一份</b>，不会把回滚能力清空。
+          数值填 0 表示不限制。自动清理默认关闭，只有打开开关并设了上限才会在后台执行。
+        </p>
+        <div class="frm">
+          <div><label>每类保留份数（0 = 不限）</label><input id="bk_keep" class="input" type="number" min="0" step="1" value="0"></div>
+          <div><label>总占用上限 MB（0 = 不限）</label><input id="bk_maxmb" class="input" type="number" min="0" step="1" value="0"></div>
+          <div><label>保留天数（0 = 不限）</label><input id="bk_maxdays" class="input" type="number" min="0" step="1" value="0"></div>
+          <div class="full radio-row"><label><input type="checkbox" id="bk_auto"> 允许后台按策略自动清理（默认关）</label></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn" data-act="previewBackupPrune">预览将清理的条目</button>
+          <button class="btn danger" data-act="runBackupPrune">按策略清理</button>
+          <span class="muted" id="bk_policy_hint"></span>
+        </div>
+        <div id="bk_preview" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3>备份文件清单<span class="spacer"></span>
+          <button class="btn sm danger" data-act="deleteSelectedBackups">删除选中</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          数据归档会把 <code>cores/</code> 下的内核二进制一起打包，份数多时占用成倍增长；
+          面板版本、内核版本与配置修订的 <code>.bak</code> 以前各自堆积、从不清理。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr>
+            <th style="width:44px">选</th><th style="width:100px">分类</th><th style="width:110px">分组</th>
+            <th>文件</th><th style="width:100px">大小</th><th style="width:170px">时间</th>
+            <th style="width:70px">天数</th><th class="ta-r" style="width:90px">操作</th>
+          </tr></thead>
+          <tbody id="bk_body"><tr><td colspan="8" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 主机优化：BBR 只读体检 + 显式确认后才写系统配置 -->
+    <section id="v-hostopt" class="view">
+      <div class="card">
+        <h3>主机网络体检<span class="spacer"></span>
+          <button class="btn sm" data-act="loadHostOpt">重新检测</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          这里只做<b>只读检测</b>：不创建文件、不改 sysctl、不重启任何服务。
+          应用与撤销会写 <code>/etc/sysctl.d/99-triune-bbr.conf</code>，仅超级管理员可用，
+          且必须先备份原值、失败整体回滚。
+        </p>
+        <div id="ho_meta" style="margin-bottom:12px"></div>
+        <div id="ho_checks"></div>
+        <div id="ho_reason" class="muted" style="margin-top:10px;line-height:1.7"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+          <button class="btn primary hide" id="ho_apply" data-act="hostOptApply">应用 BBR</button>
+          <button class="btn danger hide" id="ho_revert" data-act="hostOptRevert">撤销面板的改动</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>手动执行 / 验证命令</h3>
+        <p class="muted" style="margin-bottom:10px">不放心让面板写系统配置时，复制下列命令自己执行即可；效果与面板的应用完全一致。</p>
+        <pre id="ho_cmds" style="white-space:pre-wrap;word-break:break-all"></pre>
       </div>
     </section>
 

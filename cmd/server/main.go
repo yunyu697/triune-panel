@@ -149,6 +149,10 @@ func serve(args []string) {
 	// 「升级完成后立刻切到最新版」，不是「面板告诉你该重启了」。
 	srv.StartBinaryWatch()
 
+	// 备份容量治理：默认只统计不删除，用户在设置里显式打开 auto_prune 并设了
+	// 上限才会在后台清理旧版本。启动后先等 10 分钟，留足回滚窗口。
+	srv.StartBackupJanitor()
+
 	// ACME 证书管理器：API 查询与后台签发/续期循环必须使用同一实例，
 	// 否则 API 侧永远看不到后台签发的证书状态。
 	certMgr := certmgr.New(*dataDir, st)

@@ -80,6 +80,11 @@ var protectedRoutes = []struct{ method, path string }{
 	{"POST", "/api/cores/singbox/rollback"},
 	{"GET", "/api/panel/backups"},
 	{"POST", "/api/panel/rollback"},
+	{"GET", "/api/backups/inventory"},
+	{"POST", "/api/backups/prune"},
+	{"GET", "/api/host-opt"},
+	{"POST", "/api/host-opt/apply"},
+	{"POST", "/api/host-opt/revert"},
 	{"GET", "/api/certs"},
 	{"POST", "/api/certs/issue"},
 }

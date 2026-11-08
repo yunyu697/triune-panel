@@ -32,7 +32,7 @@
  * 不存在的页面名时，CSS 的「先藏概览」会没有对应显示规则 → 整页空白。
  * 非法值干脆不设属性，退回 index.html 默认的概览页。 */
 var BOOT_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic",
-  "import", "gen", "configs", "apply", "settings", "audit"];
+  "import", "gen", "configs", "apply", "settings", "audit", "backups", "hostopt"];
 
 /* 主题白名单与旧版迁移表必须与 app.js 的 MODE_NAME / SCHEMES / LEGACY_THEME
  * 一致，由 TestFirstPaintTheme 逐项比对。不认的值回落 light/azure：写进

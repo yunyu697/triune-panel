@@ -191,6 +191,12 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mirrors", a.write(a.handleMirrors))
 	mux.HandleFunc("POST /api/mirrors/test", a.write(a.handleMirrorTest))
 	mux.HandleFunc("GET /api/panel/backups", a.write(a.handlePanelBackups))
+	// 备份容量治理：盘点只读，预览/删除按 write 档（见 backups.go）。
+	// 四个 .bak 目录 + 两处数据归档统一成一个视图，删除只认重新扫出的白名单。
+	mux.HandleFunc("GET /api/backups/inventory", a.auth(a.handleBackupInventory))
+	mux.HandleFunc("POST /api/backups/prune", a.write(a.handleBackupPrune))
+	// 主机网络优化体检（BBR）：报告只读，管理员可见；应用/撤销见下面 ownerOnly。
+	mux.HandleFunc("GET /api/host-opt", a.write(a.handleHostOpt))
 	// 面板自身 HTTPS：没有域名时用自签证书（见 paneltls.go 的诚实边界）
 	mux.HandleFunc("GET /api/panel/tls", a.write(a.handlePanelTLS))
 	mux.HandleFunc("GET /api/panel/tls/cert", a.write(a.handlePanelCertDownload))
@@ -203,6 +209,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/admins/{id}", a.ownerOnly(a.handleAdminDelete))
 	mux.HandleFunc("DELETE /api/audit", a.ownerOnly(a.handleAuditClear))
 	mux.HandleFunc("POST /api/panel/rollback", a.ownerOnly(a.handlePanelRollback))
+	// 写 /etc/sysctl.d 属于系统级改动：只有超级管理员、且带回传的确认字面量才会执行
+	mux.HandleFunc("POST /api/host-opt/apply", a.ownerOnly(a.handleHostOptApply))
+	mux.HandleFunc("POST /api/host-opt/revert", a.ownerOnly(a.handleHostOptRevert))
 
 	// 前端脚本从内嵌副本走（见 webui.AssetFile）：内容与二进制严格对应，
 	// 且 CSP 收紧到 script-src 'self' 之后必须能同源加载。

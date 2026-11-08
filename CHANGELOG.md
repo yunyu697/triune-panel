@@ -10,6 +10,52 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ## 未发布
 
+### 备份管理：四类旧版本文件终于有统一视图和容量上限
+
+以前只有 `Rotate(keep=7)` 按份数清理数据归档，面板版本 `.bak`、内核二进制
+`.bak`、配置修订 `.bak` 各写各的目录、从不清理；用户看到的是「面板没怎么用，
+硬盘却一直涨」。更隐蔽的是归档把 `cores/` 下的内核二进制也打了进去，7 份
+归档等于把几十 MB 的内核复制 7 遍。
+
+- 新增 `internal/backup/inventory.go`：**同时**枚举 `data/backups`、安装脚本
+  `--out` 指向的 `<install>/backups`、`data/backups/panel`、
+  `data/backups/cores/<内核>`、`data/revisions/<内核>`，给出总占用、分类小计、
+  磁盘可用与份数，并说明「归档含内核二进制」这个体积来源。
+- 保留策略可按**份数 / 总容量 MB / 天数**设上限（三者取「或」），全 0 = 不限制；
+  **每个分类 + 分组至少保留最新一份**是硬底线，任何策略都不能把回滚能力清空。
+  策略存 `store.settings`，`PUT /api/settings` 会先校验数值再落库。
+- `GET /api/backups/inventory` 只读盘点并附带「按当前策略会清哪些」预演；
+  `POST /api/backups/prune` 在 `dry_run` 或没带 `confirm` 时**只预览不删除**，
+  预览与执行共用同一套筛选。前端传的只是 key，后端重新扫描后按白名单复核，
+  绝不拿 key 拼文件系统路径；只认面板自己生成的文件名（归档前缀或带时间戳
+  的 `.bak`），目录里的其它文件、子目录、符号链接一律不碰。
+- 自动清理**默认关闭**：显式打开开关并设了上限后，面板每 6 小时按策略清一次，
+  启动后等 10 分钟才跑第一次，留足升级后的回滚窗口。手动/自动清理都留审计。
+- **边界**：每日 03:30 的定时备份仍由 `install.sh` 部署的 systemd timer +
+  `backup.sh` 按 `KEEP=7` 自行轮转，面板策略不改那个脚本；面板的自动清理只在
+  面板进程运行时生效，也没有改动「归档打包内核二进制」这个既有语义。
+
+### 主机优化：BBR 只读体检，默认绝不改系统
+
+VPS 自建节点常被建议「开 BBR」，但容器里改 sysctl 通常无效、非 Linux 上更
+无从谈起。新增「主机优化」页把这些前置条件一次说清，同时给一条可回滚的
+可选应用路径。
+
+- `internal/hostopt/`：Linux 只读探测内核版本（≥ 4.9）、当前/可用拥塞控制、
+  `net.core.default_qdisc`、tcp_bbr 模块、`tc qdisc show`（`LookPath` + 3 秒
+  超时，缺 `tc` 记 Warn 而不是假失败）、容器特征（docker/k8s/containerd/
+  podman/lxc/OpenVZ）与 root 权限，共 7 项结论；非 Linux 走 `//go:build !linux`
+  明确降级。报告里始终给出可复制的手动执行与验证命令。
+- **默认零副作用**：`Detect` 不创建目录、不写文件、不改 sysctl；应用与撤销
+  只在超级管理员点下并原样回传确认串（`APPLY BBR` / `REVERT BBR`）后才执行，
+  路由挂 `ownerOnly`。
+- 应用前把原值与「是否原本存在同名配置」存进
+  `data/hostopt-bbr.orig.json`（0600），再用临时文件 + `os.Rename` 原子写
+  `/etc/sysctl.d/99-triune-bbr.conf`；`sysctl -p` 5 秒超时，失败**整体回滚**
+  配置与原值。撤销恢复原值、删配置与状态标记、保留备份文件供审计；原本存在
+  同名配置时恢复其内容而不是粗暴删除用户的文件。容器内、非 root、BBR 模块
+  缺失时按钮直接不可用并写明原因。
+
 ### 发版链：CDN 504 不再误报失败，限流不再掐断校验
 
 - `deploy/verify-release.sh` 下载资产仍优先走用户实际用的公开地址，失败时回退到
