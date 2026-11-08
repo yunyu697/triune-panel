@@ -2067,7 +2067,7 @@ function renderHoDiff() {
 }
 
 /* 输入框/下拉一改就重算差异；不写库、不发请求。 */
-function hoEdit() { renderHoDiff(); }
+function hoEdit() { renderHoDiff(); syncHoApplyState(); }
 
 function renderHostOpt(j) {
   const kv = [
@@ -2106,6 +2106,17 @@ function renderHostOpt(j) {
   const canAct = isOwner();
   $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled);
   $("ho_revert").classList.toggle("hide", !canAct || !j.applied);
+  syncHoApplyState();
+}
+
+/* 有差异才让点：无变更时把按钮禁用，比点下去再弹「无需应用」更直接。
+   按钮常驻而不是应用完就消失——调完一个参数还能再应用一次。 */
+function syncHoApplyState() {
+  const btn = $("ho_apply");
+  if (!btn || btn.classList.contains("hide")) return;
+  const n = hoDiffRows().filter(r => r.ch).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `应用 ${n} 项变更` : "应用网络参数";
 }
 
 async function hostOptApply() {

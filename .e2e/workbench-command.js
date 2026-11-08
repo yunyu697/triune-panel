@@ -74,7 +74,10 @@ const ck = (n, want, got) => {
     todos: document.querySelectorAll("#wbTodo .todo-row").length,
     spans: [...document.querySelectorAll("#workbench .wb-card")].filter(c => c.style.gridRowEnd).length
   }));
-  ck("工作台七张卡片齐全", "todo,kpis,trend,cores,users,rank,quick", wb.cards.join(","));
+  // 顺序 = WB_KEYS = index.html 里的卡片排列：待办 → 趋势 → 内核 → 快捷动作
+  // → 关键指标 → 占比 → 排行。DOM 与 WB_KEYS 必须一致，否则首帧会先按旧顺序
+  // 画一遍再被 wbApply 重排，卡片看起来「跳」了一下。
+  ck("工作台七张卡片齐全", "todo,trend,cores,quick,kpis,users,rank", wb.cards.join(","));
   ck("卡片头有折叠置顶上移下移拖拽", "wbToggle,wbPin,wbUp,wbDown,drag", wb.tools.join(","));
   ck("今天要处理有内容", true, wb.todos >= 1);
   ck("桌面瀑布流已算出 grid-row span", 7, wb.spans);

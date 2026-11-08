@@ -98,26 +98,55 @@ const ck = (n, want, got) => {
   }));
   ck("切到了主机优化页", "hostopt", ho.view);
   ck("active 视图是 v-hostopt", "v-hostopt", ho.active);
-  ck("七项体检都渲染了", 7, ho.checks);
+  ck("十一项体检都渲染了", 11, ho.checks);
   ck("给了手动执行命令", true, ho.cmds.includes("sysctl"));
   ck("元信息显示未应用", true, ho.meta.includes("未应用"));
   ck("可应用时显示应用按钮", true, ho.applyShown);
   ck("未应用时不显示撤销按钮", false, ho.revertShown);
 
-  // ---- 5. 应用 → 撤销，按钮状态必须跟着变 ----
+  // ---- 5. 改参数 → 差异预览 → 应用 → 撤销，按钮状态必须跟着变 ----
+  // 与当前值一致时不该弹确认：没有变更可确认，直接提示「无需应用」。
+  const diffIdle = await page.evaluate(() => document.getElementById("ho_diff").textContent);
+  ck("未改动时差异预览写明一致", true, diffIdle.includes("一致"));
+  ck("未改动时点应用不弹确认", false, await page.evaluate(async () => {
+    document.getElementById("ho_apply").click();
+    await new Promise(r => setTimeout(r, 150));
+    return document.getElementById("mConfirm").classList.contains("show");
+  }));
+
+  const diffAfter = await page.evaluate(() => {
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      el.value = v;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    set("ho_cc", "bbr");
+    set("ho_qdisc", "fq");
+    return document.getElementById("ho_diff").textContent;
+  });
+  ck("改动两项后差异预览计数", true, diffAfter.includes("2 项将被修改"));
+  ck("差异预览列出拥塞控制", true, diffAfter.includes("拥塞控制"));
+  ck("有变更后应用按钮可点且写明项数", "应用 2 项变更", await page.evaluate(() => {
+    const b = document.getElementById("ho_apply");
+    return b.disabled ? "(disabled)" : b.textContent.trim();
+  }));
+
   await page.evaluate(() => document.getElementById("ho_apply").click());
   await page.waitForTimeout(150);
   ck("应用前有二次确认", true,
     await page.evaluate(() => document.getElementById("mConfirm").classList.contains("show")));
+  ck("确认弹窗列出待改项", true,
+    await page.evaluate(() => document.getElementById("cf_text").textContent.includes("项变更")));
   await page.evaluate(() => document.getElementById("cf_ok").click());
   await page.waitForTimeout(600);
   const applied = await page.evaluate(() => ({
     meta: document.getElementById("ho_meta").textContent,
     applyShown: !document.getElementById("ho_apply").classList.contains("hide"),
+    applyDisabled: document.getElementById("ho_apply").disabled,
     revertShown: !document.getElementById("ho_revert").classList.contains("hide")
   }));
   ck("应用后显示已应用", true, applied.meta.includes("已应用"));
-  ck("应用后隐藏应用按钮", false, applied.applyShown);
+  ck("应用后应用按钮保留但不可点", true, applied.applyShown && applied.applyDisabled);
   ck("应用后出现撤销按钮", true, applied.revertShown);
 
   await page.evaluate(() => document.getElementById("ho_revert").click());
