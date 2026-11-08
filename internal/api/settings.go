@@ -74,7 +74,9 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 面板是否用 TLS 监听（"1" 开，改了要重启；见 paneltls.go）
 		SettingPanelHTTPS,
 		// 备份容量治理策略（见 backups.go）
-		SettingBackupKeepCount, SettingBackupMaxMB, SettingBackupMaxDays, SettingBackupAutoPrune} {
+		SettingBackupKeepCount, SettingBackupMaxMB, SettingBackupMaxDays, SettingBackupAutoPrune,
+		// 命令工作台布局（见 workbench.go）：跨设备记住卡片顺序与折叠状态
+		SettingWorkbenchLayout} {
 		v, _ := a.Store.GetSetting(k)
 		out[k] = v
 	}
@@ -141,6 +143,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 备份容量治理：份数 / 总容量(MB) / 天数 / 是否允许后台自动清理（默认关）
 		SettingBackupKeepCount: true, SettingBackupMaxMB: true,
 		SettingBackupMaxDays: true, SettingBackupAutoPrune: true,
+		// 工作台布局只影响 UI，但一样要过白名单校验才落库
+		SettingWorkbenchLayout: true,
 	}
 	for _, c := range core.All() {
 		allowed["bin_"+c.Name()] = true
@@ -170,6 +174,12 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	// 备份策略是「会删文件」的设置，非法值必须先拒掉：写进库再被 clamp 成 0
 	// 会变成「用户以为设了上限，其实什么都没发生」的静默失效。
 	if err := validateBackupSettings(m); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	// 工作台布局是前端拼出来的 JSON：不校验就等于开放一个任意字符串仓库，
+	// 而且脏值回流到页面会直接破坏卡片顺序。
+	if err := validateWorkbenchLayout(m[SettingWorkbenchLayout]); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}

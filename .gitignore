@@ -26,3 +26,4 @@ downloads/
 !.e2e/section-restore.js
 !.e2e/theme-switch-flicker.js
 !.e2e/view-restore.js
+!.e2e/workbench-command.js

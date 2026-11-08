@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.3.3 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.4 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -39,8 +39,8 @@
  * 只认白名单里的值：localStorage 是同源可控数据，但手改/旧版本残留一个
  * 不存在的页面名时，CSS 的「先藏概览」会没有对应显示规则 → 整页空白。
  * 非法值干脆不设属性，退回 index.html 默认的概览页。 */
-var BOOT_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic",
-  "import", "gen", "configs", "apply", "settings", "audit", "backups", "hostopt"];
+var BOOT_VIEWS = ["overview", "traffic", "audit", "inbounds", "outbounds", "clients",
+  "import", "gen", "configs", "apply", "settings", "backups", "hostopt"];
 
 /* 主题白名单与旧版迁移表必须与 app.js 的 MODE_NAME / SCHEMES / LEGACY_THEME
  * 一致，由 TestFirstPaintTheme 逐项比对。不认的值回落 light/azure：写进
@@ -62,8 +62,15 @@ var BOOT_LEGACY_THEME = {
  * app.js 的 setSect() 已经在同一个 JS 任务里同步算完，浏览器不会绘制中间态。 */
 var BOOT_SECTS = ["common", "security", "maintain"];
 
+/* 密度与圆角也要在首帧恢复：它们改的是卡片内距、字号与圆角，等 app.js
+   跑起来才改会让整页在刷新后「先松后紧」跳一下。白名单与 app.js 的
+   DENSITIES / RADII 一致，非法值回落默认档。 */
+var BOOT_DENSITIES = ["compact", "comfortable"];
+var BOOT_RADII = ["sharp", "normal", "soft"];
+
 (function () {
   var boot = "guest", view = "", mode = "light", scheme = "azure", sect = "common";
+  var density = "comfortable", radius = "normal";
   try {
     if (window.localStorage) {
       if (localStorage.getItem("triune_token")) boot = "app";
@@ -81,6 +88,10 @@ var BOOT_SECTS = ["common", "security", "maintain"];
       }
       if (BOOT_MODES.indexOf(m) >= 0) mode = m;
       if (BOOT_SCHEMES.indexOf(s) >= 0) scheme = s;
+      var d = localStorage.getItem("triune_density");
+      var rad = localStorage.getItem("triune_radius");
+      if (BOOT_DENSITIES.indexOf(d) >= 0) density = d;
+      if (BOOT_RADII.indexOf(rad) >= 0) radius = rad;
     }
   } catch (e) { /* 存储不可用：保持登录页 / 概览页 / 默认主题 */ }
 
@@ -89,6 +100,9 @@ var BOOT_SECTS = ["common", "security", "maintain"];
   // 主题与登录态无关：登录页也用同一套配色，深色偏好下不该先亮一帧。
   root.setAttribute("data-mode", mode);
   root.setAttribute("data-scheme", scheme);
+  root.setAttribute("data-density", density);
+  if (radius === "normal") root.removeAttribute("data-radius");
+  else root.setAttribute("data-radius", radius);
   // 概览是 HTML 默认页，不需要标记；只有停在别处时才需要首帧纠偏，
   // 这样「属性存在但值没匹配上」的风险面只剩这一种情况，且已被白名单挡住。
   if (boot === "app" && view !== "overview" && BOOT_VIEWS.indexOf(view) >= 0) {
@@ -125,93 +139,49 @@ var BOOT_SECTS = ["common", "security", "maintain"];
   --side-w:240px;
   --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
-/* ============ 主题：亮暗（mode）× 色彩方案（scheme） ============
-   拆成两层是为了「换亮暗不换风格、换风格不换亮暗」。
-   模式层只给中性色（背景/卡片/文字/线/阴影/语义色），
-   方案层只给强调色（主色/辅色/柔和底色/图表色），
-   个别方案会额外微调中性色（如暖阳偏米黄、森野偏墨绿）。
-   两层用属性选择器叠加，方案选择器权重更高，无需关心先后顺序。 */
+/* THEME:BEGIN 由 deploy/build-theme.py 生成，勿手改 */
 
-[data-mode="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#68727f;--line:#e5eaf1;--hover:#f1f4f9;
-  --ok:#15a34a;--ok-soft:#e6f6ec;--err:#dc2626;--err-soft:#fdecec;--warn:#d97706;--warn-soft:#fdf3e2;
-  --shadow-sm:0 1px 2px rgba(16,24,40,.05);
-  --shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);
-  --shadow-lg:0 28px 64px -26px rgba(16,24,40,.34);
-  --glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44)}
-[data-mode="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;
-  --ok:#2fca7f;--ok-soft:rgba(47,202,127,.14);--err:#f06a6a;--err-soft:rgba(240,106,106,.13);--warn:#eab308;--warn-soft:rgba(234,179,8,.13);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);
-  --shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);
-  --glass:rgba(13,16,22,.72);--mask:rgba(0,0,0,.58)}
+/* 四层令牌：表面 / 品牌 / 语义 / 图表与景深。每个组合都由
+   tokens() 展开同一组变量，集合完全一致（Go 守卫逐项比）。 */
+[data-mode="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
+[data-mode="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(13,16,22,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
 
-/* --- 蔚蓝 azure：默认方案，中性色完全交给模式层 --- */
-[data-mode="light"][data-scheme="azure"]{--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e9f1fe;--acc-text:#2563eb;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(59,130,246,.6);--tint:rgba(59,130,246,.07);
-  --chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--grid:rgba(16,24,40,.075)}
-[data-mode="dark"][data-scheme="azure"]{--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:rgba(91,156,248,.14);--acc-text:#7cabf9;--on-acc:#0b1017;
-  --glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);
-  --chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- azure 蔚蓝 --- */
+[data-mode="light"][data-scheme="azure"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
+[data-mode="dark"][data-scheme="azure"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(13,16,22,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
 
-/* --- 靛夜 indigo --- */
-[data-mode="light"][data-scheme="indigo"]{--bg:#f5f6fd;--line:#e4e7f5;--hover:#eef0fb;--text:#191c2e;--muted:#6b7194;
-  --acc:#6366f1;--acc2:#0891b2;--acc-soft:#e8e9fe;--acc-text:#4f46e5;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(99,102,241,.55);--tint:rgba(99,102,241,.07);
-  --chart-up:#6366f1;--chart-down:#10b981;--chart-3:#0891b2;--chart-4:#f59e0b;--grid:rgba(20,24,60,.075)}
-[data-mode="dark"][data-scheme="indigo"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;
-  --acc:#818cf8;--acc2:#22d3ee;--acc-soft:rgba(129,140,248,.15);--acc-text:#a5b0fb;--on-acc:#080d1a;
-  --glow:0 10px 26px -10px rgba(129,140,248,.6);--tint:rgba(129,140,248,.09);
-  --chart-up:#818cf8;--chart-down:#34d399;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- indigo 靛夜 --- */
+[data-mode="light"][data-scheme="indigo"]{--bg:#f5f6fd;--side:#ffffff;--card:#ffffff;--text:#191c2e;--muted:#686e90;--line:#e4e7f5;--hover:#eef0fb;--acc:#6366f1;--acc2:#0891b2;--acc-soft:#e5e6fc;--acc-text:#4f46e5;--on-acc:#ffffff;--acc-btn:#5f62e7;--acc2-btn:#087b97;--ok:#0f8f63;--ok-soft:#dcebec;--err:#d63d63;--err-soft:#f2e2ec;--warn:#b45309;--warn-soft:#eee4e2;--chart-up:#6366f1;--chart-down:#10b981;--chart-3:#0891b2;--chart-4:#f59e0b;--chart-5:#0f8f63;--grid:rgba(25,28,46,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(99,102,241,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(99,102,241,.55);--tint:rgba(99,102,241,.08);--focus:rgba(99,102,241,.45);--code-bg:#f0f2fc;--zebra:#f6f7fd;}
+[data-mode="dark"][data-scheme="indigo"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;--acc:#818cf8;--acc2:#22d3ee;--acc-soft:#1b213e;--acc-text:#a5b0fb;--on-acc:#080d1a;--acc-btn:#818cf8;--acc2-btn:#22d3ee;--ok:#34d399;--ok-soft:#0f2f30;--err:#f472b6;--err-soft:#301e35;--warn:#fbbf24;--warn-soft:#312b1c;--chart-up:#818cf8;--chart-down:#4ade80;--chart-3:#22d3ee;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(129,140,248,.30);--glass:rgba(8,13,26,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(129,140,248,.55);--tint:rgba(129,140,248,.08);--focus:rgba(129,140,248,.45);--code-bg:#111a2f;--zebra:#121c31;}
 
-/* --- 森野 forest --- */
-[data-mode="light"][data-scheme="forest"]{--bg:#f3f8f5;--line:#dcebe2;--hover:#e9f4ee;--text:#14251b;--muted:#5f7d6b;
-  --acc:#16a34a;--acc2:#65a30d;--acc-soft:#e4f5ea;--acc-text:#15803d;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(22,163,74,.5);--tint:rgba(22,163,74,.07);
-  --chart-up:#16a34a;--chart-down:#65a30d;--chart-3:#0d9488;--chart-4:#d97706;--grid:rgba(16,50,30,.08)}
-[data-mode="dark"][data-scheme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;
-  --acc:#34d399;--acc2:#a3e635;--acc-soft:rgba(52,211,153,.13);--acc-text:#5fe0b0;--on-acc:#0a120e;
-  --glow:0 10px 24px -10px rgba(52,211,153,.5);--tint:rgba(52,211,153,.08);
-  --chart-up:#34d399;--chart-down:#a3e635;--chart-3:#22d3ee;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- forest 森野 --- */
+[data-mode="light"][data-scheme="forest"]{--bg:#f3f8f5;--side:#ffffff;--card:#ffffff;--text:#14251b;--muted:#597665;--line:#dcebe2;--hover:#e9f4ee;--acc:#16a34a;--acc2:#65a30d;--acc-soft:#dbefe2;--acc-text:#15803d;--on-acc:#ffffff;--acc-btn:#11843c;--acc2-btn:#4f7f0c;--ok:#15803d;--ok-soft:#dbebe1;--err:#c2410c;--err-soft:#eee4db;--warn:#a16207;--warn-soft:#eae8db;--chart-up:#16a34a;--chart-down:#65a30d;--chart-3:#65a30d;--chart-4:#d97706;--chart-5:#15803d;--grid:rgba(20,37,27,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(22,163,74,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(22,163,74,.55);--tint:rgba(22,163,74,.08);--focus:rgba(22,163,74,.45);--code-bg:#ecf5f0;--zebra:#f3f9f6;}
+[data-mode="dark"][data-scheme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;--acc:#34d399;--acc2:#a3e635;--acc-soft:#113124;--acc-text:#5fe0b0;--on-acc:#0a120e;--acc-btn:#34d399;--acc2-btn:#a3e635;--ok:#34d399;--ok-soft:#113326;--err:#fb7185;--err-soft:#332222;--warn:#facc15;--warn-soft:#33320f;--chart-up:#34d399;--chart-down:#a3e635;--chart-3:#a3e635;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(52,211,153,.30);--glass:rgba(10,18,14,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(52,211,153,.55);--tint:rgba(52,211,153,.08);--focus:rgba(52,211,153,.45);--code-bg:#132119;--zebra:#14231b;}
 
-/* --- 玫瑰 rose --- */
-[data-mode="light"][data-scheme="rose"]{--bg:#fdf5f7;--line:#f2dfe5;--hover:#fbebef;--text:#2b1620;--muted:#8a6a76;
-  --acc:#e11d48;--acc2:#a855f7;--acc-soft:#fde8ed;--acc-text:#be123c;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(225,29,72,.5);--tint:rgba(225,29,72,.06);
-  --chart-up:#e11d48;--chart-down:#10b981;--chart-3:#a855f7;--chart-4:#f59e0b;--grid:rgba(60,20,35,.075)}
-[data-mode="dark"][data-scheme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;
-  --acc:#fb7185;--acc2:#c084fc;--acc-soft:rgba(251,113,133,.14);--acc-text:#fc93a2;--on-acc:#120e13;
-  --glow:0 10px 24px -10px rgba(251,113,133,.5);--tint:rgba(251,113,133,.08);
-  --chart-up:#fb7185;--chart-down:#4ade80;--chart-3:#c084fc;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- rose 玫瑰 --- */
+[data-mode="light"][data-scheme="rose"]{--bg:#fdf5f7;--side:#ffffff;--card:#ffffff;--text:#2b1620;--muted:#866773;--line:#f2dfe5;--hover:#fbebef;--acc:#e11d48;--acc2:#a855f7;--acc-soft:#fadde4;--acc-text:#be123c;--on-acc:#ffffff;--acc-btn:#e11d48;--acc2-btn:#954cdb;--ok:#0f766e;--ok-soft:#e3e7e8;--err:#be123c;--err-soft:#f6dce2;--warn:#b45309;--warn-soft:#f5e3dd;--chart-up:#e11d48;--chart-down:#0d9488;--chart-3:#a855f7;--chart-4:#f59e0b;--chart-5:#0f766e;--grid:rgba(43,22,32,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(225,29,72,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(225,29,72,.55);--tint:rgba(225,29,72,.08);--focus:rgba(225,29,72,.45);--code-bg:#fceef1;--zebra:#fdf4f6;}
+[data-mode="dark"][data-scheme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;--acc:#fb7185;--acc2:#c084fc;--acc-soft:#371e25;--acc-text:#fc93a2;--on-acc:#120e13;--acc-btn:#fb7185;--acc2-btn:#c084fc;--ok:#4ade80;--ok-soft:#1c3126;--err:#fda4af;--err-soft:#3a282e;--warn:#fbbf24;--warn-soft:#3a2c16;--chart-up:#fb7185;--chart-down:#2dd4bf;--chart-3:#c084fc;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(251,113,133,.30);--glass:rgba(18,14,19,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(251,113,133,.55);--tint:rgba(251,113,133,.08);--focus:rgba(251,113,133,.45);--code-bg:#20171e;--zebra:#221820;}
 
-/* --- 暖阳 solar：中性色偏米黄 --- */
-[data-mode="light"][data-scheme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--line:#e9dfcd;--hover:#f3ebdb;--text:#3b3026;--muted:#8e7f6c;
-  --acc:#e08a2e;--acc2:#c2410c;--acc-soft:#faeeda;--acc-text:#bf6f1c;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(224,138,46,.55);--tint:rgba(224,138,46,.08);
-  --chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--grid:rgba(90,70,40,.09)}
-[data-mode="dark"][data-scheme="solar"]{--bg:#17110a;--side:#1e1610;--card:#251b12;--text:#f0e6d8;--muted:#a3907a;--line:#3a2c1e;--hover:#2c2116;
-  --acc:#e8a04a;--acc2:#f97316;--acc-soft:rgba(232,160,74,.15);--acc-text:#f0b76a;--on-acc:#17110a;
-  --glow:0 10px 24px -10px rgba(232,160,74,.5);--tint:rgba(232,160,74,.09);
-  --chart-up:#e8a04a;--chart-down:#4ade80;--chart-3:#f97316;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- solar 暖阳 --- */
+[data-mode="light"][data-scheme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--text:#3b3026;--muted:#796b5b;--line:#e9dfcd;--hover:#f3ebdb;--acc:#e08a2e;--acc2:#c2410c;--acc-soft:#f4e7d4;--acc-text:#bf6f1c;--on-acc:#ffffff;--acc-btn:#a16421;--acc2-btn:#c2410c;--ok:#4d7c0f;--ok-soft:#e4e5d1;--err:#b91c1c;--err-soft:#f0dad2;--warn:#a16207;--warn-soft:#eee2d0;--chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--chart-5:#4d7c0f;--grid:rgba(59,48,38,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(224,138,46,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(224,138,46,.55);--tint:rgba(224,138,46,.08);--focus:rgba(224,138,46,.45);--code-bg:#f4eddf;--zebra:#f8f3e8;}
+[data-mode="dark"][data-scheme="solar"]{--bg:#17110a;--side:#1e1610;--card:#251b12;--text:#f0e6d8;--muted:#a3907a;--line:#3a2c1e;--hover:#2c2116;--acc:#e8a04a;--acc2:#f97316;--acc-soft:#382814;--acc-text:#f0b76a;--on-acc:#17110a;--acc-btn:#e8a04a;--acc2-btn:#f97316;--ok:#4ade80;--ok-soft:#20341e;--err:#f87171;--err-soft:#3d211c;--warn:#fbbf24;--warn-soft:#3e2f0e;--chart-up:#e8a04a;--chart-down:#86efac;--chart-3:#f97316;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(232,160,74,.30);--glass:rgba(23,17,10,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(232,160,74,.55);--tint:rgba(232,160,74,.08);--focus:rgba(232,160,74,.45);--code-bg:#261c12;--zebra:#291e14;}
 
-/* --- 雾蓝 steel：低饱和，接近办公软件 --- */
-[data-mode="light"][data-scheme="steel"]{--bg:#eceff4;--line:#dbe2ea;--hover:#e8edf4;--text:#1f2732;--muted:#69758a;
-  --acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#e8edf6;--acc-text:#415c8c;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(84,112,168,.55);--tint:rgba(84,112,168,.07);
-  --chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--grid:rgba(35,50,70,.08)}
-[data-mode="dark"][data-scheme="steel"]{--bg:#0e1319;--side:#131a22;--card:#18202a;--text:#dfe6ef;--muted:#8593a5;--line:#26313d;--hover:#1e2833;
-  --acc:#7f9bd1;--acc2:#5fa8c9;--acc-soft:rgba(127,155,209,.15);--acc-text:#9db4e0;--on-acc:#0e1319;
-  --glow:0 10px 24px -10px rgba(127,155,209,.5);--tint:rgba(127,155,209,.08);
-  --chart-up:#7f9bd1;--chart-down:#34d399;--chart-3:#5fa8c9;--chart-4:#eab308;--grid:rgba(255,255,255,.07)}
+/* --- steel 雾蓝 --- */
+[data-mode="light"][data-scheme="steel"]{--bg:#eceff4;--side:#ffffff;--card:#ffffff;--text:#1f2732;--muted:#606c80;--line:#dbe2ea;--hover:#e8edf4;--acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#dbe1ec;--acc-text:#415c8c;--on-acc:#ffffff;--acc-btn:#5470a8;--acc2-btn:#3c7a9a;--ok:#1b7f5a;--ok-soft:#d5e3e3;--err:#c24545;--err-soft:#e7dce1;--warn:#9a6b0b;--warn-soft:#e3e0da;--chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--chart-5:#1b7f5a;--grid:rgba(31,39,50,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(84,112,168,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(84,112,168,.55);--tint:rgba(84,112,168,.08);--focus:rgba(84,112,168,.45);--code-bg:#e9eef4;--zebra:#f2f5f9;}
+[data-mode="dark"][data-scheme="steel"]{--bg:#0e1319;--side:#131a22;--card:#18202a;--text:#dfe6ef;--muted:#8593a5;--line:#26313d;--hover:#1e2833;--acc:#7f9bd1;--acc2:#5fa8c9;--acc-soft:#202936;--acc-text:#9db4e0;--on-acc:#0e1319;--acc-btn:#7f9bd1;--acc2-btn:#5fa8c9;--ok:#34d399;--ok-soft:#14342f;--err:#f87171;--err-soft:#362328;--warn:#eab308;--warn-soft:#332e16;--chart-up:#7f9bd1;--chart-down:#5eead4;--chart-3:#5fa8c9;--chart-4:#eab308;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(127,155,209,.30);--glass:rgba(14,19,25,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(127,155,209,.55);--tint:rgba(127,155,209,.08);--focus:rgba(127,155,209,.45);--code-bg:#19222b;--zebra:#1b242f;}
 
-/* --- 海盐 ocean --- */
-[data-mode="light"][data-scheme="ocean"]{--bg:#eef6f7;--line:#d7e6ea;--hover:#e5f0f3;--text:#12303a;--muted:#5b7f8a;
-  --acc:#0f9db8;--acc2:#0d9488;--acc-soft:#e0f3f7;--acc-text:#0a7f97;--on-acc:#fff;
-  --glow:0 10px 22px -10px rgba(15,157,184,.55);--tint:rgba(15,157,184,.07);
-  --chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--grid:rgba(15,60,70,.08)}
-[data-mode="dark"][data-scheme="ocean"]{--bg:#061417;--side:#0a1c20;--card:#0d2429;--text:#d9eef2;--muted:#7fa3ab;--line:#17363d;--hover:#103038;
-  --acc:#22b8d4;--acc2:#2dd4bf;--acc-soft:rgba(34,184,212,.15);--acc-text:#4ecfe6;--on-acc:#061417;
-  --glow:0 10px 24px -10px rgba(34,184,212,.5);--tint:rgba(34,184,212,.08);
-  --chart-up:#22b8d4;--chart-down:#34d399;--chart-3:#2dd4bf;--chart-4:#fbbf24;--grid:rgba(255,255,255,.07)}
+/* --- ocean 海盐 --- */
+[data-mode="light"][data-scheme="ocean"]{--bg:#eef6f7;--side:#ffffff;--card:#ffffff;--text:#12303a;--muted:#4f737e;--line:#d7e6ea;--hover:#e5f0f3;--acc:#0f9db8;--acc2:#0d9488;--acc-soft:#d5ecf0;--acc-text:#0a7f97;--on-acc:#ffffff;--acc-btn:#0c8096;--acc2-btn:#0c8379;--ok:#0f766e;--ok-soft:#d5e8e8;--err:#be3b4a;--err-soft:#e9e1e4;--warn:#a16207;--warn-soft:#e6e6dd;--chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--chart-5:#0f766e;--grid:rgba(18,48,58,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(15,157,184,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(15,157,184,.55);--tint:rgba(15,157,184,.08);--focus:rgba(15,157,184,.45);--code-bg:#e8f2f4;--zebra:#f1f7f8;}
+[data-mode="dark"][data-scheme="ocean"]{--bg:#061417;--side:#0a1c20;--card:#0d2429;--text:#d9eef2;--muted:#7fa3ab;--line:#17363d;--hover:#103038;--acc:#22b8d4;--acc2:#2dd4bf;--acc-soft:#0a2e35;--acc-text:#4ecfe6;--on-acc:#061417;--acc-btn:#22b8d4;--acc2-btn:#2dd4bf;--ok:#34d399;--ok-soft:#0e342d;--err:#fb7185;--err-soft:#30242a;--warn:#fbbf24;--warn-soft:#303119;--chart-up:#22b8d4;--chart-down:#67e8f9;--chart-3:#2dd4bf;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(34,184,212,.30);--glass:rgba(6,20,23,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(34,184,212,.55);--tint:rgba(34,184,212,.08);--focus:rgba(34,184,212,.45);--code-bg:#0d282e;--zebra:#0f2b31;}
+
+/* 密度与圆角是独立于明暗与配色的第三、第四根轴；外观偏好只存本机。 */
+:root{--dens-pad:20px;--dens-gap:18px;--dens-font:14px;--r-xl:20px;--r-lg:14px;--r:10px;--r-sm:7px}
+html[data-density="compact"]{--dens-pad:13px;--dens-gap:12px;--dens-font:13px;--r-xl:14px;--r-lg:10px;--r:7px;--r-sm:5px}
+html[data-density="comfortable"]{--dens-pad:24px;--dens-gap:22px;--dens-font:14px}
+html[data-radius="sharp"]{--r-xl:8px;--r-lg:6px;--r:4px;--r-sm:3px}
+html[data-radius="soft"]{--r-xl:26px;--r-lg:20px;--r:15px;--r-sm:11px}
+
+/* THEME:END */
 
 /* ============ 基础 ============ */
 *{box-sizing:border-box;margin:0;padding:0}
@@ -312,7 +282,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
   box-shadow:var(--shadow-lg);padding:34px 30px;animation:pop .4s cubic-bezier(.34,1.4,.5,1);position:relative;z-index:1}
 .login-logo{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
 .login-logo .mark{width:42px;height:42px;border-radius:13px;color:#fff;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
+  background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
 .login-logo b{font-size:19px;letter-spacing:.3px}
 .login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px}
 .demo-tag{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:99px;padding:1px 10px;font-size:12px;margin-left:6px}
@@ -342,7 +312,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
 .logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
 .logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
+  background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
 .logo b{font-size:15px;letter-spacing:.3px;font-weight:650;white-space:nowrap;flex:0 0 auto}
 .logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -504,7 +474,7 @@ body[data-role="admin"] .need-owner{display:none!important}
 .side-apply{display:inline-flex;align-items:center;justify-content:center;gap:6px;
   width:100%;height:38px;flex:0 0 auto;margin:12px 0 6px;
   border:none;border-radius:var(--r);cursor:pointer;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));color:var(--on-acc);
+  background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));color:var(--on-acc);
   font:600 13px/1 var(--font);
   box-shadow:0 6px 14px -9px rgba(20,40,80,.55);
   transition:box-shadow var(--t-fast),transform var(--t-fast),background var(--t-fast),color var(--t-fast)}
@@ -549,7 +519,7 @@ body[data-role="admin"] .need-owner{display:none!important}
 .kpi:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:color-mix(in srgb,var(--acc) 32%,var(--line))}
 .kpi-top{display:flex;align-items:center;gap:11px;margin-bottom:14px}
 .kpi-ic{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;flex:none;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:var(--glow)}
+  background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
 .kpi-ic.g2{background:linear-gradient(135deg,var(--chart-3),var(--acc2));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-3) 60%,transparent)}
 .kpi-ic.g3{background:linear-gradient(135deg,var(--chart-down),var(--chart-4));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-down) 55%,transparent)}
 .kpi-ic.g4{background:linear-gradient(135deg,var(--chart-4),var(--acc));box-shadow:0 8px 20px -10px color-mix(in srgb,var(--chart-4) 55%,transparent)}
@@ -601,7 +571,7 @@ body[data-role="admin"] .need-owner{display:none!important}
 .rank-row:hover{transform:translateX(3px)}
 .rank-row .idx{width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;
   font-weight:700;background:var(--card);color:var(--muted);border:1px solid var(--line)}
-.rank-row:nth-child(1) .idx{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border-color:transparent}
+.rank-row:nth-child(1) .idx{background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));color:#fff;border-color:transparent}
 .rank-row .nm{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rank-row .vl{font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--muted)}
 .rank-row .bar{grid-column:2/4;height:4px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:-3px}
@@ -613,7 +583,7 @@ body[data-role="admin"] .need-owner{display:none!important}
   transition:background var(--t-fast),border-color var(--t-fast),transform .08s,color var(--t-fast),box-shadow var(--t-fast)}
 .btn:hover{background:var(--hover);border-color:color-mix(in srgb,var(--acc) 28%,var(--line))}
 .btn:active{transform:scale(.97)}
-.btn.primary{background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent;color:#fff;font-weight:600;
+.btn.primary{background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));border-color:transparent;color:#fff;font-weight:600;
   box-shadow:var(--glow)}
 .btn.primary:hover{filter:brightness(1.07)}
 .btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 32%,transparent)}
@@ -939,6 +909,184 @@ canvas{display:block;width:100%}
 .quick:hover{border-color:color-mix(in srgb,var(--acc) 45%,var(--line));transform:translateY(-2px);box-shadow:var(--shadow)}
 .quick .qi{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;
   background:var(--acc-soft);color:var(--acc-text)}
+
+/* ==================================================================
+   命令工作台（B 方案）：悬浮层次 + 瀑布流 + 命令中枢 + 移动底部入口
+   层次只由 --elev-0/1/2 决定，它们跟配色方案一起变（见主题令牌块）。
+   ================================================================== */
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.card{box-shadow:var(--elev-1)}
+.kpi:hover,.quick:hover,.scn-card:hover{box-shadow:var(--elev-2)}
+
+/* ---- 命令条：所有页面常驻，搜索 + 三个高频动作 ---- */
+.cmdbar{position:sticky;top:var(--topbar-h,74px);z-index:15;display:flex;align-items:center;gap:9px;
+  flex-wrap:wrap;max-width:1240px;width:100%;margin:0 auto;
+  padding:10px 28px;background:var(--bg);border-bottom:1px solid var(--line)}
+.cmdbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:14px;pointer-events:none;
+  background:linear-gradient(to bottom,var(--bg),transparent)}
+.cmd-trigger{display:inline-flex;align-items:center;gap:8px;min-width:210px;height:34px;padding:0 10px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--muted);
+  font:inherit;font-size:12.5px;cursor:pointer;transition:border-color var(--t-fast),box-shadow var(--t-fast),color var(--t-fast)}
+.cmd-trigger:hover{border-color:var(--acc);color:var(--text);box-shadow:var(--elev-1)}
+.cmd-trigger .ci{display:inline-flex;flex:none}
+.cmd-trigger .kbd{margin-left:auto;font:10.5px/1 var(--mono);color:var(--muted);
+  border:1px solid var(--line);border-radius:4px;padding:3px 5px;background:var(--hover);white-space:nowrap}
+.cmd-quick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cmd-quick .btn{padding:6px 11px;font-size:12.5px}
+.cmdbar .cmd-hint{font-size:11.5px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+/* ---- 命令面板 ---- */
+.cmd-overlay{position:fixed;top:0;right:0;bottom:0;left:0;z-index:150;display:none;
+  align-items:flex-start;justify-content:center;background:var(--mask);
+  padding:calc(9vh + env(safe-area-inset-top)) 16px 16px}
+.cmd-overlay.show{display:flex}
+.cmd-panel{width:min(560px,100%);background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r-lg);box-shadow:var(--elev-2);overflow:hidden}
+.cmd-input{width:100%;border:none;border-bottom:1px solid var(--line);background:transparent;color:var(--text);
+  padding:14px 16px;font:14px/1.5 var(--font);outline:none}
+.cmd-input::placeholder{color:var(--muted)}
+.cmd-list{max-height:min(52vh,420px);overflow-y:auto;padding:6px}
+.cmd-group{font-size:10.5px;letter-spacing:.1em;color:var(--muted);opacity:.8;padding:9px 10px 5px;font-weight:600}
+.cmd-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--text);
+  padding:9px 10px;border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:13.5px;text-align:left;min-width:0}
+.cmd-item:hover,.cmd-item.on{background:var(--acc-soft);color:var(--acc-text)}
+.cmd-item .ci{flex:none;width:18px;height:18px;color:var(--muted)}
+.cmd-item.on .ci{color:var(--acc-text)}
+.cmd-item .ct{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmd-item .cs{margin-left:auto;flex:none;font-size:11px;color:var(--muted)}
+.cmd-empty{padding:22px 12px;text-align:center;color:var(--muted);font-size:13px}
+.cmd-foot{border-top:1px solid var(--line);padding:8px 12px;font-size:11px;color:var(--muted);
+  display:flex;gap:14px;flex-wrap:wrap}
+
+/* ---- 工作台瀑布流 ----
+   用 Grid 的 grid-row span 做错落，DOM 顺序 = 视觉顺序 = Tab 顺序；
+   绝不用 column-count（那会把顺序按列拆开，键盘用户完全对不上）。
+   不用 grid-auto-flow:dense，它同样会打乱顺序。 */
+#workbench{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-auto-rows:8px;row-gap:var(--dens-gap);column-gap:var(--dens-gap);align-items:start}
+/* 初始占位 span：JS 量完真实高度会覆盖它。没有这一条时首帧每张卡只有
+   8px 的 grid area，所有卡片挤在一起，肉眼可见地跳一下。 */
+#workbench>.wb-card{min-width:0;grid-row-end:span 24}
+.wb-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--elev-1);padding:var(--dens-pad);margin:0;position:relative;
+  transition:box-shadow var(--t),border-color var(--t),transform var(--t)}
+.wb-card:hover{box-shadow:var(--elev-2);border-color:var(--acc-soft)}
+/* 桌面才抬升，且卡片里有焦点时不抬：正在填表/点按钮时卡片跟着动很难受。 */
+@media (min-width:961px){.wb-card:hover:not(:focus-within){transform:translateY(-3px)}}
+.wb-card.pinned{border-color:var(--acc-soft)}
+.wb-card.pinned>.wb-head::after{content:"置顶";flex:none;font-size:10px;color:var(--acc-text);
+  background:var(--acc-soft);border-radius:99px;padding:1px 7px}
+.wb-card.dragging{opacity:.55;box-shadow:var(--elev-2)}
+.wb-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;min-width:0}
+.wb-head h3{font-size:15px;font-weight:650;margin:0;display:flex;align-items:center;gap:9px;
+  letter-spacing:.2px;min-width:0;flex-wrap:wrap}
+.wb-head h3 .hint{font-size:11.5px;font-weight:400;color:var(--muted)}
+.wb-tools{margin-left:auto;display:flex;gap:2px;flex:none}
+.wb-tool{width:26px;height:26px;border:1px solid transparent;background:none;border-radius:7px;
+  color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  font:600 13px/1 var(--font);transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast)}
+.wb-tool:hover{background:var(--hover);border-color:var(--line);color:var(--text)}
+.wb-tool[aria-pressed="true"]{color:var(--acc-text);background:var(--acc-soft)}
+.wb-body{min-width:0}
+.wb-card.collapsed .wb-body{display:none}
+.wb-card.collapsed .wb-head{margin-bottom:0}
+.wb-card.collapsed .wb-head h3 .hint{display:none}
+/* 卡片内容里的 .card/.grid-2 不再自带外边距，避免瀑布流里双倍留白 */
+.wb-body>.card,.wb-body>.grid-2,.wb-body>.kpis{margin-bottom:0}
+.wb-body>.grid-2{gap:var(--dens-gap)}
+
+/* 今天要处理：可点的待办，注册表式来源，任一接口失败不影响其它条目 */
+.todo-list{display:flex;flex-direction:column;gap:8px}
+.todo-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--r);
+  background:var(--hover);border:1px solid var(--line);min-width:0;width:100%;text-align:left;
+  font:inherit;cursor:pointer;transition:border-color var(--t-fast),transform var(--t-fast)}
+.todo-row:hover{border-color:var(--acc-soft);transform:translateX(2px)}
+.todo-ic{width:24px;height:24px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;background:var(--acc-soft);color:var(--acc-text)}
+.todo-ic.warn{background:var(--warn-soft);color:var(--warn)}
+.todo-ic.err{background:var(--err-soft);color:var(--err)}
+.todo-ic.ok{background:var(--ok-soft);color:var(--ok)}
+.todo-tx{min-width:0;flex:1}
+.todo-tx b{display:block;font-size:13px;font-weight:600;word-break:break-word}
+.todo-tx span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-word}
+.todo-go{flex:none;color:var(--muted);font-size:12px}
+
+/* ---- 主题弹窗：大预览卡 + 密度圆角两轴 ---- */
+.scheme .prev{height:64px}
+.scheme .prev .p-side{width:18px}
+.scheme .prev .p-top{left:18px;top:0;right:0;height:9px;border-bottom-width:1px;border-bottom-style:solid}
+.scheme .prev .p-nav1,.scheme .prev .p-nav2,.scheme .prev .p-nav3{left:4px;width:10px;height:3px;border-radius:2px}
+.scheme .prev .p-nav1{top:16px}.scheme .prev .p-nav2{top:23px}.scheme .prev .p-nav3{top:30px}
+.scheme .prev .p-card{left:23px;top:14px;right:6px;height:28px;border-radius:4px}
+.scheme .prev .p-ln{left:26px;top:20px;width:36px;height:3px}
+.scheme .prev .p-ln2{left:26px;top:27px;width:24px;height:3px}
+.scheme .prev .p-btn{right:7px;bottom:9px;width:17px;height:10px;border-radius:3px}
+.scheme .prev .p-ok{left:26px;bottom:9px;width:9px;height:9px;border-radius:50%}
+.scheme .prev .p-chart{left:40px;bottom:10px;width:34px;height:7px;border-radius:3px}
+.dots{gap:3px;flex-wrap:wrap}
+.dots i{width:9px;height:9px}
+.axis-seg{grid-template-columns:repeat(3,1fr)}
+.axis-seg.two{grid-template-columns:1fr 1fr}
+.axis-seg button{font-size:11.5px;padding:6px 0}
+
+/* ---- 手机端：底部五个高频入口 + 更多抽屉 ---- */
+#navMobile{display:none}
+.more-sheet{position:fixed;top:0;right:0;bottom:0;left:0;z-index:90;display:none;
+  align-items:flex-end;background:var(--mask)}
+.more-sheet.show{display:flex}
+.more-panel{width:100%;max-height:76vh;overflow-y:auto;background:var(--card);
+  border-radius:var(--r-xl) var(--r-xl) 0 0;box-shadow:var(--elev-2);
+  padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.more-h{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.more-h b{font-size:15px}
+.more-h .spacer{flex:1}
+.more-sec{font-size:10.5px;letter-spacing:.12em;color:var(--muted);opacity:.8;
+  padding:12px 2px 6px;font-weight:600}
+.more-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.more-item{display:flex;align-items:center;gap:7px;min-width:0;border:1px solid var(--line);
+  background:var(--hover);color:var(--text);border-radius:var(--r);padding:10px 9px;
+  font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+.more-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.more-item svg{flex:none;color:var(--muted)}
+.more-item.on{border-color:var(--acc);background:var(--acc-soft);color:var(--acc-text)}
+
+@media (max-width:960px){
+  /* 手机上交还文档滚动，命令条不 sticky；瀑布流一律单列 */
+  .cmdbar{position:static;padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left))}
+  .cmdbar::after{display:none}
+  .cmd-trigger{min-width:0;flex:1 1 130px}
+  .cmd-trigger .kbd{display:none}
+  .cmdbar .cmd-hint{display:none}
+  .cmd-quick .btn{padding:6px 9px;font-size:0;gap:0}
+  .cmd-quick .btn svg{width:16px;height:16px}
+  .cmd-overlay{padding:calc(12px + env(safe-area-inset-top)) 10px 10px}
+  .cmd-panel{border-radius:var(--r)}
+  #workbench{display:block}
+  #workbench>.wb-card{margin-bottom:var(--dens-gap)}
+  /* 触摸端取消位移：卡片跟着手指抖，反而难按 */
+  .wb-card:hover{transform:none}
+  .wb-card:hover,.wb-card:active{box-shadow:var(--elev-1)}
+  .wb-card:active{border-color:var(--acc-soft)}
+  #navMobile{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:1px}
+  .mnav-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;border:none;background:none;color:var(--muted);font:11px/1.2 var(--font);padding:4px 1px;cursor:pointer}
+  .mnav-item span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .mnav-item.on{color:var(--acc-text);font-weight:600}
+  #nav{display:none}
+  .side-apply{display:none}
+  .side-foot{gap:0}
+  .side-foot .theme-btn{padding:6px}
+}
+@media (max-width:360px){
+  .more-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cmd-quick .btn{padding:6px 7px}
+}
+/* 系统开了「减少动态效果」就全部关掉：位移、淡入、脉冲都不该勉强用户。 */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important}
+  .wb-card:hover:not(:focus-within),.kpi:hover,.quick:hover,.scheme:hover,.todo-row:hover{transform:none!important}
+}
 </style>
 </head>
 <body>
@@ -988,6 +1136,8 @@ canvas{display:block;width:100%}
       <span class="logo-v" id="logoVer">—</span>
     </div>
     <nav id="nav"></nav>
+    <!-- 手机端底部只留五个高频入口；其余全部进「更多」抽屉。桌面隐藏这一条。 -->
+    <nav id="navMobile" aria-label="高频入口"></nav>
     <!-- 常驻「应用配置」：桌面上钉在导航与账号区之间（导航自己滚，它不动），
          手机上被 order:-1 挪到导航条最左侧。放在导航区域里而不是浮在内容上。
          点它**开弹窗**（#mApply），不切页——应用是一个动作，不该把当前页换走。 -->
@@ -1017,6 +1167,17 @@ canvas{display:block;width:100%}
           </div>
           <div class="tpop-sub">色彩方案<span class="n" id="schemeN"></span></div>
           <div class="schemes" id="schemes"></div>
+          <div class="tpop-sub">界面密度<span class="n">紧凑 · 舒适</span></div>
+          <div class="mode-seg axis-seg two" id="densitySeg">
+            <button data-v="compact" data-act="setDensity" data-args='["compact"]'>紧凑</button>
+            <button data-v="comfortable" data-act="setDensity" data-args='["comfortable"]'>舒适</button>
+          </div>
+          <div class="tpop-sub">圆角风格<span class="n">方直 · 默认 · 柔和</span></div>
+          <div class="mode-seg axis-seg" id="radiusSeg">
+            <button data-v="sharp" data-act="setRadius" data-args='["sharp"]'>方直</button>
+            <button data-v="normal" data-act="setRadius" data-args='["normal"]'>默认</button>
+            <button data-v="soft" data-act="setRadius" data-args='["soft"]'>柔和</button>
+          </div>
         </div>
       </div>
       <button class="theme-btn" data-act="logout">
@@ -1034,9 +1195,27 @@ canvas{display:block;width:100%}
       <span class="top-pill" id="pillLive">↓ —</span>
       <span class="muted mono" id="verinfo"></span>
     </div>
+    <!-- 命令中枢：所有页面常驻。搜索索引视图与高频动作，右侧三个按钮不必先找页面。
+         手机上压成「一行搜索 + 三个图标」，窄屏也不挤掉内容。 -->
+    <div class="cmdbar" id="cmdbar">
+      <button class="cmd-trigger" data-act="openCommand" aria-label="搜索页面与操作">
+        <span class="ci"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <span>搜索页面与操作</span><span class="kbd">Ctrl K</span>
+      </button>
+      <span class="cmd-quick">
+        <button class="btn need-admin" data-act="openInboundModal" title="新增入站">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>新增入站</span></button>
+        <button class="btn" data-act="goto" data-args='["gen"]' title="生成配置">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span>生成配置</span></button>
+        <button class="btn need-admin" data-act="openApply" title="应用配置">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span>应用配置</span></button>
+      </span>
+      <span class="cmd-hint muted" id="cmdHint">按 Ctrl K 直达任意页面</span>
+    </div>
     <div class="content">
 
-    <!-- 概览 -->
+    <!-- 概览：命令工作台。卡片可折叠 / 置顶 / 排序，布局存后端设置；
+         瀑布流只在桌面启用，DOM 顺序始终等于视觉与 Tab 顺序。 -->
     <section id="v-overview" class="view active">
       <div class="hero">
         <div class="hero-inner">
@@ -1044,66 +1223,146 @@ canvas{display:block;width:100%}
             <h1>Triune Panel · <span class="grad-text">三内核统一控制台</span></h1>
             <p>mihomo · sing-box · xray 统一纳管。配置渲染 → 内核校验 → 原子替换 → 备份 → 回滚，
                任一环节失败都不影响现网运行；升级与切换全程可回滚。</p>
+            <p class="muted" style="margin-top:8px">用上方命令条搜索任意页面，或直接新建入站、生成配置、应用配置。下面的卡片可以折叠、置顶与排序，布局会被记住。</p>
             <p id="last_login_line" class="hide" style="font-size:12.5px;margin-top:6px;opacity:.75"></p>
           </div>
-          <div class="hero-act">
-            <button class="btn primary" data-act="openInboundModal">+ 新增入站</button>
-            <button class="btn" data-act="goto" data-args='["gen"]'>生成配置</button>
-            <button class="btn need-admin" data-act="openApply">应用配置</button>
-          </div>
         </div>
       </div>
 
-      <div class="kpis" id="kpis"></div>
-
-      <div class="grid-2">
-        <div class="card">
-          <h3>流量趋势<span class="hint">近 14 天 · 上行 / 下行</span><span class="spacer"></span>
-            <span class="legend"><span class="li"><i style="background:var(--chart-down)"></i>下行</span>
-              <span class="li"><i style="background:var(--chart-up)"></i>上行</span></span>
-          </h3>
-          <div class="chart-wrap"><canvas id="ov_chart"></canvas><div class="chart-tip" id="ov_tip"></div></div>
-          <div class="mini-stats" id="ov_stats"></div>
+      <div id="workbench">
+        <div class="wb-card" data-wb="todo" data-title="今天要处理" data-hint="汇总待办，点一下直达">
+          <div class="wb-head"></div>
+          <div class="wb-body"><div class="todo-list" id="wbTodo"></div></div>
         </div>
 
-        <div class="card">
-          <h3>内核状态<span class="spacer"></span><button class="btn sm" data-act="loadStatus">刷新</button></h3>
-          <div class="rings" id="ov_rings"></div>
-          <h3 style="margin-top:20px">实时速率<span class="spacer"></span>
-            <span class="muted" id="live_at" style="font-weight:400;font-size:11.5px">每 30 秒采样</span></h3>
-          <div class="chart-wrap"><canvas id="ov_live"></canvas></div>
-          <div style="display:flex;gap:22px;margin-top:10px;flex-wrap:wrap">
-            <span class="muted">↑ 上行 <b class="mono" id="liveUp" style="color:var(--text)">—</b></span>
-            <span class="muted">↓ 下行 <b class="mono" id="liveDown" style="color:var(--text)">—</b></span>
+        <div class="wb-card" data-wb="kpis" data-title="关键指标" data-hint="入站、用户与流量概览">
+          <div class="wb-head"></div>
+          <div class="wb-body"><div class="kpis" id="kpis"></div></div>
+        </div>
+
+        <div class="wb-card" data-wb="trend" data-title="流量趋势" data-hint="近 14 天 · 上行 / 下行">
+          <div class="wb-head"></div>
+          <div class="wb-body">
+            <div class="legend" style="margin-bottom:8px"><span class="li"><i style="background:var(--chart-down)"></i>下行</span>
+              <span class="li"><i style="background:var(--chart-up)"></i>上行</span></div>
+            <div class="chart-wrap"><canvas id="ov_chart"></canvas><div class="chart-tip" id="ov_tip"></div></div>
+            <div class="mini-stats" id="ov_stats"></div>
+          </div>
+        </div>
+
+        <div class="wb-card" data-wb="cores" data-title="内核状态" data-hint="运行状态与实时速率">
+          <div class="wb-head"></div>
+          <div class="wb-body">
+            <div class="rings" id="ov_rings"></div>
+            <h3 style="margin-top:20px;font-size:14px;font-weight:650">实时速率
+              <span class="muted" id="live_at" style="font-weight:400;font-size:11.5px">每 30 秒采样</span></h3>
+            <div class="chart-wrap"><canvas id="ov_live"></canvas></div>
+            <div style="display:flex;gap:22px;margin-top:10px;flex-wrap:wrap">
+              <span class="muted">↑ 上行 <b class="mono" id="liveUp" style="color:var(--text)">—</b></span>
+              <span class="muted">↓ 下行 <b class="mono" id="liveDown" style="color:var(--text)">—</b></span>
+            </div>
+            <button class="btn sm" data-act="loadStatus" style="margin-top:12px">刷新状态</button>
+          </div>
+        </div>
+
+        <div class="wb-card" data-wb="users" data-title="用户流量占比" data-hint="Top 6">
+          <div class="wb-head"></div>
+          <div class="wb-body">
+            <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">
+              <div class="chart-wrap" style="width:172px;flex:none"><canvas id="ov_donut"></canvas></div>
+              <div style="flex:1;min-width:180px" class="legend" id="ov_legend"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wb-card" data-wb="rank" data-title="流量排行" data-hint="按用户合计">
+          <div class="wb-head"></div>
+          <div class="wb-body"><div class="rank" id="ov_rank"></div></div>
+        </div>
+
+        <div class="wb-card" data-wb="quick" data-title="快捷操作" data-hint="常用动作一步到位">
+          <div class="wb-head"></div>
+          <div class="wb-body">
+            <div class="quick-grid">
+              <button class="quick" data-act="openInboundModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></span>新增入站</button>
+              <button class="quick" data-act="openClientModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
+              <button class="quick" data-act="goto" data-args='["import"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>外部节点</button>
+              <button class="quick" data-act="goto" data-args='["gen"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
+              <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
+              <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
+            </div>
+            <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="grid-2">
-        <div class="card">
-          <h3>用户流量占比<span class="spacer"></span><span class="hint">Top 6</span></h3>
-          <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">
-            <div class="chart-wrap" style="width:172px;flex:none"><canvas id="ov_donut"></canvas></div>
-            <div style="flex:1;min-width:180px" class="legend" id="ov_legend"></div>
-          </div>
-        </div>
-        <div class="card">
-          <h3>流量排行<span class="spacer"></span><span class="hint">按用户合计</span></h3>
-          <div class="rank" id="ov_rank"></div>
-        </div>
-      </div>
-
+    <!-- 流量 -->
+    <section id="v-traffic" class="view">
       <div class="card">
-        <h3>快捷操作</h3>
-        <div class="quick-grid">
-          <button class="quick" data-act="openInboundModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></span>新增入站</button>
-          <button class="quick" data-act="openClientModal"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>新增用户</button>
-          <button class="quick" data-act="goto" data-args='["import"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>外部节点</button>
-          <button class="quick" data-act="goto" data-args='["gen"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>生成配置</button>
-          <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
-          <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
+        <h3>每日流量趋势<span class="spacer"></span>
+          <select id="tr_days" class="input" style="width:110px" data-act="loadDaily">
+            <option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option>
+          </select>
+        </h3>
+        <div class="chart-wrap"><canvas id="tr_chart"></canvas><div class="chart-tip" id="tr_tip"></div></div>
+        <div style="display:flex;gap:18px;margin-top:10px">
+          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-up);border-radius:3px"></span> 上行</span>
+          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-down);border-radius:3px"></span> 下行</span>
+          <span class="muted" id="tr_total"></span>
         </div>
-        <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
+      </div>
+      <div class="card">
+        <h3>用户流量 <span class="muted" style="font-weight:400">（每 30 秒采样）</span></h3>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>#</th><th>用户</th><th class="ta-r">上行</th><th class="ta-r">下行</th><th class="ta-r">合计</th><th>用量</th><th class="ta-r">配额</th><th>状态</th></tr></thead>
+          <tbody id="trtbody"></tbody>
+        </table></div>
+        <p class="muted" style="margin-top:10px">统计来源：sing-box/mihomo clash 兼容 API、xray StatsService。需在设置中开启统计并应用生效；到期或超配额用户会被自动停用，越过告警阈值（设置中可调）会发送邮件提醒。</p>
+      </div>
+    </section>
+
+    <!-- 审计日志 -->
+    <section id="v-audit" class="view">
+      <div class="card">
+        <h3>操作审计<span class="spacer"></span>
+          <select id="au_prefix" class="input" style="width:130px" data-act="loadAudit">
+            <option value="">全部动作</option>
+            <option value="login">登录</option>
+            <option value="settings">设置 / 密码</option>
+            <option value="inbound">入站</option>
+            <option value="client">用户</option>
+            <option value="apply">应用 / 回滚</option>
+            <option value="switch-core">内核切换</option>
+            <option value="import">导入</option>
+            <option value="external">外部节点</option>
+            <option value="auth2fa">二次验证</option>
+            <option value="admin">管理员账号</option>
+            <option value="session">登录设备</option>
+            <option value="rbac">越权拦截</option>
+            <option value="update">版本更新</option>
+          </select>
+          <select id="au_result" class="input" style="width:110px" data-act="loadAudit">
+            <option value="">全部结果</option>
+            <option value="ok">成功</option>
+            <option value="fail">失败</option>
+          </select>
+          <button class="btn sm" data-act="loadAudit">刷新</button>
+        </h3>
+        <p class="muted" style="margin-bottom:12px">
+          记录登录（含失败与来源 IP）、改密、设置变更、入站/用户增删改、应用与回滚、内核切换、版本更新等关键操作。
+          只记「改了什么」不记「值是什么」——密码、密钥、SMTP 口令不会出现在这里。
+          超过 90 天的记录由面板自动清理。
+        </p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th style="width:150px">时间</th><th style="width:110px">操作人</th><th style="width:130px">动作</th><th>对象</th><th style="width:130px">来源</th><th style="width:70px">结果</th><th>详情</th></tr></thead>
+          <tbody id="autbody"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
+        </table></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn sm" id="au_more" data-act="loadAudit" data-args='[true]'>加载更多</button>
+          <button class="btn sm danger need-owner" data-act="clearAudit">清空审计</button>
+          <span class="muted" id="au_msg"></span>
+        </div>
       </div>
     </section>
 
@@ -1166,31 +1425,6 @@ canvas{display:block;width:100%}
           <thead><tr><th>名称</th><th>凭据</th><th>订阅链接</th><th>配额</th><th>到期</th><th>启用</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="cltbody"></tbody>
         </table></div>
-      </div>
-    </section>
-
-    <!-- 流量 -->
-    <section id="v-traffic" class="view">
-      <div class="card">
-        <h3>每日流量趋势<span class="spacer"></span>
-          <select id="tr_days" class="input" style="width:110px" data-act="loadDaily">
-            <option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option>
-          </select>
-        </h3>
-        <div class="chart-wrap"><canvas id="tr_chart"></canvas><div class="chart-tip" id="tr_tip"></div></div>
-        <div style="display:flex;gap:18px;margin-top:10px">
-          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-up);border-radius:3px"></span> 上行</span>
-          <span class="muted"><span style="display:inline-block;width:10px;height:10px;background:var(--chart-down);border-radius:3px"></span> 下行</span>
-          <span class="muted" id="tr_total"></span>
-        </div>
-      </div>
-      <div class="card">
-        <h3>用户流量 <span class="muted" style="font-weight:400">（每 30 秒采样）</span></h3>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>#</th><th>用户</th><th class="ta-r">上行</th><th class="ta-r">下行</th><th class="ta-r">合计</th><th>用量</th><th class="ta-r">配额</th><th>状态</th></tr></thead>
-          <tbody id="trtbody"></tbody>
-        </table></div>
-        <p class="muted" style="margin-top:10px">统计来源：sing-box/mihomo clash 兼容 API、xray StatsService。需在设置中开启统计并应用生效；到期或超配额用户会被自动停用，越过告警阈值（设置中可调）会发送邮件提醒。</p>
       </div>
     </section>
 
@@ -1752,50 +1986,6 @@ canvas{display:block;width:100%}
       </div>
     </section>
 
-    <!-- 审计日志 -->
-    <section id="v-audit" class="view">
-      <div class="card">
-        <h3>操作审计<span class="spacer"></span>
-          <select id="au_prefix" class="input" style="width:130px" data-act="loadAudit">
-            <option value="">全部动作</option>
-            <option value="login">登录</option>
-            <option value="settings">设置 / 密码</option>
-            <option value="inbound">入站</option>
-            <option value="client">用户</option>
-            <option value="apply">应用 / 回滚</option>
-            <option value="switch-core">内核切换</option>
-            <option value="import">导入</option>
-            <option value="external">外部节点</option>
-            <option value="auth2fa">二次验证</option>
-            <option value="admin">管理员账号</option>
-            <option value="session">登录设备</option>
-            <option value="rbac">越权拦截</option>
-            <option value="update">版本更新</option>
-          </select>
-          <select id="au_result" class="input" style="width:110px" data-act="loadAudit">
-            <option value="">全部结果</option>
-            <option value="ok">成功</option>
-            <option value="fail">失败</option>
-          </select>
-          <button class="btn sm" data-act="loadAudit">刷新</button>
-        </h3>
-        <p class="muted" style="margin-bottom:12px">
-          记录登录（含失败与来源 IP）、改密、设置变更、入站/用户增删改、应用与回滚、内核切换、版本更新等关键操作。
-          只记「改了什么」不记「值是什么」——密码、密钥、SMTP 口令不会出现在这里。
-          超过 90 天的记录由面板自动清理。
-        </p>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th style="width:150px">时间</th><th style="width:110px">操作人</th><th style="width:130px">动作</th><th>对象</th><th style="width:130px">来源</th><th style="width:70px">结果</th><th>详情</th></tr></thead>
-          <tbody id="autbody"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
-        </table></div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
-          <button class="btn sm" id="au_more" data-act="loadAudit" data-args='[true]'>加载更多</button>
-          <button class="btn sm danger need-owner" data-act="clearAudit">清空审计</button>
-          <span class="muted" id="au_msg"></span>
-        </div>
-      </div>
-    </section>
-
     <!-- 备份管理：四类旧版本文件统一成一个视图 + 容量治理 -->
     <section id="v-backups" class="view">
       <div class="card">
@@ -2271,6 +2461,25 @@ canvas{display:block;width:100%}
     <h3 id="vw_title">详情</h3>
     <pre id="vw_body"></pre>
     <div class="foot"><button class="btn primary" data-act="closeModal" data-args='["mView"]'>关闭</button></div>
+  </div>
+</div>
+
+<!-- 命令中枢：Ctrl K 打开，索引全部视图与高频动作；上下键选择、回车执行、Esc 关闭。 -->
+<div class="cmd-overlay" id="cmdOverlay" data-act="closeCommand" data-self="1">
+  <div class="cmd-panel">
+    <input id="cmdInput" class="cmd-input" data-act="cmdQuery" data-el="value"
+           placeholder="输入页面名或操作名…" autocomplete="off" aria-label="搜索页面与操作">
+    <div class="cmd-list" id="cmdList"></div>
+    <div class="cmd-foot"><span>↑ ↓ 选择</span><span>Enter 执行</span><span>Esc 关闭</span></div>
+  </div>
+</div>
+
+<!-- 手机端「更多」抽屉：按查看 / 配置 / 维护三段列全量页面。 -->
+<div class="more-sheet" id="moreSheet" data-act="closeMoreSheet" data-self="1">
+  <div class="more-panel">
+    <div class="more-h"><b>全部页面</b><span class="spacer"></span>
+      <button class="btn sm" data-act="closeMoreSheet">关闭</button></div>
+    <div id="moreBody"></div>
   </div>
 </div>
 
@@ -4755,24 +4964,30 @@ const ICONS = {
   // 备份管理：叠放的磁盘 + 时钟，和「配置管理」的下载托盘区分开
   backups:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/><path d="M12 12v4l2.5 1.5"/>',
   // 主机优化：主板 + 提速折线
-  hostopt:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 12l3-4 3 3 4-5"/>'
+  hostopt:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 12l3-4 3 3 4-5"/>',
+  // 更多：九宫格
+  more:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
 };
+/* 导航按「要做什么」分三段，不按对象堆列表：查看（看状态）、配置（改东西）、
+   维护（管面板自己）。分组名一律是完整双字词，不用斜杠拼名字——手机上换行时
+   斜杠会被误读成分隔符。顺序必须与 index.html 的 section、boot.js 的
+   BOOT_VIEWS 完全一致，TestViewRestoreOnReload 会逐项比。 */
 const VIEWS = [
-  ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
-  ["inbounds","入站","网络服务","管理监听端口、协议、传输与 TLS"],
-  ["outbounds","出站","网络服务","查看当前内核渲染出的出站、路由规则与 DNS（只读）"],
-  ["clients","用户","网络服务","账号、凭据、配额与到期时间"],
-  ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
-  ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出；建入站请用「入站 → 新增入站」"],
+  ["overview","概览","查看","一屏掌握入站、用户、流量与内核运行状态"],
+  ["traffic","流量","查看","每日趋势、用量明细与配额消耗"],
+  ["audit","审计","查看","登录、配置变更与关键操作留痕"],
+  ["inbounds","入站","配置","管理监听端口、协议、传输与 TLS"],
+  ["outbounds","出站","配置","查看当前内核渲染出的出站、路由规则与 DNS（只读）"],
+  ["clients","用户","配置","账号、凭据、配额与到期时间"],
+  ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
-  ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
-  // 第 5 位 true = 不占导航位。「应用」是动作，入口是常驻按钮 + 弹窗（#mApply）；
-  // 这一页只剩修订历史与内核日志，从弹窗里的「修订历史 →」进来。
+  ["configs","配置管理","配置","保存的配置随时下载、重新生成与对比"],
+  // 第 5 位 true = 不占导航位。应用是动作，入口是常驻命令条与弹窗（#mApply）；
+  // 这一页只剩修订历史与内核日志。
   ["apply","修订与日志","配置","配置修订历史与内核运行日志", true],
-  ["settings","设置","系统","内核路径、证书、版本管理与主题"],
-  ["audit","审计","系统","登录、配置变更与关键操作留痕"],
-  ["backups","备份管理","系统","四类旧版本文件统一盘点、保留策略与容量清理"],
-  ["hostopt","主机优化","系统","BBR 与拥塞控制只读体检，默认不改系统设置"]
+  ["settings","设置","维护","内核路径、证书、版本管理与主题"],
+  ["backups","备份管理","维护","四类旧版本文件统一盘点、保留策略与容量清理"],
+  ["hostopt","主机优化","维护","BBR 与拥塞控制只读体检，默认不改系统设置"]
 ];
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
@@ -4788,6 +5003,14 @@ function visibleViews() {
 }
 
 let CURRENT = "overview";
+/* 手机端底部只放五个高频入口，其余收进「更多」抽屉，抽屉里仍按查看、
+   配置、维护三段排列。抽屉里的标签和桌面一样不带斜杠。 */
+const MOBILE_NAV = [
+  ["overview", "概览"], ["inbounds", "入站"], ["apply", "应用"],
+  ["settings", "设置"], ["more", "更多"]
+];
+const svgIcon = (k, size) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.overview}</svg>`;
 function renderNav() {
   const list = visibleViews();
   // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
@@ -4797,12 +5020,43 @@ function renderNav() {
   list.forEach(([v, label, sec]) => {
     if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
     html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
-      <span>${label}</span></button>`;
+      ${svgIcon(v, 17)}<span>${label}</span></button>`;
   });
   $("nav").innerHTML = html;
+
+  // 三条是切页，两条是动作（应用开弹窗、更多开抽屉），动作直接走事件委托。
+  $("navMobile").innerHTML = MOBILE_NAV.map(([k, label]) => {
+    const attr = k === "apply" ? 'data-act="openApply"'
+      : k === "more" ? 'data-act="openMoreSheet"' : `data-v="${k}"`;
+    const on = k !== "apply" && k !== "more" && k === CURRENT ? " on" : "";
+    return `<button class="mnav-item${on}" ${attr} aria-label="${label}">
+      ${svgIcon(k, 18)}<span>${label}</span></button>`;
+  }).join("");
+
+  let mh = "", mlast = null;
+  list.forEach(([v, label, sec]) => {
+    if (sec !== mlast) {
+      if (mlast !== null) mh += "</div>";
+      mh += `<div class="more-sec">${sec}</div><div class="more-grid">`;
+      mlast = sec;
+    }
+    mh += `<button class="more-item${v===CURRENT?" on":""}" data-v="${v}">
+      ${svgIcon(v, 15)}<span>${label}</span></button>`;
+  });
+  if (mlast !== null) mh += "</div>";
+  $("moreBody").innerHTML = mh;
 }
 renderNav();
+$("navMobile").addEventListener("click", e => {
+  const b = e.target.closest("[data-v]");
+  if (b) goto(b.dataset.v);
+});
+$("moreBody").addEventListener("click", e => {
+  const b = e.target.closest("[data-v]");
+  if (b) { closeMoreSheet(); goto(b.dataset.v); }
+});
+function openMoreSheet() { $("moreSheet").classList.add("show"); syncBodyLock(); }
+function closeMoreSheet() { $("moreSheet").classList.remove("show"); syncBodyLock(); }
 
 /* ---- 窄屏可用性 ---- */
 /* 导航条在 960px 以下变成横向可滑的一行。切到靠后的页面时，选中的入口可能
@@ -4862,7 +5116,8 @@ function goto(v, sect, animate = true) {
   // 给 CSS 一个「现在是哪一页」的钩子：手机端常驻的「应用」按钮在设置页（有自己的
   // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
   document.body.dataset.view = v;
-  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  document.querySelectorAll(".nav-item,.more-item,.mnav-item[data-v]").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === v));
   // 入场动画只给真正切页：刷新恢复（restoreView 传 animate=false）不播，
   // 否则首帧从 opacity:0 淡入，又是那下整页闪。
   VIEWS.forEach(([k]) => {
@@ -4880,7 +5135,11 @@ function goto(v, sect, animate = true) {
   $("pageTitle").textContent = TITLES[v];
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
-  if (v === "overview") setTimeout(loadOverview, 30);
+  if (v === "overview") {
+    setTimeout(loadOverview, 30);
+    wbEnsure();                 // 幂等：只加载一次布局并建好卡片头
+    setTimeout(loadTodos, 60);  // 待办各来源独立请求，失败互不影响
+  }
   if (v === "outbounds") loadOutbounds();
   if (v === "audit") loadAudit();
   if (v === "backups") loadBackupInventory();
@@ -4904,6 +5163,316 @@ function goto(v, sect, animate = true) {
   }
 }
 
+/* ================= 命令中枢 =================
+   把「找页面」变成一步：全部视图 + 高频动作进同一个索引，Ctrl K 直达。
+   动作项只存名字和参数，执行时按名字从 window 取——和事件委托同一套协议，
+   不用 eval，CSP 仍是 script-src 'self'。只读账号看不到无权页面（visibleViews
+   与侧栏共用一份过滤），隐藏的「修订与日志」也不会凭空冒出来。 */
+const CMD_ACTIONS = [
+  {act:"openInboundModal", title:"新增入站", group:"常用操作", hint:"入站 端口 协议", icon:"inbounds"},
+  {act:"openClientModal", title:"新增用户", group:"常用操作", hint:"用户 账号 配额", icon:"clients"},
+  {act:"openApply", title:"应用配置", group:"常用操作", hint:"应用 渲染 生效", icon:"apply"},
+  {act:"goto", args:["gen"], title:"生成配置", group:"常用操作", hint:"生成 订阅 客户端", icon:"gen"},
+  {act:"loadStatus", title:"刷新状态", group:"常用操作", hint:"刷新 内核 速率", icon:"overview"},
+  {act:"goto", args:["backups"], title:"备份管理", group:"常用操作", hint:"备份 容量 清理", icon:"backups"},
+  {act:"goto", args:["hostopt"], title:"主机优化", group:"常用操作", hint:"BBR 拥塞控制 体检", icon:"hostopt"}
+];
+function cmdItems() {
+  const views = visibleViews().map(([k, label, sec, sub]) =>
+    ({view:k, title:label, group:sec, hint:sub || "", icon:k}));
+  return CMD_ACTIONS.concat(views);
+}
+let CMD_FILTERED = [], CMD_SEL = 0;
+function cmdPaint(q) {
+  const s = (q || "").trim().toLowerCase();
+  CMD_FILTERED = cmdItems().filter(c =>
+    !s || (c.title + " " + c.group + " " + (c.hint || "")).toLowerCase().includes(s)).slice(0, 16);
+  CMD_SEL = 0;
+  const host = $("cmdList");
+  if (!CMD_FILTERED.length) {
+    host.innerHTML = '<div class="cmd-empty">没有匹配的页面或操作</div>';
+    return;
+  }
+  host.innerHTML = CMD_FILTERED.map((c, i) =>
+    `<button class="cmd-item${i === 0 ? " on" : ""}" data-act="cmdRun" data-args='${escJson([i])}'>
+      <span class="ci">${svgIcon(c.icon, 18)}</span>
+      <span class="ct">${escHtml(c.title)}</span>
+      <span class="cs">${escHtml(c.group)}</span></button>`).join("");
+}
+function cmdMove(d) {
+  if (!CMD_FILTERED.length) return;
+  CMD_SEL = (CMD_SEL + d + CMD_FILTERED.length) % CMD_FILTERED.length;
+  document.querySelectorAll("#cmdList .cmd-item").forEach((b, i) =>
+    b.classList.toggle("on", i === CMD_SEL));
+  const on = document.querySelector("#cmdList .cmd-item.on");
+  if (on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
+}
+function cmdExec(i) {
+  const c = CMD_FILTERED[i];
+  if (!c) return;
+  closeCommand();
+  if (c.view) { goto(c.view); return; }
+  const fn = window[c.act];
+  if (typeof fn === "function") fn.call(document.body, ...(c.args || []));
+}
+function cmdRun(i) { cmdExec(+i); }
+function cmdQuery(v) { cmdPaint(v); }
+function openCommand() {
+  $("cmdOverlay").classList.add("show");
+  $("cmdInput").value = "";
+  cmdPaint("");
+  syncBodyLock();
+  // 下一任务再聚焦：面板刚 show 时部分 Android WebView 还量不到输入框。
+  setTimeout(() => $("cmdInput").focus(), 0);
+}
+function closeCommand() {
+  $("cmdOverlay").classList.remove("show");
+  syncBodyLock();
+}
+document.addEventListener("keydown", e => {
+  const k = (e.key || "").toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && (k === "k" || k === "p")) {
+    e.preventDefault();
+    $("cmdOverlay").classList.contains("show") ? closeCommand() : openCommand();
+    return;
+  }
+  if (!$("cmdOverlay").classList.contains("show")) return;
+  if (e.key === "Escape") { e.preventDefault(); closeCommand(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); cmdMove(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); cmdMove(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); cmdExec(CMD_SEL); }
+});
+
+/* ================= 命令工作台 =================
+   布局存服务端（跨设备一致），localStorage 只作只读账号 / 接口失败时的本机
+   降级。卡片可折叠、置顶、排序；拖拽有上移下移按钮作为键盘与触摸的等价
+   替代路径——不能只有一种操作方式。 */
+const WB_KEYS = ["todo", "kpis", "trend", "cores", "users", "rank", "quick"];
+const WB_SETTING = "wb_layout";
+let WB = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
+let WB_READY = false, WB_RO = null, WB_DRAG = "";
+
+function wbNormalize(raw) {
+  const base = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
+  try {
+    const o = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
+    const order = [];
+    (Array.isArray(o.order) ? o.order : []).forEach(k => {
+      if (WB_KEYS.includes(k) && !order.includes(k)) order.push(k);
+    });
+    // 新增卡片在旧布局里不存在时补到末尾，不能让它凭空消失。
+    WB_KEYS.forEach(k => { if (!order.includes(k)) order.push(k); });
+    base.order = order;
+    ["collapsed", "pinned"].forEach(f => {
+      base[f] = (Array.isArray(o[f]) ? o[f] : []).filter(k => WB_KEYS.includes(k));
+    });
+  } catch (_) { /* 脏值一律回落默认布局 */ }
+  return base;
+}
+function wbOrder() {
+  const p = WB.pinned.filter(k => WB.order.includes(k));
+  return p.concat(WB.order.filter(k => !p.includes(k)));
+}
+/* 卡片头只建一次。之后只改按钮状态与文字，不重建 DOM——否则键盘用户按一次
+   「上移」焦点就掉了，等于没有键盘可访问性。 */
+function wbInitHeads() {
+  document.querySelectorAll("#workbench .wb-card").forEach(card => {
+    const k = card.dataset.wb;
+    const head = card.querySelector(".wb-head");
+    if (!head) return;
+    const tools = [
+      ["wbToggle", "▾", "折叠或展开"],
+      ["wbPin", "★", "置顶"],
+      ["wbUp", "↑", "上移"],
+      ["wbDown", "↓", "下移"]
+    ];
+    head.innerHTML = `<h3>${escHtml(card.dataset.title)}<span class="hint">${escHtml(card.dataset.hint || "")}</span></h3>
+      <div class="wb-tools">${tools.map(([act, label, tip]) =>
+        `<button class="wb-tool" data-act="${act}" data-args='${escJson([k])}'
+           aria-label="${tip}" title="${tip}">${label}</button>`).join("")}
+        <button class="wb-tool" data-drag="1" data-key="${k}" draggable="true"
+           aria-label="拖动排序" title="拖动排序">⠿</button></div>`;
+  });
+}
+function wbPaintHeads() {
+  document.querySelectorAll("#workbench .wb-card").forEach(card => {
+    const k = card.dataset.wb;
+    const folded = WB.collapsed.includes(k), pinned = WB.pinned.includes(k);
+    card.classList.toggle("collapsed", folded);
+    card.classList.toggle("pinned", pinned);
+    const t = card.querySelector('[data-act="wbToggle"]');
+    if (t) { t.setAttribute("aria-pressed", folded ? "true" : "false"); t.firstChild.nodeValue = folded ? "▸" : "▾"; }
+    const p = card.querySelector('[data-act="wbPin"]');
+    if (p) { p.setAttribute("aria-pressed", pinned ? "true" : "false"); }
+  });
+}
+function wbApply() {
+  const host = $("workbench");
+  if (!host) return;
+  wbOrder().forEach(k => {
+    const c = host.querySelector(`[data-wb="${k}"]`);
+    if (c) host.appendChild(c);
+  });
+  wbPaintHeads();
+  wbMasonry();
+}
+function wbSave() {
+  const val = JSON.stringify(WB);
+  try { localStorage.setItem("triune_wb_layout", val); } catch (_) {}
+  // 只读账号 / 演示模式写不进服务端也不该报错：本机布局照样可用。
+  req("/api/settings", {method:"PUT", body:{[WB_SETTING]: val}}).catch(() => {});
+}
+async function wbEnsure() {
+  if (WB_READY) return;
+  WB_READY = true;
+  wbInitHeads();
+  wbInitDrag();
+  wbInitMasonry();
+  let raw = "";
+  try { raw = (await req("/api/settings"))[WB_SETTING] || ""; } catch (_) {}
+  if (!raw) { try { raw = localStorage.getItem("triune_wb_layout") || ""; } catch (_) {} }
+  WB = wbNormalize(raw);
+  wbApply();
+}
+function wbToggle(k) {
+  const i = WB.collapsed.indexOf(k);
+  if (i >= 0) WB.collapsed.splice(i, 1); else WB.collapsed.push(k);
+  wbPaintHeads(); wbMasonry(); wbSave();
+}
+function wbPin(k) {
+  const i = WB.pinned.indexOf(k);
+  if (i >= 0) WB.pinned.splice(i, 1); else WB.pinned.push(k);
+  wbApply(); wbSave();
+}
+function wbStep(k, d) {
+  // 置顶段固定，只在非置顶卡片之间排序；否则「置顶」会被悄悄绕过。
+  if (WB.pinned.includes(k)) { toast("取消置顶后才能调整顺序", "info"); return; }
+  const i = WB.order.indexOf(k), j = i + d;
+  if (i < 0 || j < 0 || j >= WB.order.length || WB.pinned.includes(WB.order[j])) return;
+  [WB.order[i], WB.order[j]] = [WB.order[j], WB.order[i]];
+  wbApply(); wbSave();
+}
+function wbUp(k) { wbStep(k, -1); }
+function wbDown(k) { wbStep(k, 1); }
+function wbMoveBefore(from, to) {
+  if (from === to || WB.pinned.includes(from) || WB.pinned.includes(to)) return;
+  const arr = WB.order.filter(k => k !== from);
+  const i = arr.indexOf(to);
+  arr.splice(i < 0 ? arr.length : i, 0, from);
+  WB.order = arr;
+}
+function wbInitDrag() {
+  const host = $("workbench");
+  if (!host) return;
+  host.addEventListener("dragstart", e => {
+    const h = e.target.closest("[data-drag]");
+    if (!h) return;
+    WB_DRAG = h.dataset.key;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", WB_DRAG);
+    }
+    const c = host.querySelector(`[data-wb="${WB_DRAG}"]`);
+    if (c) c.classList.add("dragging");
+  });
+  host.addEventListener("dragend", () => {
+    WB_DRAG = "";
+    host.querySelectorAll(".dragging").forEach(c => c.classList.remove("dragging"));
+  });
+  host.addEventListener("dragover", e => {
+    if (!WB_DRAG || !e.target.closest(".wb-card")) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  });
+  host.addEventListener("drop", e => {
+    const c = e.target.closest(".wb-card");
+    if (!c || !WB_DRAG) return;
+    e.preventDefault();
+    wbMoveBefore(WB_DRAG, c.dataset.wb);
+    WB_DRAG = "";
+    host.querySelectorAll(".dragging").forEach(x => x.classList.remove("dragging"));
+    wbApply(); wbSave();
+  });
+}
+/* 瀑布流：用 grid-row span 做不等高错落，DOM 顺序 = 视觉顺序 = Tab 顺序。
+   不用 column-count（顺序会被按列拆开），也不用 dense（会打乱顺序）。
+   手机上 CSS 直接退回单列，这里把 inline span 清干净。 */
+function wbMasonry() {
+  const host = $("workbench");
+  if (!host) return;
+  const cards = host.querySelectorAll(".wb-card");
+  if (window.matchMedia("(max-width:960px)").matches) {
+    cards.forEach(c => { c.style.gridRowEnd = ""; });
+    return;
+  }
+  const cs = getComputedStyle(host);
+  const row = parseFloat(cs.gridAutoRows) || 8;
+  const gap = parseFloat(cs.rowGap) || 18;
+  cards.forEach(c => {
+    c.style.gridRowEnd = "";                 // 先回到 CSS 的占位 span，再量真实高度
+    const h = c.getBoundingClientRect().height;
+    if (h > 0) c.style.gridRowEnd = "span " + Math.max(2, Math.ceil((h + gap) / (row + gap)));
+  });
+}
+function wbInitMasonry() {
+  const host = $("workbench");
+  if (!host) return;
+  if (window.ResizeObserver) {
+    WB_RO = new ResizeObserver(() => wbMasonry());
+    host.querySelectorAll(".wb-card").forEach(c => WB_RO.observe(c));
+  }
+  addEventListener("resize", () => setTimeout(wbMasonry, 120));
+}
+
+/* 「今天要处理」是注册表：每个 provider 独立请求、独立失败，一个接口挂了
+   不影响其它待办。以后要给主机优化加时钟 / 文件描述符 / conntrack 体检，
+   在这里挂一个 provider 就行，工作台骨架不用改。 */
+const TODO_PROVIDERS = [
+  {key:"inbounds", async run() {
+    const j = await req("/api/inbounds");
+    const n = Array.isArray(j) ? j.length : (j.items || []).length;
+    if (!n) return {level:"warn", title:"还没有入站", text:"先新增一个入站，才能生成客户端配置", view:"inbounds"};
+    return null;
+  }},
+  {key:"backups", async run() {
+    const j = await req("/api/backups/inventory");
+    const s = j.summary || {}, p = j.policy || {};
+    const total = s.total_bytes || 0;
+    const limitMB = +(p.max_mb || 0);
+    if (total > 200 * 1048576 || (limitMB > 0 && total > limitMB * 1048576)) {
+      return {level:"warn", title:"备份占用 " + fmtBytes(total),
+        text:"旧归档里含内核二进制，建议到备份管理设上限并清理", view:"backups"};
+    }
+    return null;
+  }},
+  {key:"hostopt", async run() {
+    const j = await req("/api/host-opt");
+    if (j.apply_enabled && !j.applied) {
+      return {level:"info", title:"主机网络可以优化",
+        text:"检测到 BBR 可用但当前未启用，面板默认不会改系统设置", view:"hostopt"};
+    }
+    return null;
+  }}
+];
+async function loadTodos() {
+  const host = $("wbTodo");
+  if (!host) return;
+  const marks = {warn:"!", err:"✕", info:"i", ok:"✓"};
+  const out = await Promise.all(TODO_PROVIDERS.map(async p => {
+    try { return await p.run(); } catch (_) { return null; }
+  }));
+  let items = out.filter(Boolean);
+  if (!items.length) items = [{level:"ok", title:"一切正常",
+    text:"入站、备份占用与主机优化都没有待处理项", view:"overview"}];
+  host.innerHTML = items.map(it =>
+    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}'>
+      <span class="todo-ic ${escHtml(it.level || "info")}">${marks[it.level] || "i"}</span>
+      <span class="todo-tx"><b>${escHtml(it.title)}</b><span>${escHtml(it.text || "")}</span></span>
+      <span class="todo-go">→</span></button>`).join("");
+  wbMasonry();
+}
+function todoGo(view) { goto(view); }
+
 /* ================= Toast / Modal / Confirm ================= */
 function toast(msg, type = "ok") {
   const icons = {ok:"✓", err:"✕", warn:"!", info:"i"};
@@ -4926,7 +5495,12 @@ function closeModal(id){ $(id).classList.remove("show"); syncBodyLock(); }
    背后的页面跟着滑，看着像整页在抖。按 DOM 现状重算而不做计数——
    计数一旦漏减就会把页面永久锁死，那是比不锁严重得多的故障。 */
 function syncBodyLock(){
-  document.body.style.overflow = document.querySelector(".overlay.show") ? "hidden" : "";
+  // 按 DOM 现状重算，绝不计数：计数漏减会把页面永久锁死。
+  const modal = document.querySelector(".overlay.show") ? "hidden" : "";
+  // 命令面板与「更多」抽屉不是 .overlay（定位方式不同），但同样是铺满视口的
+  // 浮层，漏掉任一个窄屏上手指一拖背后的文档就跟着滚。
+  const layer = document.querySelector(".cmd-overlay.show,.more-sheet.show") ? "hidden" : "";
+  document.body.style.overflow = modal || layer;
 }
 function ask(title, text) {
   return new Promise(resolve => {
@@ -4968,20 +5542,31 @@ function schemeVars(mode, scheme) {
   const out = {
     bg: g("--bg") || "#ffffff", side: g("--side") || "#ffffff", card: g("--card") || "#ffffff",
     text: g("--text") || "#111111", line: g("--line") || "#dddddd",
-    acc: g("--acc") || "#3b82f6", acc2: g("--acc2") || "#8b5cf6"
+    acc: g("--acc") || "#3b82f6", acc2: g("--acc2") || "#8b5cf6",
+    muted: g("--muted") || "#888888", ok: g("--ok") || "#16a34a",
+    err: g("--err") || "#dc2626", chart: g("--chart-down") || "#22c55e",
+    code: g("--code-bg") || "#f1f4f9"
   };
   probe.remove();
   return out;
 }
 /* 预览卡上每个色块对应哪个 CSS 变量、悬停时显示什么名字。
+   数量比旧版多一倍：颜色方案现在同时决定语义色、图表色与代码块底色，
+   缩略图必须把这些层都画出来，用户才能一眼看出「这是一整套配色」。
    renderSchemes() 第一次建 DOM，之后只改已有节点的 style/title/class。 */
 const SCHEME_DOTS = [
-  ["bg", "背景"], ["side", "侧栏"], ["card", "卡片"],
-  ["text", "文字"], ["acc", "主色"], ["acc2", "辅色"]
+  ["bg", "背景"], ["side", "侧栏"], ["card", "卡片"], ["text", "文字"],
+  ["acc", "主色"], ["acc2", "辅色"], ["ok", "成功"], ["chart", "图表"]
 ];
+/* 大预览卡是一张缩略页面：侧栏、顶栏、正文卡片、按钮、状态点、图表条。
+   节点只在这里创建一次，paintScheme() 之后只改 style，不重建 DOM。 */
 function schemeMarkup([id, name]) {
   return `<button class="scheme" data-s="${id}">
-      <span class="prev"><i class="p-side"></i><i class="p-card"></i><i class="p-ln"></i><i class="p-ln2"></i><i class="p-btn"></i></span>
+      <span class="prev">
+        <i class="p-side"></i><i class="p-nav1"></i><i class="p-nav2"></i><i class="p-nav3"></i>
+        <i class="p-top"></i><i class="p-card"></i><i class="p-ln"></i><i class="p-ln2"></i>
+        <i class="p-btn"></i><i class="p-ok"></i><i class="p-chart"></i>
+      </span>
       <span class="nm"><b>${name}</b><span class="chk">✓</span></span>
       <span class="dots">${SCHEME_DOTS.map(() => "<i></i>").join("")}</span>
       <span class="hex">—</span>
@@ -5003,8 +5588,18 @@ function paintScheme(btn, id, name) {
   card.style.background = c.card;
   card.style.borderColor = c.line;
   btn.querySelector(".p-ln").style.background = c.text;
-  btn.querySelector(".p-ln2").style.background = c.text;
+  btn.querySelector(".p-ln2").style.background = c.muted;
+  [".p-nav1", ".p-nav2", ".p-nav3"].forEach((sel, i) => {
+    const n = btn.querySelector(sel);
+    n.style.background = i === 0 ? c.acc : c.muted;
+    n.style.opacity = i === 0 ? "1" : ".42";
+  });
+  btn.querySelector(".p-top").style.background = c.card;
+  btn.querySelector(".p-top").style.borderBottomColor = c.line;
   btn.querySelector(".p-btn").style.background = `linear-gradient(135deg,${c.acc},${c.acc2})`;
+  btn.querySelector(".p-ok").style.background = c.ok;
+  btn.querySelector(".p-chart").style.background =
+    `linear-gradient(90deg,${c.acc} 45%,${c.chart} 45%)`;
   const dots = btn.querySelectorAll(".dots i");
   SCHEME_DOTS.forEach(([k, label], i) => {
     dots[i].style.background = c[k];
@@ -5055,6 +5650,34 @@ function applyTheme() {
   }
   setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
 }
+/* 密度与圆角是独立于明暗、配色的两根轴：外观偏好只存本机，和服务端配置无关。
+   改它们同样要压掉一帧过渡（圆角/内距都在 transition 里），所以复用
+   markThemeSwitch()。boot.js 会在首帧就恢复属性，避免刷新后先画默认档。 */
+const DENSITIES = ["compact", "comfortable"];
+const RADII = ["sharp", "normal", "soft"];
+let themeDensity = "comfortable", themeRadius = "normal";
+function paintAxes() {
+  markThemeSwitch();
+  const r = document.documentElement;
+  r.dataset.density = themeDensity;
+  if (themeRadius === "normal") r.removeAttribute("data-radius");
+  else r.dataset.radius = themeRadius;
+  localStorage.setItem("triune_density", themeDensity);
+  localStorage.setItem("triune_radius", themeRadius);
+  document.querySelectorAll("#densitySeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === themeDensity));
+  document.querySelectorAll("#radiusSeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === themeRadius));
+  setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
+}
+function setDensity(v) {
+  if (!DENSITIES.includes(v) || v === themeDensity) return;
+  themeDensity = v; paintAxes();
+}
+function setRadius(v) {
+  if (!RADII.includes(v) || v === themeRadius) return;
+  themeRadius = v; paintAxes();
+}
 function setMode(m) { if (!MODE_NAME[m] || m === themeMode) return; themeMode = m; applyTheme(); renderSchemes(); }
 function setScheme(s) { if (s === themeScheme) return; themeScheme = s; applyTheme(); renderSchemes(); }
 $("schemes").addEventListener("click", e => {
@@ -5075,8 +5698,23 @@ document.addEventListener("click", e => {
   if (!MODE_NAME[mode]) mode = "light";
   if (!SCHEMES.some(s => s[0] === scheme)) scheme = "azure";
   themeMode = mode; themeScheme = scheme;
+  // 首帧属性已由 boot.js 写过，这里只把 JS 状态与分段按钮对齐，不再挂
+  // data-theme-switch（刷新时 CSS 本来就没有过渡可压）。
+  let d = localStorage.getItem("triune_density");
+  let rad = localStorage.getItem("triune_radius");
+  if (!DENSITIES.includes(d)) d = "comfortable";
+  if (!RADII.includes(rad)) rad = "normal";
+  themeDensity = d; themeRadius = rad;
+  const r0 = document.documentElement;
+  r0.dataset.density = d;
+  if (rad === "normal") r0.removeAttribute("data-radius");
+  else r0.dataset.radius = rad;
   applyTheme();
   renderSchemes();
+  document.querySelectorAll("#densitySeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === d));
+  document.querySelectorAll("#radiusSeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === rad));
 })();
 
 /* ================= API（含演示 mock） ================= */

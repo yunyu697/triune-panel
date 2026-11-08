@@ -174,24 +174,30 @@ const ICONS = {
   // 备份管理：叠放的磁盘 + 时钟，和「配置管理」的下载托盘区分开
   backups:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/><path d="M12 12v4l2.5 1.5"/>',
   // 主机优化：主板 + 提速折线
-  hostopt:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 12l3-4 3 3 4-5"/>'
+  hostopt:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 12l3-4 3 3 4-5"/>',
+  // 更多：九宫格
+  more:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
 };
+/* 导航按「要做什么」分三段，不按对象堆列表：查看（看状态）、配置（改东西）、
+   维护（管面板自己）。分组名一律是完整双字词，不用斜杠拼名字——手机上换行时
+   斜杠会被误读成分隔符。顺序必须与 index.html 的 section、boot.js 的
+   BOOT_VIEWS 完全一致，TestViewRestoreOnReload 会逐项比。 */
 const VIEWS = [
-  ["overview","概览","总览","一屏掌握入站、用户、流量与内核运行状态"],
-  ["inbounds","入站","网络服务","管理监听端口、协议、传输与 TLS"],
-  ["outbounds","出站","网络服务","查看当前内核渲染出的出站、路由规则与 DNS（只读）"],
-  ["clients","用户","网络服务","账号、凭据、配额与到期时间"],
-  ["traffic","流量","网络服务","每日趋势、用量明细与配额消耗"],
-  ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出；建入站请用「入站 → 新增入站」"],
+  ["overview","概览","查看","一屏掌握入站、用户、流量与内核运行状态"],
+  ["traffic","流量","查看","每日趋势、用量明细与配额消耗"],
+  ["audit","审计","查看","登录、配置变更与关键操作留痕"],
+  ["inbounds","入站","配置","管理监听端口、协议、传输与 TLS"],
+  ["outbounds","出站","配置","查看当前内核渲染出的出站、路由规则与 DNS（只读）"],
+  ["clients","用户","配置","账号、凭据、配额与到期时间"],
+  ["import","外部节点","配置","把外部订阅与分享链接聚合进订阅输出"],
   ["gen","配置生成","配置","按目标设备与场景一键生成完整配置"],
-  ["configs","配置管理","配置","保存的配置：随时下载、重新生成与对比"],
-  // 第 5 位 true = 不占导航位。「应用」是动作，入口是常驻按钮 + 弹窗（#mApply）；
-  // 这一页只剩修订历史与内核日志，从弹窗里的「修订历史 →」进来。
+  ["configs","配置管理","配置","保存的配置随时下载、重新生成与对比"],
+  // 第 5 位 true = 不占导航位。应用是动作，入口是常驻命令条与弹窗（#mApply）；
+  // 这一页只剩修订历史与内核日志。
   ["apply","修订与日志","配置","配置修订历史与内核运行日志", true],
-  ["settings","设置","系统","内核路径、证书、版本管理与主题"],
-  ["audit","审计","系统","登录、配置变更与关键操作留痕"],
-  ["backups","备份管理","系统","四类旧版本文件统一盘点、保留策略与容量清理"],
-  ["hostopt","主机优化","系统","BBR 与拥塞控制只读体检，默认不改系统设置"]
+  ["settings","设置","维护","内核路径、证书、版本管理与主题"],
+  ["backups","备份管理","维护","四类旧版本文件统一盘点、保留策略与容量清理"],
+  ["hostopt","主机优化","维护","BBR 与拥塞控制只读体检，默认不改系统设置"]
 ];
 const TITLES = Object.fromEntries(VIEWS.map(v => [v[0], v[1]]));
 const SUBS = Object.fromEntries(VIEWS.map(v => [v[0], v[3]]));
@@ -207,6 +213,14 @@ function visibleViews() {
 }
 
 let CURRENT = "overview";
+/* 手机端底部只放五个高频入口，其余收进「更多」抽屉，抽屉里仍按查看、
+   配置、维护三段排列。抽屉里的标签和桌面一样不带斜杠。 */
+const MOBILE_NAV = [
+  ["overview", "概览"], ["inbounds", "入站"], ["apply", "应用"],
+  ["settings", "设置"], ["more", "更多"]
+];
+const svgIcon = (k, size) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.overview}</svg>`;
 function renderNav() {
   const list = visibleViews();
   // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
@@ -216,12 +230,43 @@ function renderNav() {
   list.forEach(([v, label, sec]) => {
     if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
     html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[v]}</svg>
-      <span>${label}</span></button>`;
+      ${svgIcon(v, 17)}<span>${label}</span></button>`;
   });
   $("nav").innerHTML = html;
+
+  // 三条是切页，两条是动作（应用开弹窗、更多开抽屉），动作直接走事件委托。
+  $("navMobile").innerHTML = MOBILE_NAV.map(([k, label]) => {
+    const attr = k === "apply" ? 'data-act="openApply"'
+      : k === "more" ? 'data-act="openMoreSheet"' : `data-v="${k}"`;
+    const on = k !== "apply" && k !== "more" && k === CURRENT ? " on" : "";
+    return `<button class="mnav-item${on}" ${attr} aria-label="${label}">
+      ${svgIcon(k, 18)}<span>${label}</span></button>`;
+  }).join("");
+
+  let mh = "", mlast = null;
+  list.forEach(([v, label, sec]) => {
+    if (sec !== mlast) {
+      if (mlast !== null) mh += "</div>";
+      mh += `<div class="more-sec">${sec}</div><div class="more-grid">`;
+      mlast = sec;
+    }
+    mh += `<button class="more-item${v===CURRENT?" on":""}" data-v="${v}">
+      ${svgIcon(v, 15)}<span>${label}</span></button>`;
+  });
+  if (mlast !== null) mh += "</div>";
+  $("moreBody").innerHTML = mh;
 }
 renderNav();
+$("navMobile").addEventListener("click", e => {
+  const b = e.target.closest("[data-v]");
+  if (b) goto(b.dataset.v);
+});
+$("moreBody").addEventListener("click", e => {
+  const b = e.target.closest("[data-v]");
+  if (b) { closeMoreSheet(); goto(b.dataset.v); }
+});
+function openMoreSheet() { $("moreSheet").classList.add("show"); syncBodyLock(); }
+function closeMoreSheet() { $("moreSheet").classList.remove("show"); syncBodyLock(); }
 
 /* ---- 窄屏可用性 ---- */
 /* 导航条在 960px 以下变成横向可滑的一行。切到靠后的页面时，选中的入口可能
@@ -281,7 +326,8 @@ function goto(v, sect, animate = true) {
   // 给 CSS 一个「现在是哪一页」的钩子：手机端常驻的「应用」按钮在设置页（有自己的
   // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
   document.body.dataset.view = v;
-  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  document.querySelectorAll(".nav-item,.more-item,.mnav-item[data-v]").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === v));
   // 入场动画只给真正切页：刷新恢复（restoreView 传 animate=false）不播，
   // 否则首帧从 opacity:0 淡入，又是那下整页闪。
   VIEWS.forEach(([k]) => {
@@ -299,7 +345,11 @@ function goto(v, sect, animate = true) {
   $("pageTitle").textContent = TITLES[v];
   $("pageSub").textContent = SUBS[v] || "";
   loadAll();
-  if (v === "overview") setTimeout(loadOverview, 30);
+  if (v === "overview") {
+    setTimeout(loadOverview, 30);
+    wbEnsure();                 // 幂等：只加载一次布局并建好卡片头
+    setTimeout(loadTodos, 60);  // 待办各来源独立请求，失败互不影响
+  }
   if (v === "outbounds") loadOutbounds();
   if (v === "audit") loadAudit();
   if (v === "backups") loadBackupInventory();
@@ -323,6 +373,316 @@ function goto(v, sect, animate = true) {
   }
 }
 
+/* ================= 命令中枢 =================
+   把「找页面」变成一步：全部视图 + 高频动作进同一个索引，Ctrl K 直达。
+   动作项只存名字和参数，执行时按名字从 window 取——和事件委托同一套协议，
+   不用 eval，CSP 仍是 script-src 'self'。只读账号看不到无权页面（visibleViews
+   与侧栏共用一份过滤），隐藏的「修订与日志」也不会凭空冒出来。 */
+const CMD_ACTIONS = [
+  {act:"openInboundModal", title:"新增入站", group:"常用操作", hint:"入站 端口 协议", icon:"inbounds"},
+  {act:"openClientModal", title:"新增用户", group:"常用操作", hint:"用户 账号 配额", icon:"clients"},
+  {act:"openApply", title:"应用配置", group:"常用操作", hint:"应用 渲染 生效", icon:"apply"},
+  {act:"goto", args:["gen"], title:"生成配置", group:"常用操作", hint:"生成 订阅 客户端", icon:"gen"},
+  {act:"loadStatus", title:"刷新状态", group:"常用操作", hint:"刷新 内核 速率", icon:"overview"},
+  {act:"goto", args:["backups"], title:"备份管理", group:"常用操作", hint:"备份 容量 清理", icon:"backups"},
+  {act:"goto", args:["hostopt"], title:"主机优化", group:"常用操作", hint:"BBR 拥塞控制 体检", icon:"hostopt"}
+];
+function cmdItems() {
+  const views = visibleViews().map(([k, label, sec, sub]) =>
+    ({view:k, title:label, group:sec, hint:sub || "", icon:k}));
+  return CMD_ACTIONS.concat(views);
+}
+let CMD_FILTERED = [], CMD_SEL = 0;
+function cmdPaint(q) {
+  const s = (q || "").trim().toLowerCase();
+  CMD_FILTERED = cmdItems().filter(c =>
+    !s || (c.title + " " + c.group + " " + (c.hint || "")).toLowerCase().includes(s)).slice(0, 16);
+  CMD_SEL = 0;
+  const host = $("cmdList");
+  if (!CMD_FILTERED.length) {
+    host.innerHTML = '<div class="cmd-empty">没有匹配的页面或操作</div>';
+    return;
+  }
+  host.innerHTML = CMD_FILTERED.map((c, i) =>
+    `<button class="cmd-item${i === 0 ? " on" : ""}" data-act="cmdRun" data-args='${escJson([i])}'>
+      <span class="ci">${svgIcon(c.icon, 18)}</span>
+      <span class="ct">${escHtml(c.title)}</span>
+      <span class="cs">${escHtml(c.group)}</span></button>`).join("");
+}
+function cmdMove(d) {
+  if (!CMD_FILTERED.length) return;
+  CMD_SEL = (CMD_SEL + d + CMD_FILTERED.length) % CMD_FILTERED.length;
+  document.querySelectorAll("#cmdList .cmd-item").forEach((b, i) =>
+    b.classList.toggle("on", i === CMD_SEL));
+  const on = document.querySelector("#cmdList .cmd-item.on");
+  if (on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
+}
+function cmdExec(i) {
+  const c = CMD_FILTERED[i];
+  if (!c) return;
+  closeCommand();
+  if (c.view) { goto(c.view); return; }
+  const fn = window[c.act];
+  if (typeof fn === "function") fn.call(document.body, ...(c.args || []));
+}
+function cmdRun(i) { cmdExec(+i); }
+function cmdQuery(v) { cmdPaint(v); }
+function openCommand() {
+  $("cmdOverlay").classList.add("show");
+  $("cmdInput").value = "";
+  cmdPaint("");
+  syncBodyLock();
+  // 下一任务再聚焦：面板刚 show 时部分 Android WebView 还量不到输入框。
+  setTimeout(() => $("cmdInput").focus(), 0);
+}
+function closeCommand() {
+  $("cmdOverlay").classList.remove("show");
+  syncBodyLock();
+}
+document.addEventListener("keydown", e => {
+  const k = (e.key || "").toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && (k === "k" || k === "p")) {
+    e.preventDefault();
+    $("cmdOverlay").classList.contains("show") ? closeCommand() : openCommand();
+    return;
+  }
+  if (!$("cmdOverlay").classList.contains("show")) return;
+  if (e.key === "Escape") { e.preventDefault(); closeCommand(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); cmdMove(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); cmdMove(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); cmdExec(CMD_SEL); }
+});
+
+/* ================= 命令工作台 =================
+   布局存服务端（跨设备一致），localStorage 只作只读账号 / 接口失败时的本机
+   降级。卡片可折叠、置顶、排序；拖拽有上移下移按钮作为键盘与触摸的等价
+   替代路径——不能只有一种操作方式。 */
+const WB_KEYS = ["todo", "kpis", "trend", "cores", "users", "rank", "quick"];
+const WB_SETTING = "wb_layout";
+let WB = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
+let WB_READY = false, WB_RO = null, WB_DRAG = "";
+
+function wbNormalize(raw) {
+  const base = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
+  try {
+    const o = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
+    const order = [];
+    (Array.isArray(o.order) ? o.order : []).forEach(k => {
+      if (WB_KEYS.includes(k) && !order.includes(k)) order.push(k);
+    });
+    // 新增卡片在旧布局里不存在时补到末尾，不能让它凭空消失。
+    WB_KEYS.forEach(k => { if (!order.includes(k)) order.push(k); });
+    base.order = order;
+    ["collapsed", "pinned"].forEach(f => {
+      base[f] = (Array.isArray(o[f]) ? o[f] : []).filter(k => WB_KEYS.includes(k));
+    });
+  } catch (_) { /* 脏值一律回落默认布局 */ }
+  return base;
+}
+function wbOrder() {
+  const p = WB.pinned.filter(k => WB.order.includes(k));
+  return p.concat(WB.order.filter(k => !p.includes(k)));
+}
+/* 卡片头只建一次。之后只改按钮状态与文字，不重建 DOM——否则键盘用户按一次
+   「上移」焦点就掉了，等于没有键盘可访问性。 */
+function wbInitHeads() {
+  document.querySelectorAll("#workbench .wb-card").forEach(card => {
+    const k = card.dataset.wb;
+    const head = card.querySelector(".wb-head");
+    if (!head) return;
+    const tools = [
+      ["wbToggle", "▾", "折叠或展开"],
+      ["wbPin", "★", "置顶"],
+      ["wbUp", "↑", "上移"],
+      ["wbDown", "↓", "下移"]
+    ];
+    head.innerHTML = `<h3>${escHtml(card.dataset.title)}<span class="hint">${escHtml(card.dataset.hint || "")}</span></h3>
+      <div class="wb-tools">${tools.map(([act, label, tip]) =>
+        `<button class="wb-tool" data-act="${act}" data-args='${escJson([k])}'
+           aria-label="${tip}" title="${tip}">${label}</button>`).join("")}
+        <button class="wb-tool" data-drag="1" data-key="${k}" draggable="true"
+           aria-label="拖动排序" title="拖动排序">⠿</button></div>`;
+  });
+}
+function wbPaintHeads() {
+  document.querySelectorAll("#workbench .wb-card").forEach(card => {
+    const k = card.dataset.wb;
+    const folded = WB.collapsed.includes(k), pinned = WB.pinned.includes(k);
+    card.classList.toggle("collapsed", folded);
+    card.classList.toggle("pinned", pinned);
+    const t = card.querySelector('[data-act="wbToggle"]');
+    if (t) { t.setAttribute("aria-pressed", folded ? "true" : "false"); t.firstChild.nodeValue = folded ? "▸" : "▾"; }
+    const p = card.querySelector('[data-act="wbPin"]');
+    if (p) { p.setAttribute("aria-pressed", pinned ? "true" : "false"); }
+  });
+}
+function wbApply() {
+  const host = $("workbench");
+  if (!host) return;
+  wbOrder().forEach(k => {
+    const c = host.querySelector(`[data-wb="${k}"]`);
+    if (c) host.appendChild(c);
+  });
+  wbPaintHeads();
+  wbMasonry();
+}
+function wbSave() {
+  const val = JSON.stringify(WB);
+  try { localStorage.setItem("triune_wb_layout", val); } catch (_) {}
+  // 只读账号 / 演示模式写不进服务端也不该报错：本机布局照样可用。
+  req("/api/settings", {method:"PUT", body:{[WB_SETTING]: val}}).catch(() => {});
+}
+async function wbEnsure() {
+  if (WB_READY) return;
+  WB_READY = true;
+  wbInitHeads();
+  wbInitDrag();
+  wbInitMasonry();
+  let raw = "";
+  try { raw = (await req("/api/settings"))[WB_SETTING] || ""; } catch (_) {}
+  if (!raw) { try { raw = localStorage.getItem("triune_wb_layout") || ""; } catch (_) {} }
+  WB = wbNormalize(raw);
+  wbApply();
+}
+function wbToggle(k) {
+  const i = WB.collapsed.indexOf(k);
+  if (i >= 0) WB.collapsed.splice(i, 1); else WB.collapsed.push(k);
+  wbPaintHeads(); wbMasonry(); wbSave();
+}
+function wbPin(k) {
+  const i = WB.pinned.indexOf(k);
+  if (i >= 0) WB.pinned.splice(i, 1); else WB.pinned.push(k);
+  wbApply(); wbSave();
+}
+function wbStep(k, d) {
+  // 置顶段固定，只在非置顶卡片之间排序；否则「置顶」会被悄悄绕过。
+  if (WB.pinned.includes(k)) { toast("取消置顶后才能调整顺序", "info"); return; }
+  const i = WB.order.indexOf(k), j = i + d;
+  if (i < 0 || j < 0 || j >= WB.order.length || WB.pinned.includes(WB.order[j])) return;
+  [WB.order[i], WB.order[j]] = [WB.order[j], WB.order[i]];
+  wbApply(); wbSave();
+}
+function wbUp(k) { wbStep(k, -1); }
+function wbDown(k) { wbStep(k, 1); }
+function wbMoveBefore(from, to) {
+  if (from === to || WB.pinned.includes(from) || WB.pinned.includes(to)) return;
+  const arr = WB.order.filter(k => k !== from);
+  const i = arr.indexOf(to);
+  arr.splice(i < 0 ? arr.length : i, 0, from);
+  WB.order = arr;
+}
+function wbInitDrag() {
+  const host = $("workbench");
+  if (!host) return;
+  host.addEventListener("dragstart", e => {
+    const h = e.target.closest("[data-drag]");
+    if (!h) return;
+    WB_DRAG = h.dataset.key;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", WB_DRAG);
+    }
+    const c = host.querySelector(`[data-wb="${WB_DRAG}"]`);
+    if (c) c.classList.add("dragging");
+  });
+  host.addEventListener("dragend", () => {
+    WB_DRAG = "";
+    host.querySelectorAll(".dragging").forEach(c => c.classList.remove("dragging"));
+  });
+  host.addEventListener("dragover", e => {
+    if (!WB_DRAG || !e.target.closest(".wb-card")) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  });
+  host.addEventListener("drop", e => {
+    const c = e.target.closest(".wb-card");
+    if (!c || !WB_DRAG) return;
+    e.preventDefault();
+    wbMoveBefore(WB_DRAG, c.dataset.wb);
+    WB_DRAG = "";
+    host.querySelectorAll(".dragging").forEach(x => x.classList.remove("dragging"));
+    wbApply(); wbSave();
+  });
+}
+/* 瀑布流：用 grid-row span 做不等高错落，DOM 顺序 = 视觉顺序 = Tab 顺序。
+   不用 column-count（顺序会被按列拆开），也不用 dense（会打乱顺序）。
+   手机上 CSS 直接退回单列，这里把 inline span 清干净。 */
+function wbMasonry() {
+  const host = $("workbench");
+  if (!host) return;
+  const cards = host.querySelectorAll(".wb-card");
+  if (window.matchMedia("(max-width:960px)").matches) {
+    cards.forEach(c => { c.style.gridRowEnd = ""; });
+    return;
+  }
+  const cs = getComputedStyle(host);
+  const row = parseFloat(cs.gridAutoRows) || 8;
+  const gap = parseFloat(cs.rowGap) || 18;
+  cards.forEach(c => {
+    c.style.gridRowEnd = "";                 // 先回到 CSS 的占位 span，再量真实高度
+    const h = c.getBoundingClientRect().height;
+    if (h > 0) c.style.gridRowEnd = "span " + Math.max(2, Math.ceil((h + gap) / (row + gap)));
+  });
+}
+function wbInitMasonry() {
+  const host = $("workbench");
+  if (!host) return;
+  if (window.ResizeObserver) {
+    WB_RO = new ResizeObserver(() => wbMasonry());
+    host.querySelectorAll(".wb-card").forEach(c => WB_RO.observe(c));
+  }
+  addEventListener("resize", () => setTimeout(wbMasonry, 120));
+}
+
+/* 「今天要处理」是注册表：每个 provider 独立请求、独立失败，一个接口挂了
+   不影响其它待办。以后要给主机优化加时钟 / 文件描述符 / conntrack 体检，
+   在这里挂一个 provider 就行，工作台骨架不用改。 */
+const TODO_PROVIDERS = [
+  {key:"inbounds", async run() {
+    const j = await req("/api/inbounds");
+    const n = Array.isArray(j) ? j.length : (j.items || []).length;
+    if (!n) return {level:"warn", title:"还没有入站", text:"先新增一个入站，才能生成客户端配置", view:"inbounds"};
+    return null;
+  }},
+  {key:"backups", async run() {
+    const j = await req("/api/backups/inventory");
+    const s = j.summary || {}, p = j.policy || {};
+    const total = s.total_bytes || 0;
+    const limitMB = +(p.max_mb || 0);
+    if (total > 200 * 1048576 || (limitMB > 0 && total > limitMB * 1048576)) {
+      return {level:"warn", title:"备份占用 " + fmtBytes(total),
+        text:"旧归档里含内核二进制，建议到备份管理设上限并清理", view:"backups"};
+    }
+    return null;
+  }},
+  {key:"hostopt", async run() {
+    const j = await req("/api/host-opt");
+    if (j.apply_enabled && !j.applied) {
+      return {level:"info", title:"主机网络可以优化",
+        text:"检测到 BBR 可用但当前未启用，面板默认不会改系统设置", view:"hostopt"};
+    }
+    return null;
+  }}
+];
+async function loadTodos() {
+  const host = $("wbTodo");
+  if (!host) return;
+  const marks = {warn:"!", err:"✕", info:"i", ok:"✓"};
+  const out = await Promise.all(TODO_PROVIDERS.map(async p => {
+    try { return await p.run(); } catch (_) { return null; }
+  }));
+  let items = out.filter(Boolean);
+  if (!items.length) items = [{level:"ok", title:"一切正常",
+    text:"入站、备份占用与主机优化都没有待处理项", view:"overview"}];
+  host.innerHTML = items.map(it =>
+    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}'>
+      <span class="todo-ic ${escHtml(it.level || "info")}">${marks[it.level] || "i"}</span>
+      <span class="todo-tx"><b>${escHtml(it.title)}</b><span>${escHtml(it.text || "")}</span></span>
+      <span class="todo-go">→</span></button>`).join("");
+  wbMasonry();
+}
+function todoGo(view) { goto(view); }
+
 /* ================= Toast / Modal / Confirm ================= */
 function toast(msg, type = "ok") {
   const icons = {ok:"✓", err:"✕", warn:"!", info:"i"};
@@ -345,7 +705,12 @@ function closeModal(id){ $(id).classList.remove("show"); syncBodyLock(); }
    背后的页面跟着滑，看着像整页在抖。按 DOM 现状重算而不做计数——
    计数一旦漏减就会把页面永久锁死，那是比不锁严重得多的故障。 */
 function syncBodyLock(){
-  document.body.style.overflow = document.querySelector(".overlay.show") ? "hidden" : "";
+  // 按 DOM 现状重算，绝不计数：计数漏减会把页面永久锁死。
+  const modal = document.querySelector(".overlay.show") ? "hidden" : "";
+  // 命令面板与「更多」抽屉不是 .overlay（定位方式不同），但同样是铺满视口的
+  // 浮层，漏掉任一个窄屏上手指一拖背后的文档就跟着滚。
+  const layer = document.querySelector(".cmd-overlay.show,.more-sheet.show") ? "hidden" : "";
+  document.body.style.overflow = modal || layer;
 }
 function ask(title, text) {
   return new Promise(resolve => {
@@ -387,20 +752,31 @@ function schemeVars(mode, scheme) {
   const out = {
     bg: g("--bg") || "#ffffff", side: g("--side") || "#ffffff", card: g("--card") || "#ffffff",
     text: g("--text") || "#111111", line: g("--line") || "#dddddd",
-    acc: g("--acc") || "#3b82f6", acc2: g("--acc2") || "#8b5cf6"
+    acc: g("--acc") || "#3b82f6", acc2: g("--acc2") || "#8b5cf6",
+    muted: g("--muted") || "#888888", ok: g("--ok") || "#16a34a",
+    err: g("--err") || "#dc2626", chart: g("--chart-down") || "#22c55e",
+    code: g("--code-bg") || "#f1f4f9"
   };
   probe.remove();
   return out;
 }
 /* 预览卡上每个色块对应哪个 CSS 变量、悬停时显示什么名字。
+   数量比旧版多一倍：颜色方案现在同时决定语义色、图表色与代码块底色，
+   缩略图必须把这些层都画出来，用户才能一眼看出「这是一整套配色」。
    renderSchemes() 第一次建 DOM，之后只改已有节点的 style/title/class。 */
 const SCHEME_DOTS = [
-  ["bg", "背景"], ["side", "侧栏"], ["card", "卡片"],
-  ["text", "文字"], ["acc", "主色"], ["acc2", "辅色"]
+  ["bg", "背景"], ["side", "侧栏"], ["card", "卡片"], ["text", "文字"],
+  ["acc", "主色"], ["acc2", "辅色"], ["ok", "成功"], ["chart", "图表"]
 ];
+/* 大预览卡是一张缩略页面：侧栏、顶栏、正文卡片、按钮、状态点、图表条。
+   节点只在这里创建一次，paintScheme() 之后只改 style，不重建 DOM。 */
 function schemeMarkup([id, name]) {
   return `<button class="scheme" data-s="${id}">
-      <span class="prev"><i class="p-side"></i><i class="p-card"></i><i class="p-ln"></i><i class="p-ln2"></i><i class="p-btn"></i></span>
+      <span class="prev">
+        <i class="p-side"></i><i class="p-nav1"></i><i class="p-nav2"></i><i class="p-nav3"></i>
+        <i class="p-top"></i><i class="p-card"></i><i class="p-ln"></i><i class="p-ln2"></i>
+        <i class="p-btn"></i><i class="p-ok"></i><i class="p-chart"></i>
+      </span>
       <span class="nm"><b>${name}</b><span class="chk">✓</span></span>
       <span class="dots">${SCHEME_DOTS.map(() => "<i></i>").join("")}</span>
       <span class="hex">—</span>
@@ -422,8 +798,18 @@ function paintScheme(btn, id, name) {
   card.style.background = c.card;
   card.style.borderColor = c.line;
   btn.querySelector(".p-ln").style.background = c.text;
-  btn.querySelector(".p-ln2").style.background = c.text;
+  btn.querySelector(".p-ln2").style.background = c.muted;
+  [".p-nav1", ".p-nav2", ".p-nav3"].forEach((sel, i) => {
+    const n = btn.querySelector(sel);
+    n.style.background = i === 0 ? c.acc : c.muted;
+    n.style.opacity = i === 0 ? "1" : ".42";
+  });
+  btn.querySelector(".p-top").style.background = c.card;
+  btn.querySelector(".p-top").style.borderBottomColor = c.line;
   btn.querySelector(".p-btn").style.background = `linear-gradient(135deg,${c.acc},${c.acc2})`;
+  btn.querySelector(".p-ok").style.background = c.ok;
+  btn.querySelector(".p-chart").style.background =
+    `linear-gradient(90deg,${c.acc} 45%,${c.chart} 45%)`;
   const dots = btn.querySelectorAll(".dots i");
   SCHEME_DOTS.forEach(([k, label], i) => {
     dots[i].style.background = c[k];
@@ -474,6 +860,34 @@ function applyTheme() {
   }
   setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
 }
+/* 密度与圆角是独立于明暗、配色的两根轴：外观偏好只存本机，和服务端配置无关。
+   改它们同样要压掉一帧过渡（圆角/内距都在 transition 里），所以复用
+   markThemeSwitch()。boot.js 会在首帧就恢复属性，避免刷新后先画默认档。 */
+const DENSITIES = ["compact", "comfortable"];
+const RADII = ["sharp", "normal", "soft"];
+let themeDensity = "comfortable", themeRadius = "normal";
+function paintAxes() {
+  markThemeSwitch();
+  const r = document.documentElement;
+  r.dataset.density = themeDensity;
+  if (themeRadius === "normal") r.removeAttribute("data-radius");
+  else r.dataset.radius = themeRadius;
+  localStorage.setItem("triune_density", themeDensity);
+  localStorage.setItem("triune_radius", themeRadius);
+  document.querySelectorAll("#densitySeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === themeDensity));
+  document.querySelectorAll("#radiusSeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === themeRadius));
+  setTimeout(() => { if (typeof redrawCharts === "function") redrawCharts(); }, 60);
+}
+function setDensity(v) {
+  if (!DENSITIES.includes(v) || v === themeDensity) return;
+  themeDensity = v; paintAxes();
+}
+function setRadius(v) {
+  if (!RADII.includes(v) || v === themeRadius) return;
+  themeRadius = v; paintAxes();
+}
 function setMode(m) { if (!MODE_NAME[m] || m === themeMode) return; themeMode = m; applyTheme(); renderSchemes(); }
 function setScheme(s) { if (s === themeScheme) return; themeScheme = s; applyTheme(); renderSchemes(); }
 $("schemes").addEventListener("click", e => {
@@ -494,8 +908,23 @@ document.addEventListener("click", e => {
   if (!MODE_NAME[mode]) mode = "light";
   if (!SCHEMES.some(s => s[0] === scheme)) scheme = "azure";
   themeMode = mode; themeScheme = scheme;
+  // 首帧属性已由 boot.js 写过，这里只把 JS 状态与分段按钮对齐，不再挂
+  // data-theme-switch（刷新时 CSS 本来就没有过渡可压）。
+  let d = localStorage.getItem("triune_density");
+  let rad = localStorage.getItem("triune_radius");
+  if (!DENSITIES.includes(d)) d = "comfortable";
+  if (!RADII.includes(rad)) rad = "normal";
+  themeDensity = d; themeRadius = rad;
+  const r0 = document.documentElement;
+  r0.dataset.density = d;
+  if (rad === "normal") r0.removeAttribute("data-radius");
+  else r0.dataset.radius = rad;
   applyTheme();
   renderSchemes();
+  document.querySelectorAll("#densitySeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === d));
+  document.querySelectorAll("#radiusSeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === rad));
 })();
 
 /* ================= API（含演示 mock） ================= */

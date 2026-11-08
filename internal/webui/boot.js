@@ -31,8 +31,8 @@
  * 只认白名单里的值：localStorage 是同源可控数据，但手改/旧版本残留一个
  * 不存在的页面名时，CSS 的「先藏概览」会没有对应显示规则 → 整页空白。
  * 非法值干脆不设属性，退回 index.html 默认的概览页。 */
-var BOOT_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic",
-  "import", "gen", "configs", "apply", "settings", "audit", "backups", "hostopt"];
+var BOOT_VIEWS = ["overview", "traffic", "audit", "inbounds", "outbounds", "clients",
+  "import", "gen", "configs", "apply", "settings", "backups", "hostopt"];
 
 /* 主题白名单与旧版迁移表必须与 app.js 的 MODE_NAME / SCHEMES / LEGACY_THEME
  * 一致，由 TestFirstPaintTheme 逐项比对。不认的值回落 light/azure：写进
@@ -54,8 +54,15 @@ var BOOT_LEGACY_THEME = {
  * app.js 的 setSect() 已经在同一个 JS 任务里同步算完，浏览器不会绘制中间态。 */
 var BOOT_SECTS = ["common", "security", "maintain"];
 
+/* 密度与圆角也要在首帧恢复：它们改的是卡片内距、字号与圆角，等 app.js
+   跑起来才改会让整页在刷新后「先松后紧」跳一下。白名单与 app.js 的
+   DENSITIES / RADII 一致，非法值回落默认档。 */
+var BOOT_DENSITIES = ["compact", "comfortable"];
+var BOOT_RADII = ["sharp", "normal", "soft"];
+
 (function () {
   var boot = "guest", view = "", mode = "light", scheme = "azure", sect = "common";
+  var density = "comfortable", radius = "normal";
   try {
     if (window.localStorage) {
       if (localStorage.getItem("triune_token")) boot = "app";
@@ -73,6 +80,10 @@ var BOOT_SECTS = ["common", "security", "maintain"];
       }
       if (BOOT_MODES.indexOf(m) >= 0) mode = m;
       if (BOOT_SCHEMES.indexOf(s) >= 0) scheme = s;
+      var d = localStorage.getItem("triune_density");
+      var rad = localStorage.getItem("triune_radius");
+      if (BOOT_DENSITIES.indexOf(d) >= 0) density = d;
+      if (BOOT_RADII.indexOf(rad) >= 0) radius = rad;
     }
   } catch (e) { /* 存储不可用：保持登录页 / 概览页 / 默认主题 */ }
 
@@ -81,6 +92,9 @@ var BOOT_SECTS = ["common", "security", "maintain"];
   // 主题与登录态无关：登录页也用同一套配色，深色偏好下不该先亮一帧。
   root.setAttribute("data-mode", mode);
   root.setAttribute("data-scheme", scheme);
+  root.setAttribute("data-density", density);
+  if (radius === "normal") root.removeAttribute("data-radius");
+  else root.setAttribute("data-radius", radius);
   // 概览是 HTML 默认页，不需要标记；只有停在别处时才需要首帧纠偏，
   // 这样「属性存在但值没匹配上」的风险面只剩这一种情况，且已被白名单挡住。
   if (boot === "app" && view !== "overview" && BOOT_VIEWS.indexOf(view) >= 0) {
