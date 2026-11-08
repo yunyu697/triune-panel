@@ -84,14 +84,20 @@ func linuxReport(dataDir string) Report {
 			OK:     r.IsRoot,
 			Detail: rootDetail(r.IsRoot),
 		},
+		// 以下四项是「比没开 BBR 更容易让节点不通」的故障面，全部只读。
+		checkClock(),
+		checkFDLimit(),
+		checkConntrack(),
+		checkSysctlConflicts(),
 	}
 
 	// Suggested 始终给出：即使 ApplyEnabled=true，用户也该知道手动怎么做、怎么验证。
+	d := DefaultTune()
 	r.Suggested = []string{
-		"写入 BBR 配置：printf 'net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n' > /etc/sysctl.d/99-bbr.conf",
-		"使配置生效：sysctl --system",
-		"验证结果：sysctl net.ipv4.tcp_congestion_control",
-		"也可直接在面板点『应用』，面板会先备份原值再写配置",
+		"写入配置：cat > " + cfgPath + " <<'EOF'\n" + configText(d) + "EOF",
+		"使配置生效：sysctl -p " + cfgPath,
+		"逐项验证：sysctl " + strings.Join(managedKeys(), " "),
+		"也可直接在面板点『应用』：面板会先备份每个键的原值，写完回读复检，不符自动回滚",
 	}
 
 	// ApplyEnabled 严格只由「Linux + root + 非容器 + BBR 可用」四项决定：

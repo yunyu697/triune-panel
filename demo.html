@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.5.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.6.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -136,7 +136,8 @@ var BOOT_RADII = ["sharp", "normal", "soft"];
   --r-xl:20px; --r-lg:14px; --r:10px; --r-sm:7px;
   --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-  --side-w:240px;
+  /* 侧栏宽度按方案 B 设计稿：72px 窄栏，只放短标签，正文全部让给内容区。 */
+  --side-w:216px;
   --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
 /* THEME:BEGIN 由 deploy/build-theme.py 生成，勿手改 */
@@ -300,7 +301,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
   .login-wrap{min-height:var(--app-h,100vh)}
 }
 .side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;min-height:0;
+  display:flex;flex-direction:column;padding:14px 10px 10px;position:relative;z-index:30;min-height:0;
   transition:background var(--t),border-color var(--t)}
 /* 导航区自己滚。窗口高度不够时（笔记本半屏、横屏手机、浏览器控制台占了下半屏）
    11 个入口加起来比视口高，而 .shell 是 overflow:hidden——溢出的入口被裁掉又滑不到，
@@ -310,27 +311,40 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 #nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .side::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
-.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
+/* 品牌区：标识 + 名称 + 版本。 */
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px;position:relative}
 .logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
-.logo b{font-size:15px;letter-spacing:.3px;font-weight:650;white-space:nowrap;flex:0 0 auto}
-.logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;min-width:0}
-.nav-sec{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);opacity:.75;
-  padding:12px 12px 6px;font-weight:600}
-.nav-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
-  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:14px;text-align:left;margin-bottom:2px;font-family:var(--font);
-  position:relative;transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.logo b{display:block;font-size:15px;letter-spacing:.2px;font-weight:650;white-space:nowrap}
+.logo .logo-v{display:block;margin-left:auto;font-size:10.5px;color:var(--muted);font-family:var(--mono);white-space:nowrap}
+/* 分组标题：原名，小号、加宽字距，靠上留白分节——不画线、不缩字。
+   导航文字一律用 app.js 里 VIEWS 的原名，禁止简写。 */
+.nav-sec{padding:16px 10px 6px;font-size:11px;letter-spacing:.08em;color:var(--muted);
+  opacity:.8;font-weight:600;white-space:nowrap}
+/* 导航项：图标 18 + 原名 14px，行高 38，左对齐让图标连成一列。
+   宽度不够就加宽侧栏，不靠缩字号/缩间距来塞。 */
+.nav-item{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;border:none;background:none;
+  color:var(--muted);padding:9px 10px;border-radius:var(--r);cursor:pointer;font-size:14px;line-height:1.35;
+  font-family:var(--font);position:relative;text-align:left;margin-bottom:2px;
+  transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.nav-item svg{display:block;flex:0 0 auto;opacity:.9}
+.nav-item span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nav-item:hover{background:var(--hover);color:var(--text)}
+.nav-item:hover svg{opacity:1}
 .nav-item.on{background:var(--acc-soft);color:var(--acc-text);font-weight:600}
-.nav-item.on::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:18px;
+.nav-item.on svg{opacity:1}
+.nav-item.on::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;
   border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--acc),var(--acc2))}
-.nav-item .badge{margin-left:auto}
+.nav-item .badge{margin-left:auto;flex:none;font-size:10px;padding:1px 6px}
 .side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;position:relative}
-/* 当前登录账号与角色（多管理员之后必须一眼看出「我是谁、我能干什么」） */
-.whoami{display:flex;align-items:center;gap:7px;padding:0 10px 8px;font-size:12px;min-width:0}
-.whoami-user{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px}
-.whoami-role{flex:none;font-size:10.5px;padding:1px 7px;border-radius:99px;font-weight:600;
+/* 当前登录账号与角色（多管理员之后必须一眼看出「我是谁、我能干什么」）。 */
+.whoami{display:flex;align-items:center;gap:8px;padding:0 10px 8px;font-size:12.5px;min-width:0}
+.whoami-user{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:96px}
+/* 主题与退出并排堆在底部。position:relative 在这里，主题弹窗才能按
+   「侧栏右侧」定位——挂在单个按钮上，弹窗会从侧栏里面钻出来。 */
+.side-tools{display:flex;flex-direction:column;gap:2px;position:relative}
+.side-tools>*{flex:0 0 auto}
+.whoami-role{display:inline-block;flex:none;font-size:11px;padding:1px 8px;border-radius:99px;font-weight:600;
   background:var(--acc-soft);color:var(--acc-text);border:1px solid transparent}
 .whoami-role.owner{background:var(--warn-soft);color:var(--warn)}
 .whoami-role.viewer{background:var(--hover);color:var(--muted)}
@@ -338,17 +352,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 body[data-role="viewer"] .need-admin,body[data-role="viewer"] .need-owner{display:none!important}
 body[data-role="admin"] .need-owner{display:none!important}
 .main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:14px 28px;
-  background:var(--glass);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
-  border-bottom:1px solid var(--line)}
-/* 不支持 backdrop-filter 的内核里 --glass 仍是半透明的：内容从顶栏下面滚过时
-   直接透出来，看起来像闪烁/重影。给一层不透明底色兜底，顶栏才真的挡住内容。 */
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .topbar{background:var(--bg)}
-}
-.topbar h2{font-size:17px;font-weight:650;letter-spacing:.2px}
-.topbar .sub{font-size:12px;color:var(--muted);margin-top:1px}
-.topbar .spacer{flex:1}
+/* 顶栏已并入 .cmdbar（方案 B），这里只留状态胶囊本身的样式。 */
 .top-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;font-size:12px;
   background:var(--hover);color:var(--muted);border:1px solid var(--line);transition:all var(--t-fast)}
 .top-pill b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
@@ -471,16 +475,17 @@ body[data-role="admin"] .need-owner{display:none!important}
    桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，
           所以导航滚到哪儿它都在。
    手机：导航条横排，它占最左侧一格（见下面的 @media，order:-1）。 */
-.side-apply{display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  width:100%;height:38px;flex:0 0 auto;margin:12px 0 6px;
+.side-apply{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  width:100%;height:40px;flex:0 0 auto;margin:12px 0 10px;
   border:none;border-radius:var(--r);cursor:pointer;
   background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));color:var(--on-acc);
-  font:600 13px/1 var(--font);
+  font:600 13.5px/1 var(--font);
   box-shadow:0 6px 14px -9px rgba(20,40,80,.55);
   transition:box-shadow var(--t-fast),transform var(--t-fast),background var(--t-fast),color var(--t-fast)}
 .side-apply:hover{box-shadow:0 8px 18px -9px rgba(20,40,80,.7)}
 .side-apply:active{transform:translateY(1px)}
-/* 桌面侧栏放得下全称，手机导航条那一格只够两个字 */
+/* 侧栏够宽，用原名「应用配置」，不再缩成两字。 */
+.side-apply .sa-l{display:inline}
 .side-apply .sa-s{display:none}
 /* 手机上导航条横排：品牌图标只剩一个装饰用的盾牌（文字早就藏了），这块位置让给
    「应用」。order:-1 把它挪到最左侧——DOM 里它排在 #nav 之后，因为桌面上要落在
@@ -751,10 +756,13 @@ td.num{font-variant-numeric:tabular-nums}
 .progress i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width var(--t-slow)}
 
 /* ============ 主题选择 ============ */
-.theme-btn{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
-  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
+.theme-btn{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;border:none;background:none;color:var(--muted);
+  padding:9px 10px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
+/* 侧栏 216px，文字照常显示；窄屏底栏才收成图标（见文末 @media）。 */
+.theme-btn span{display:block}
 .theme-btn:hover{background:var(--hover);color:var(--text)}
-.tpop{position:absolute;bottom:54px;left:10px;width:302px;max-height:calc(100vh - 130px);overflow:auto;
+/* 主题弹窗从窄栏右侧弹出，不能按左对齐的 302px 算——那样整块会压在侧栏上。 */
+.tpop{position:absolute;bottom:0;left:calc(100% + 6px);width:302px;max-height:calc(100vh - 40px);overflow:auto;
   background:var(--card);border:1px solid var(--line);
   border-radius:var(--r);box-shadow:var(--shadow-lg);padding:14px;z-index:50;
   opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
@@ -918,8 +926,10 @@ canvas{display:block;width:100%}
 .card{box-shadow:var(--elev-1)}
 .kpi:hover,.quick:hover,.scn-card:hover{box-shadow:var(--elev-2)}
 
-/* ---- 命令条：所有页面常驻，搜索 + 三个高频动作 ---- */
-.cmdbar{position:sticky;top:var(--topbar-h,74px);z-index:15;display:flex;align-items:center;gap:9px;
+/* ---- 命令条：所有页面常驻，也是页面上唯一的顶栏 ----
+   方案 B 之后它同时承担原 .topbar 的职责（页名 + 状态胶囊），
+   所以吸顶位置是 0；--topbar-h 由 app.js 量它自己的高度算出来。 */
+.cmdbar{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:9px;
   flex-wrap:wrap;max-width:1240px;width:100%;margin:0 auto;
   padding:10px 28px;background:var(--bg);border-bottom:1px solid var(--line)}
 .cmdbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:14px;pointer-events:none;
@@ -933,7 +943,12 @@ canvas{display:block;width:100%}
   border:1px solid var(--line);border-radius:4px;padding:3px 5px;background:var(--hover);white-space:nowrap}
 .cmd-quick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .cmd-quick .btn{padding:6px 11px;font-size:12.5px}
-.cmdbar .cmd-hint{font-size:11.5px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* 当前页名：小号、不换行，给命令条一个定位锚点；副标题退到 title 里 */
+.cmd-page{display:inline-flex;align-items:center;min-width:0;flex:0 1 auto}
+.cmd-page h2{font-size:13px;font-weight:650;letter-spacing:.1px;margin:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:150px}
+/* 右侧状态：内核数 / 实时速率 / 版本。挤不进就整体换行，不压搜索框 */
+.cmd-status{display:inline-flex;align-items:center;gap:10px;margin-left:auto;flex:none}
 
 /* ---- 命令面板 ---- */
 .cmd-overlay{position:fixed;top:0;right:0;bottom:0;left:0;z-index:150;display:none;
@@ -995,21 +1010,23 @@ canvas{display:block;width:100%}
 .wb-body>.card,.wb-body>.grid-2,.wb-body>.kpis{margin-bottom:0}
 .wb-body>.grid-2{gap:var(--dens-gap)}
 
-/* 今天要处理：可点的待办，注册表式来源，任一接口失败不影响其它条目 */
-.todo-list{display:flex;flex-direction:column;gap:8px}
-.todo-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--r);
-  background:var(--hover);border:1px solid var(--line);min-width:0;width:100%;text-align:left;
+/* 今天要处理：按设计稿做成一行横向胶囊（证书 14 天到期 · 备份 2.1 GB · BBR 可开启）。
+   原来是一列带描述的双行条目，四五项就把首屏占满；胶囊只留标题，
+   详情进 title，鼠标悬停或读屏都能拿到。 */
+.todo-list{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px}
+.todo-row{display:inline-flex;align-items:center;gap:7px;padding:6px 11px 6px 8px;border-radius:99px;
+  background:var(--hover);border:1px solid var(--line);min-width:0;width:auto;max-width:100%;text-align:left;
   font:inherit;cursor:pointer;transition:border-color var(--t-fast),transform var(--t-fast)}
-.todo-row:hover{border-color:var(--acc-soft);transform:translateX(2px)}
-.todo-ic{width:24px;height:24px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;background:var(--acc-soft);color:var(--acc-text)}
+.todo-row:hover{border-color:var(--acc-soft);transform:translateY(-1px)}
+.todo-ic{width:17px;height:17px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;background:var(--acc-soft);color:var(--acc-text)}
 .todo-ic.warn{background:var(--warn-soft);color:var(--warn)}
 .todo-ic.err{background:var(--err-soft);color:var(--err)}
 .todo-ic.ok{background:var(--ok-soft);color:var(--ok)}
-.todo-tx{min-width:0;flex:1}
-.todo-tx b{display:block;font-size:13px;font-weight:600;word-break:break-word}
-.todo-tx span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-word}
-.todo-go{flex:none;color:var(--muted);font-size:12px}
+.todo-tx{min-width:0;flex:0 1 auto}
+.todo-tx b{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.todo-tx span{display:none}
+.todo-go{display:none}
 
 /* ---- 主题弹窗：大预览卡 + 密度圆角两轴 ---- */
 .scheme .prev{height:64px}
@@ -1056,7 +1073,9 @@ canvas{display:block;width:100%}
   .cmdbar::after{display:none}
   .cmd-trigger{min-width:0;flex:1 1 130px}
   .cmd-trigger .kbd{display:none}
-  .cmdbar .cmd-hint{display:none}
+  /* 窄屏只留页名与搜索，状态胶囊收进「更多」不用挤这一行 */
+  .cmd-page h2{max-width:88px}
+  .cmd-status{display:none}
   .cmd-quick .btn{padding:6px 9px;font-size:0;gap:0}
   .cmd-quick .btn svg{width:16px;height:16px}
   .cmd-overlay{padding:calc(12px + env(safe-area-inset-top)) 10px 10px}
@@ -1075,7 +1094,10 @@ canvas{display:block;width:100%}
   #nav{display:none}
   .side-apply{display:none}
   .side-foot{gap:0}
-  .side-foot .theme-btn{padding:6px}
+  /* 底栏横排，两个按钮并排、只留图标 */
+  .side-tools{flex-direction:row;gap:4px}
+  .side-foot .theme-btn{width:auto;padding:7px}
+  .side-foot .theme-btn span{display:none}
 }
 @media (max-width:360px){
   .more-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1150,8 +1172,9 @@ canvas{display:block;width:100%}
         <span class="whoami-user" id="whoami_user">—</span>
         <span class="whoami-role" id="whoami_role"></span>
       </div>
-      <div style="position:relative">
-        <button class="theme-btn" id="themeBtn" data-act="toggleThemePop">
+      <div class="side-tools">
+      <div>
+        <button class="theme-btn" id="themeBtn" data-act="toggleThemePop" title="主题外观" aria-label="主题外观">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1 0 1.5-.7 1.2-1.5-.5-1.4.2-2.5 1.8-2.5h1.5c1.4 0 2.5-1.1 2.5-2.5A9 9 0 0 0 12 3z"/></svg>
           <span>主题外观</span>
         </button>
@@ -1180,24 +1203,21 @@ canvas{display:block;width:100%}
           </div>
         </div>
       </div>
-      <button class="theme-btn" data-act="logout">
+      <button class="theme-btn" data-act="logout" title="退出登录" aria-label="退出登录">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
         <span>退出登录</span>
       </button>
+      </div>
     </div>
   </aside>
 
   <main class="main">
-    <div class="topbar">
-      <div><h2 id="pageTitle">概览</h2><div class="sub" id="pageSub">一屏掌握入站、用户、流量与内核状态</div></div>
-      <span class="spacer"></span>
-      <span class="top-pill" id="pillCore"><i class="pulse"></i> 内核 <b>0/0</b></span>
-      <span class="top-pill" id="pillLive">↓ —</span>
-      <span class="muted mono" id="verinfo"></span>
-    </div>
-    <!-- 命令中枢：所有页面常驻。搜索索引视图与高频动作，右侧三个按钮不必先找页面。
-         手机上压成「一行搜索 + 三个图标」，窄屏也不挤掉内容。 -->
+    <!-- 顶栏按方案 B 设计稿并进命令条：原来标题、副标题、状态胶囊各占一行，
+         首屏有一小半被这些不动的信息吃掉。现在一行里放「当前页名 + 搜索 +
+         三个动作 + 右侧状态」，页面名降为小号说明，副标题进 title。
+         元素 id 全部保留（goto() 仍会写 pageTitle/pageSub）。 -->
     <div class="cmdbar" id="cmdbar">
+      <span class="cmd-page"><h2 id="pageTitle">概览</h2><span class="sub hide" id="pageSub">一屏掌握入站、用户、流量与内核状态</span></span>
       <button class="cmd-trigger" data-act="openCommand" aria-label="搜索页面与操作">
         <span class="ci"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
         <span>搜索页面与操作</span><span class="kbd">Ctrl K</span>
@@ -1210,34 +1230,26 @@ canvas{display:block;width:100%}
         <button class="btn need-admin" data-act="openApply" title="应用配置">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span>应用配置</span></button>
       </span>
-      <span class="cmd-hint muted" id="cmdHint">按 Ctrl K 直达任意页面</span>
+      <span class="cmd-status">
+        <span class="top-pill" id="pillCore"><i class="pulse"></i> 内核 <b>0/0</b></span>
+        <span class="top-pill" id="pillLive">↓ —</span>
+        <span class="muted mono" id="verinfo"></span>
+      </span>
     </div>
     <div class="content">
 
     <!-- 概览：命令工作台。卡片可折叠 / 置顶 / 排序，布局存后端设置；
          瀑布流只在桌面启用，DOM 顺序始终等于视觉与 Tab 顺序。 -->
     <section id="v-overview" class="view active">
-      <div class="hero">
-        <div class="hero-inner">
-          <div class="hero-txt">
-            <h1>Triune Panel · <span class="grad-text">三内核统一控制台</span></h1>
-            <p>mihomo · sing-box · xray 统一纳管。配置渲染 → 内核校验 → 原子替换 → 备份 → 回滚，
-               任一环节失败都不影响现网运行；升级与切换全程可回滚。</p>
-            <p class="muted" style="margin-top:8px">用上方命令条搜索任意页面，或直接新建入站、生成配置、应用配置。下面的卡片可以折叠、置顶与排序，布局会被记住。</p>
-            <p id="last_login_line" class="hide" style="font-size:12.5px;margin-top:6px;opacity:.75"></p>
-          </div>
-        </div>
-      </div>
+      <!-- 方案 B 设计稿：命令条下面直接进工作台，不做占满首屏的 Hero。
+           原来的品牌大卡把第一屏全吃掉，四张卡片要滚动才看得见；
+           现在保留同样信息但不占位。上次登录时间降级成一行脚注。 -->
+      <p id="last_login_line" class="hide" style="font-size:11.5px;margin:0 2px 9px"></p>
 
       <div id="workbench">
         <div class="wb-card" data-wb="todo" data-title="今天要处理" data-hint="汇总待办，点一下直达">
           <div class="wb-head"></div>
           <div class="wb-body"><div class="todo-list" id="wbTodo"></div></div>
-        </div>
-
-        <div class="wb-card" data-wb="kpis" data-title="关键指标" data-hint="入站、用户与流量概览">
-          <div class="wb-head"></div>
-          <div class="wb-body"><div class="kpis" id="kpis"></div></div>
         </div>
 
         <div class="wb-card" data-wb="trend" data-title="流量趋势" data-hint="近 14 天 · 上行 / 下行">
@@ -1291,8 +1303,13 @@ canvas{display:block;width:100%}
               <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
               <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
             </div>
-            <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
           </div>
+        </div>
+
+        <!-- 关键指标按设计稿后置：先看趋势与内核，KPI 大数字退到第二屏。 -->
+        <div class="wb-card" data-wb="kpis" data-title="关键指标" data-hint="入站、用户与流量概览">
+          <div class="wb-head"></div>
+          <div class="wb-body"><div class="kpis" id="kpis"></div></div>
         </div>
       </div>
     </section>
@@ -2037,23 +2054,61 @@ canvas{display:block;width:100%}
 
     <!-- 主机优化：BBR 只读体检 + 显式确认后才写系统配置 -->
     <section id="v-hostopt" class="view">
+      <div class="grid-2">
+        <div class="card">
+          <h3>系统概览<span class="spacer"></span>
+            <button class="btn sm" data-act="loadHostOpt">重新检测</button>
+          </h3>
+          <div id="ho_sys"></div>
+          <p class="muted" id="ho_sys_warn" style="margin-top:8px;font-size:12px"></p>
+        </div>
+
+        <div class="card">
+          <h3>网络参数<span class="spacer"></span>
+            <button class="btn sm" data-act="hoExport">导出报告</button>
+          </h3>
+          <p class="muted" style="margin-bottom:12px">
+            面板只会写下面这六个键，写入 <code>/etc/sysctl.d/99-triune-bbr.conf</code>。
+            <b>应用前先备份每个键的原值，写完回读复检，不符自动整体回滚。</b>
+          </p>
+          <div class="frm" id="ho_form" style="margin-bottom:0">
+            <div><label>拥塞控制</label>
+              <select id="ho_cc" class="input" data-act="hoEdit"></select></div>
+            <div><label>队列规则</label>
+              <select id="ho_qdisc" class="input" data-act="hoEdit"></select></div>
+            <div><label>接收缓冲（MiB）</label>
+              <input id="ho_rmem" class="input" type="number" min="0.0625" step="0.1" data-act="hoEdit"></div>
+            <div><label>发送缓冲（MiB）</label>
+              <input id="ho_wmem" class="input" type="number" min="0.0625" step="0.1" data-act="hoEdit"></div>
+            <div><label>全连接队列 somaxconn</label>
+              <input id="ho_somaxconn" class="input" type="number" min="128" step="128" data-act="hoEdit"></div>
+            <div><label>本地端口范围</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="ho_pstart" class="input" type="number" min="1024" max="65535" data-act="hoEdit">
+                <span class="muted">–</span>
+                <input id="ho_pend" class="input" type="number" min="1024" max="65535" data-act="hoEdit">
+              </div>
+            </div>
+          </div>
+          <div id="ho_diff" style="margin-top:14px"></div>
+          <p class="muted" id="ho_reason" style="margin-top:10px;line-height:1.7"></p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn primary hide" id="ho_apply" data-act="hostOptApply">应用网络参数</button>
+            <button class="btn danger hide" id="ho_revert" data-act="hostOptRevert">撤销面板的改动</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
-        <h3>主机网络体检<span class="spacer"></span>
-          <button class="btn sm" data-act="loadHostOpt">重新检测</button>
-        </h3>
+        <h3>主机网络体检</h3>
         <p class="muted" style="margin-bottom:12px">
           这里只做<b>只读检测</b>：不创建文件、不改 sysctl、不重启任何服务。
-          应用与撤销会写 <code>/etc/sysctl.d/99-triune-bbr.conf</code>，仅超级管理员可用，
-          且必须先备份原值、失败整体回滚。
+          检测覆盖 BBR 支持、时钟同步、文件描述符、conntrack 水位与 sysctl 覆盖。
         </p>
         <div id="ho_meta" style="margin-bottom:12px"></div>
         <div id="ho_checks"></div>
-        <div id="ho_reason" class="muted" style="margin-top:10px;line-height:1.7"></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-          <button class="btn primary hide" id="ho_apply" data-act="hostOptApply">应用 BBR</button>
-          <button class="btn danger hide" id="ho_revert" data-act="hostOptRevert">撤销面板的改动</button>
-        </div>
       </div>
+
       <div class="card">
         <h3>手动执行 / 验证命令</h3>
         <p class="muted" style="margin-bottom:10px">不放心让面板写系统配置时，复制下列命令自己执行即可；效果与面板的应用完全一致。</p>
@@ -5011,6 +5066,7 @@ const MOBILE_NAV = [
 ];
 const svgIcon = (k, size) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.overview}</svg>`;
+/* 分组标题与导航项都用 VIEWS 里的原名，不造简写。 */
 function renderNav() {
   const list = visibleViews();
   // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
@@ -5018,9 +5074,12 @@ function renderNav() {
   if (!VIEWS.some(([k]) => k === CURRENT)) CURRENT = "overview";
   let html = "", last = null;
   list.forEach(([v, label, sec]) => {
-    if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
-    html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}">
-      ${svgIcon(v, 17)}<span>${label}</span></button>`;
+    if (sec !== last) {
+      html += `<div class="nav-sec">${escHtml(sec)}</div>`;
+      last = sec;
+    }
+    html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}" title="${escHtml(label)}">
+      ${svgIcon(v, 18)}<span>${escHtml(label)}</span></button>`;
   });
   $("nav").innerHTML = html;
 
@@ -5247,7 +5306,9 @@ document.addEventListener("keydown", e => {
    布局存服务端（跨设备一致），localStorage 只作只读账号 / 接口失败时的本机
    降级。卡片可折叠、置顶、排序；拖拽有上移下移按钮作为键盘与触摸的等价
    替代路径——不能只有一种操作方式。 */
-const WB_KEYS = ["todo", "kpis", "trend", "cores", "users", "rank", "quick"];
+/* 默认顺序按方案 B 设计稿：先待办、再看趋势与内核、然后快捷动作，
+   KPI 大数字与占比/排行退到第二屏（用户仍可自行置顶/排序，布局存后端）。 */
+const WB_KEYS = ["todo", "trend", "cores", "quick", "kpis", "users", "rank"];
 const WB_SETTING = "wb_layout";
 let WB = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
 let WB_READY = false, WB_RO = null, WB_DRAG = "";
@@ -5465,7 +5526,7 @@ async function loadTodos() {
   if (!items.length) items = [{level:"ok", title:"一切正常",
     text:"入站、备份占用与主机优化都没有待处理项", view:"overview"}];
   host.innerHTML = items.map(it =>
-    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}'>
+    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}' title="${escHtml(it.text || it.title)}">
       <span class="todo-ic ${escHtml(it.level || "info")}">${marks[it.level] || "i"}</span>
       <span class="todo-tx"><b>${escHtml(it.title)}</b><span>${escHtml(it.text || "")}</span></span>
       <span class="todo-go">→</span></button>`).join("");
@@ -5838,17 +5899,33 @@ if (DEMO) {
         {name:"默认 qdisc 为 fq/fq_codel",ok:false,warn:false,detail:"net.core.default_qdisc = pfifo_fast"},
         {name:"tc 实测 qdisc",ok:false,warn:false,detail:"eth0 当前为 pfifo_fast"},
         {name:"当前不在容器里",ok:true,warn:false,detail:"未检测到 docker / k8s / lxc / OpenVZ 特征"},
-        {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"}
+        {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"},
+        {name:"时钟同步（NTP）",ok:true,warn:false,detail:"时区 Asia/Shanghai，NTPSynchronized=yes"},
+        {name:"文件描述符上限",ok:false,warn:false,detail:"面板进程 soft=1024 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个；soft 上限低于建议值 65535，高并发时会拒新连接（systemd 服务可设 LimitNOFILE=65535）"},
+        {name:"conntrack 连接跟踪水位",ok:false,warn:true,detail:"未启用 nf_conntrack（没有 NAT / 端口转发时属正常；若做转发请确认模块已加载）"},
+        {name:"sysctl 配置覆盖检查",ok:true,warn:false,detail:"没有更靠后的配置文件覆盖面板管理的 sysctl 键"}
       ],
       suggested:[
-        "# 手动开启 BBR（等价面板的「应用」）",
-        "printf 'net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n' | sudo tee /etc/sysctl.d/99-bbr.conf",
-        "sudo sysctl --system",
+        "# 手动应用（等价面板的「应用」）",
+        "sudo tee /etc/sysctl.d/99-triune-bbr.conf >/dev/null <<'EOF'",
+        "net.ipv4.tcp_congestion_control=bbr",
+        "net.core.default_qdisc=fq",
+        "net.core.rmem_max=16777216",
+        "net.core.wmem_max=16777216",
+        "net.core.somaxconn=8192",
+        "net.ipv4.ip_local_port_range=10240 60999",
+        "EOF",
+        "sudo sysctl -p /etc/sysctl.d/99-triune-bbr.conf",
         "# 验证",
-        "sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc",
+        "sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.somaxconn",
         "sudo tc qdisc show dev eth0"
       ],
-      apply_enabled:true,reason:"",applied:false,config_path:"/etc/sysctl.d/99-triune-bbr.conf"
+      apply_enabled:true,reason:"",applied:false,config_path:"/etc/sysctl.d/99-triune-bbr.conf",
+      tune:{cc:"cubic",qdisc:"pfifo_fast",rmem_max:212992,wmem_max:212992,somaxconn:4096,port_start:32768,port_end:60999},
+      options:{cc:["reno","cubic","bbr"],qdisc:["fq","fq_codel","cake"]},
+      system:{load:[0.42,0.31,0.28],cpu_count:4,mem_total:8589934592,mem_avail:5368709120,
+        disk_total:21474836480,disk_free:12884901888,ipv6:true,mtu:1500,mtu_if:"eth0",warnings:[]},
+      expected:null
     },
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
@@ -6042,14 +6119,28 @@ async function mockRoute(path, opts) {
   }
   if (api === "host-opt" && m === "GET") return MDB.hostOpt;
   if (api === "host-opt" && rest === "/apply") {
-    if (opts.body?.confirm !== "APPLY BBR") throw new Error("需要显式确认");
-    Object.assign(MDB.hostOpt, { applied:true, current_cc:"bbr", default_qdisc:"fq" });
-    return MDB.hostOpt;
+    if (opts.body?.confirm !== "APPLY NET") throw new Error("需要显式确认");
+    const t = opts.body?.tune || MDB.hostOpt.tune;
+    const h = MDB.hostOpt;
+    h.applied = true;
+    h.tune = { ...h.tune, ...t };
+    h.current_cc = t.cc;
+    h.default_qdisc = t.qdisc;
+    h.expected = { ...t };
+    h.checks = h.checks.filter(c => c.name !== "面板写入的参数已生效").concat(
+      [{ name:"面板写入的参数已生效", ok:true, warn:false, detail:"六个参数的实测值与面板写入的一致" }]);
+    return h;
   }
   if (api === "host-opt" && rest === "/revert") {
-    if (opts.body?.confirm !== "REVERT BBR") throw new Error("需要显式确认");
-    Object.assign(MDB.hostOpt, { applied:false, current_cc:"cubic", default_qdisc:"pfifo_fast" });
-    return MDB.hostOpt;
+    if (opts.body?.confirm !== "REVERT NET") throw new Error("需要显式确认");
+    const h = MDB.hostOpt;
+    h.applied = false;
+    h.expected = null;
+    h.tune = { cc:"cubic", qdisc:"pfifo_fast", rmem_max:212992, wmem_max:212992, somaxconn:4096, port_start:32768, port_end:60999 };
+    h.current_cc = "cubic";
+    h.default_qdisc = "pfifo_fast";
+    h.checks = h.checks.filter(c => c.name !== "面板写入的参数已生效");
+    return h;
   }
   // 预检必须排在 apply 前面：api 只取到 "apply"，rest 才是 "/dry-run"，
   // 先命中下面那条就会返回「应用成功」的结构，弹窗里显示 undefined。
@@ -6698,10 +6789,14 @@ async function doBackupPrune(keys) {
   } catch (e) { toast(e.message, "err"); }
 }
 
-/* ================= 主机优化（BBR） =================
+/* ================= 主机优化（网络参数） =================
    体检只读；两个写动作必须回传后端约定的确认字面量，并且只给超级管理员看按钮。
-   这里不做任何「自动优化」——用户不点，系统设置永远不会被改。 */
+   这里不做任何「自动优化」——用户不点，系统设置永远不会被改。
+   参数表由后端定义（六个键），前端只负责填值、预览差异、把选择原样回传。 */
 let HO_REPORT = null;
+let HO_TUNE = null;    // 后端当前的生效值
+const HO_CONFIRM = "APPLY NET";
+const HO_REVERT_CONFIRM = "REVERT NET";
 
 async function loadHostOpt() {
   try {
@@ -6712,6 +6807,112 @@ async function loadHostOpt() {
     if (el) el.textContent = "检测失败：" + e.message;
   }
 }
+
+/* 系统概览：负载 / 内存 / 磁盘 / IPv6 / MTU，纯展示，不参与任何写操作。 */
+function renderHoSys(s) {
+  const host = $("ho_sys");
+  if (!host) return;
+  if (!s) { host.innerHTML = '<p class="muted">当前平台不支持系统概览</p>'; return; }
+  const pctText = (used, total) => total ? Math.round(used / total * 100) + "%" : "—";
+  const rows = [
+    ["负载", (s.load || []).length ? s.load.map(x => x.toFixed(2)).join(" / ") : "—"],
+    ["CPU", s.cpu_count ? s.cpu_count + " 核" : "—"],
+    ["内存", s.mem_total ? `${fmtBytes(s.mem_total - s.mem_avail)} / ${fmtBytes(s.mem_total)}（${pctText(s.mem_total - s.mem_avail, s.mem_total)}）` : "—"],
+    ["数据盘", s.disk_total ? `${fmtBytes(s.disk_total - s.disk_free)} / ${fmtBytes(s.disk_total)}（${pctText(s.disk_total - s.disk_free, s.disk_total)}）` : "—"],
+    ["IPv6", s.ipv6 ? "已启用" : "已禁用"],
+    ["默认网卡 MTU", s.mtu ? `${s.mtu}${s.mtu_if ? "（" + s.mtu_if + "）" : ""}` : "—"],
+  ];
+  host.innerHTML = rows.map(([k, v]) =>
+    `<div style="display:flex;flex-wrap:wrap;gap:2px 12px;padding:7px 0;border-bottom:1px solid var(--line)">
+       <span class="muted" style="flex:0 0 96px">${escHtml(k)}</span>
+       <span class="mono" style="flex:1 1 140px;min-width:0;word-break:break-word">${escHtml(v)}</span>
+     </div>`).join("");
+  const warn = $("ho_sys_warn");
+  if (warn) warn.textContent = (s.warnings || []).join("；");
+}
+
+/* 表单只负责「显示当前值」，第一次渲染后用户改过的内容不会被覆盖。 */
+function fillHoForm(j) {
+  HO_TUNE = j.tune || {};
+  const opt = j.options || {};
+  const fillSel = (id, list, cur) => {
+    const el = $(id);
+    if (!el) return;
+    // 当前值可能不在推荐列表里（例如系统本来是 pfifo_fast）：必须补进去，
+    // 否则 select 会显示成空白，用户以为参数丢了。
+    const vals = [...new Set([cur, ...(list || [])].filter(Boolean))];
+    el.innerHTML = vals.map(v => `<option value="${escHtml(v)}">${escHtml(v)}</option>`).join("");
+    if (cur) el.value = cur;
+  };
+  fillSel("ho_cc", opt.cc, HO_TUNE.cc);
+  fillSel("ho_qdisc", opt.qdisc, HO_TUNE.qdisc);
+  // 缓冲用 MiB 输入，允许两位小数（默认值 212992 B = 0.2 MiB）。
+  const mib = b => parseFloat(((b || 0) / 1048576).toFixed(6));
+  $("ho_rmem").value = mib(HO_TUNE.rmem_max);
+  $("ho_wmem").value = mib(HO_TUNE.wmem_max);
+  $("ho_somaxconn").value = HO_TUNE.somaxconn || 4096;
+  $("ho_pstart").value = HO_TUNE.port_start || 10240;
+  $("ho_pend").value = HO_TUNE.port_end || 60999;
+}
+
+function hoDesired() {
+  const num = id => parseInt($(id).value, 10) || 0;
+  const cur = HO_TUNE || {};
+  // MiB → 字节。输入框是十进制近似值，差 1～2 字节时按原值算：
+  // 否则「没动过的字段」也会被标成变更，差异预览就失去了意义。
+  const bytesOf = (id, curB) => {
+    const v = parseFloat($(id).value);
+    if (!isFinite(v)) return curB || 0;
+    const b = Math.round(v * 1048576);
+    return Math.abs(b - (curB || 0)) <= 2 ? (curB || 0) : b;
+  };
+  return {
+    cc: $("ho_cc").value,
+    qdisc: $("ho_qdisc").value,
+    rmem_max: bytesOf("ho_rmem", cur.rmem_max),
+    wmem_max: bytesOf("ho_wmem", cur.wmem_max),
+    somaxconn: num("ho_somaxconn"),
+    port_start: num("ho_pstart"),
+    port_end: num("ho_pend"),
+  };
+}
+
+/* 「现值 → 目标值」预览。用户改哪一格，这里立刻标红哪一行——
+   应用前就知道会动什么，是这个页面最重要的防线。 */
+function hoDiffRows() {
+  const cur = HO_TUNE || {}, want = hoDesired();
+  // 缓冲按字节展示（fmtBytes 会自动降到 KiB），比一律换算 MiB 更不容易出现 0。
+  return [
+    ["拥塞控制", cur.cc, want.cc],
+    ["队列规则", cur.qdisc, want.qdisc],
+    ["接收缓冲", fmtBytes(cur.rmem_max), fmtBytes(want.rmem_max)],
+    ["发送缓冲", fmtBytes(cur.wmem_max), fmtBytes(want.wmem_max)],
+    ["全连接队列", cur.somaxconn, want.somaxconn],
+    ["本地端口", `${cur.port_start || "—"}–${cur.port_end || "—"}`, `${want.port_start}–${want.port_end}`],
+  ].map(([k, c, v]) => ({ k, c: String(c ?? "—"), v: String(v), ch: String(c) !== String(v) }));
+}
+
+function renderHoDiff() {
+  const host = $("ho_diff");
+  if (!host || !HO_REPORT) return;
+  const rows = hoDiffRows();
+  const n = rows.filter(r => r.ch).length;
+  host.innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:6px">` +
+    (n ? `${n} 项将被修改` : "与当前生效值一致，应用不会改动系统") + `</div>` +
+    rows.map(r =>
+      `<div style="display:flex;flex-wrap:wrap;gap:2px 10px;padding:6px 8px;border-radius:6px;` +
+      `background:${r.ch ? "var(--acc-soft)" : "transparent"};border-bottom:1px solid var(--line)">
+         <span style="flex:0 0 84px;color:var(--muted)">${escHtml(r.k)}</span>
+         <span class="mono" style="flex:1 1 100px;min-width:0;word-break:break-word">${escHtml(r.c)}</span>
+         <span class="muted" style="flex:0 0 14px">→</span>
+         <span class="mono" style="flex:1 1 100px;min-width:0;word-break:break-word;` +
+      `color:${r.ch ? "var(--acc-text)" : "var(--muted)"};font-weight:${r.ch ? "600" : "400"}">${escHtml(r.v)}</span>
+       </div>`).join("");
+}
+
+/* 输入框/下拉一改就重算差异；不写库、不发请求。 */
+function hoEdit() { renderHoDiff(); }
 
 function renderHostOpt(j) {
   const kv = [
@@ -6739,35 +6940,56 @@ function renderHostOpt(j) {
       <span class="muted" style="flex:1 1 100%;min-width:0;word-break:break-word">${escHtml(c.detail || "")}</span>
     </div>`;
   }).join("");
+  renderHoSys(j.system);
+  fillHoForm(j);
+  renderHoDiff();
   $("ho_reason").textContent = (j.apply_enabled
-    ? "此主机可以由面板应用 BBR；应用前会备份原值，生效失败自动整体回滚。"
+    ? "此主机可以由面板应用；应用前会备份每个键的原值，写完回读复检，不符自动整体回滚。"
     : (j.reason || "当前主机不支持由面板应用，请按下面的命令手动处理。")) +
     (!isOwner() && j.apply_enabled ? "（应用与撤销仅超级管理员可操作）" : "");
   $("ho_cmds").textContent = (j.suggested || []).join("\n");
   const canAct = isOwner();
-  $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled || !!j.applied);
+  $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled);
   $("ho_revert").classList.toggle("hide", !canAct || !j.applied);
 }
 
 async function hostOptApply() {
-  if (!await ask("应用 BBR",
-    "面板将写入 /etc/sysctl.d/99-triune-bbr.conf 并立即生效（net.core.default_qdisc=fq、" +
-    "net.ipv4.tcp_congestion_control=bbr）。应用前会备份原值，生效失败自动整体回滚。确定继续？")) return;
+  const rows = hoDiffRows().filter(r => r.ch);
+  if (!rows.length) { toast("与当前生效值一致，无需应用"); return; }
+  const list = rows.map(r => `${r.k} ${r.c} → ${r.v}`).join("\n");
+  if (!await ask("应用网络参数",
+    "将写入 /etc/sysctl.d/99-triune-bbr.conf 并立即生效，共 " + rows.length + " 项变更：\n" + list +
+    "\n\n应用前会备份每个键的原值，写完回读复检，不符自动整体回滚。确定继续？")) return;
   try {
-    await req("/api/host-opt/apply", { method:"POST", body:{ confirm:"APPLY BBR" } });
-    toast("已应用 BBR");
+    await req("/api/host-opt/apply", { method:"POST", body:{ confirm: HO_CONFIRM, tune: hoDesired() } });
+    toast("已应用网络参数");
     await loadHostOpt();
   } catch (e) { toast(e.message, "err"); }
 }
 
 async function hostOptRevert() {
-  if (!await ask("撤销 BBR 改动",
-    "将恢复应用前的拥塞控制与 qdisc 原值，并删除面板写入的配置文件。确定继续？")) return;
+  if (!await ask("撤销面板的改动",
+    "将把六个参数恢复成应用前的原值，并删除面板写入的配置文件。确定继续？")) return;
   try {
-    await req("/api/host-opt/revert", { method:"POST", body:{ confirm:"REVERT BBR" } });
-    toast("已撤销面板的 BBR 改动");
+    await req("/api/host-opt/revert", { method:"POST", body:{ confirm: HO_REVERT_CONFIRM } });
+    toast("已撤销面板的改动");
     await loadHostOpt();
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* 导出体检报告：纯前端序列化当前报告，不发请求、不写服务端。 */
+function hoExport() {
+  if (!HO_REPORT) { toast("还没有体检结果", "err"); return; }
+  const blob = new Blob([JSON.stringify(HO_REPORT, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "hostopt-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "") + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast("已导出体检报告");
 }
 
 /* ---- 实时速率 ---- */
@@ -12423,7 +12645,9 @@ let setBarCur = null;
 /* 分组条钉在顶栏下面，top 要等于顶栏实际高度。顶栏高度随字号、窄屏换行变化，
    写死像素迟早对不齐，所以量出来塞进 --topbar-h。 */
 function syncTopbarH() {
-  const tb = document.querySelector(".topbar");
+  // 方案 B 之后顶栏就是命令条本身（原 .topbar 已并入），量的对象跟着换；
+  // 变量名保持 --topbar-h，设置页分组条仍靠它算吸顶位置。
+  const tb = document.querySelector(".cmdbar");
   // 登录页时 #app 是 hide 的，量出来是 0——别拿 0 去覆盖，留 CSS 里的兜底值
   if (!tb || !tb.offsetHeight) return;
   document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
@@ -12431,7 +12655,7 @@ function syncTopbarH() {
 syncTopbarH();
 window.addEventListener("resize", syncTopbarH);
 if (window.ResizeObserver) {
-  const tb = document.querySelector(".topbar");
+  const tb = document.querySelector(".cmdbar");
   if (tb) new ResizeObserver(syncTopbarH).observe(tb);
 }
 

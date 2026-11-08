@@ -1,10 +1,15 @@
-// Package hostopt 提供主机网络优化（当前为 TCP BBR）的只读体检与可选应用/撤销。
+// Package hostopt 提供主机网络优化的只读体检，以及可选的参数应用/撤销。
+//
+// 体检范围（全部只读）：内核 BBR 支持、当前拥塞控制与 qdisc、tc 实测、
+// 容器环境、root 权限，以及时钟同步、文件描述符水位、conntrack 水位、
+// sysctl 覆盖检查、系统概览（负载/内存/磁盘/IPv6/MTU）。
 //
 // 产品约束（本包所有代码都必须遵守）：
 //   - 默认绝不修改系统：Detect 只做只读探测，连目录都不创建、连文件都不写。
 //   - 必须用户显式确认（ApplyConfirm / RevertConfirm）才允许写系统配置，
 //     且确认串必须精确匹配，差一个字符都拒绝。
-//   - 必须能完整回滚：应用前先把原值存成备份；生效失败则「失败零改动」地整体回滚。
+//   - 必须能完整回滚：应用前先把每个键的原值存成备份；生效失败或复检不符
+//     都「失败零改动」地整体回滚。
 //   - 容器（docker/k8s/lxc/OpenVZ）里改 sysctl 通常无效甚至危险，
 //     识别出来后一律禁用应用按钮（ApplyEnabled=false）。
 package hostopt
@@ -19,21 +24,25 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // ConfigPath 是面板唯一会写的 sysctl 配置文件。
 const ConfigPath = "/etc/sysctl.d/99-triune-bbr.conf"
 
 // 确认字面量：UI 必须原样回传，避免误触写系统。
+//
+// v1.6.0 起参数从「只有 BBR」扩成一张参数表，确认串随之改成 APPLY NET；
+// 旧版前端/脚本仍在用的 APPLY BBR 依旧接受，免得升级后旧页面点不动。
 const (
-	ApplyConfirm  = "APPLY BBR"
-	RevertConfirm = "REVERT BBR"
+	ApplyConfirm        = "APPLY NET"
+	RevertConfirm       = "REVERT NET"
+	LegacyApplyConfirm  = "APPLY BBR"
+	LegacyRevertConfirm = "REVERT BBR"
 )
 
 var (
 	ErrConfirm     = errors.New("需要显式确认")
-	ErrUnsupported = errors.New("当前主机不支持由面板应用 BBR")
+	ErrUnsupported = errors.New("当前主机不支持由面板应用网络优化")
 )
 
 // Check 是体检报告里的一项。Warn 表示「无法确认 / 不适用」，不算失败。
@@ -61,6 +70,13 @@ type Report struct {
 	Reason       string   `json:"reason"`
 	Applied      bool     `json:"applied"`
 	ConfigPath   string   `json:"config_path"`
+
+	// 以下为新增：可调参数现值、可选项与系统概览。
+	// 全部来自只读探测，Detect 仍然不写任何文件。
+	Tune     Tune           `json:"tune"`
+	Options  TuneOptions    `json:"options"`
+	System   SystemOverview `json:"system"`
+	Expected *Tune          `json:"expected,omitempty"` // 面板上次写入的期望值
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +137,6 @@ const (
 	appliedFileName = "hostopt-bbr.applied"
 )
 
-// bbrConfig 是面板写入的配置文件内容：恰好两行，顺序固定。
-const bbrConfig = "net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n"
-
 func ccPath() string { return filepath.Join(procSys, "net", "ipv4", "tcp_congestion_control") }
 func availPath() string {
 	return filepath.Join(procSys, "net", "ipv4", "tcp_available_congestion_control")
@@ -151,6 +164,15 @@ func Detect(dataDir string) Report {
 	r.Platform = goos
 	r.ConfigPath = cfgPath
 	r.Applied = appliedState(dataDir)
+	r.Tune = currentTune()
+	r.Options = tuneOptions(r.AvailableCC)
+	if !platformUnsupported() {
+		r.System = systemOverview(dataDir)
+	}
+	r.Expected = readExpected(dataDir)
+	if r.Expected != nil {
+		r.Checks = append(r.Checks, verifyCheck(*r.Expected, r.Tune))
+	}
 	return r
 }
 
@@ -158,34 +180,47 @@ func Detect(dataDir string) Report {
 // 抽成函数是为了让 !linux 兜底逻辑能在任意开发机上被单测直接调用。
 func platformUnsupported() bool { return goos != "linux" }
 
-// Apply 可选地把 BBR 配置写入系统；confirm 必须是 ApplyConfirm 精确字面量。
-func Apply(dataDir, confirm string) error {
+// Apply 把参数表写入系统；confirm 必须是 ApplyConfirm（或旧版 APPLY BBR）精确字面量。
+//
+// tune 不给时用 DefaultTune()——单测与旧调用点因此不用改签名。
+func Apply(dataDir, confirm string, tune ...Tune) error {
 	// 校验放在最前面：confirm 不对时绝不触碰任何文件，这是「默认绝不修改系统」的第一道闸门。
-	if confirm != ApplyConfirm {
+	if confirm != ApplyConfirm && confirm != LegacyApplyConfirm {
 		return ErrConfirm
 	}
-	// 非 Linux 二进制直接拒绝，连 /proc 都不读。
 	if platformUnsupported() {
 		return ErrUnsupported
 	}
+	want := DefaultTune()
+	if len(tune) > 0 {
+		want = tune[0]
+	}
+
 	// 「失败零改动」核心不变量：任何写操作之前重新做一次只读体检，
 	// 条件不满足就绝不落盘，并把中文原因带给调用方。
 	r := Detect(dataDir)
 	if !r.ApplyEnabled {
 		return fmt.Errorf("%w: %s", ErrUnsupported, r.Reason)
 	}
-	return applyBBR(dataDir)
+	if err := validateTune(want, r.AvailableCC); err != nil {
+		return err
+	}
+	// 幂等：已应用且现值就是要的值，直接成功返回，不重复写盘。
+	if appliedState(dataDir) && r.Tune.equal(want) {
+		return nil
+	}
+	return applyTune(dataDir, want)
 }
 
-// Revert 撤销面板写过的配置并恢复原值；confirm 必须是 RevertConfirm 精确字面量。
+// Revert 撤销面板写过的配置并恢复原值；confirm 必须是 RevertConfirm（或旧版）。
 func Revert(dataDir, confirm string) error {
-	if confirm != RevertConfirm {
+	if confirm != RevertConfirm && confirm != LegacyRevertConfirm {
 		return ErrConfirm
 	}
 	if platformUnsupported() {
 		return ErrUnsupported
 	}
-	return revertBBR(dataDir)
+	return revertTune(dataDir)
 }
 
 // appliedState 同时要求「状态标记」与「配置文件」都在，避免标记残留导致误判。
@@ -200,180 +235,17 @@ func appliedState(dataDir string) bool {
 	return true
 }
 
-// bbrOrig 是应用前的原值快照，写到 dataDir 供 Revert 审计与恢复。
-// 连「配置文件原本是否存在 / 内容」都记下来，是为了做到完整回滚：
-// 若原本就有同名配置，撤销时恢复它，而不是粗暴删除用户的文件。
-type bbrOrig struct {
-	ConfigExisted bool   `json:"config_existed"`
-	ConfigContent []byte `json:"config_content"`
-	CurrentCC     string `json:"current_cc"`
-	DefaultQdisc  string `json:"default_qdisc"`
-}
-
-func applyBBR(dataDir string) error {
-	// 幂等：已经应用过就直接成功返回，绝不重复覆盖备份文件。
-	// 这里选「返回 nil」而不是报错：重复点应用是用户的正常行为，不该吓人。
-	if appliedState(dataDir) {
+// readExpected 读取面板上次写入的期望值（只读）。
+func readExpected(dataDir string) *Tune {
+	b, err := readFile(expectedPath(dataDir))
+	if err != nil {
 		return nil
 	}
-
-	// 「先备份原值」：读不到内核当前值就干脆不应用，避免恢复时写回空串。
-	orig, err := snapshotOrig()
-	if err != nil {
-		return fmt.Errorf("读取原值失败，未改动系统: %w", err)
-	}
-	if err := mkdirAll(dataDir, 0o700); err != nil {
-		return fmt.Errorf("创建数据目录失败，未改动系统: %w", err)
-	}
-	// 备份已存在时不覆盖：首次应用留下的才是真正的「原值」，重试不能把它冲掉。
-	if _, err := stat(origPath(dataDir)); err != nil {
-		blob, mErr := json.MarshalIndent(orig, "", "  ")
-		if mErr != nil {
-			return fmt.Errorf("序列化备份失败，未改动系统: %w", mErr)
-		}
-		if err := writeFile(origPath(dataDir), blob, 0o600); err != nil {
-			return fmt.Errorf("写备份失败，未改动系统: %w", err)
-		}
-	}
-
-	// 写配置：临时文件 + rename 原子替换，避免半截配置被 sysctl 读到。
-	if err := mkdirAll(sysctlDir, 0o755); err != nil {
-		return fmt.Errorf("创建 %s 失败，未改动系统: %w", sysctlDir, err)
-	}
-	tmp := cfgPath + ".tmp"
-	if err := writeFile(tmp, []byte(bbrConfig), 0o644); err != nil {
-		_ = remove(tmp)
-		return fmt.Errorf("写临时配置失败，未改动系统: %w", err)
-	}
-	if err := rename(tmp, cfgPath); err != nil {
-		_ = remove(tmp)
-		return fmt.Errorf("替换配置失败，未改动系统: %w", err)
-	}
-
-	// 生效：优先 sysctl -p；sysctl 不存在才退回直接写 /proc/sys。
-	// 任一失败都必须整体回滚——「失败零改动」是这个项目的核心不变量：
-	// 绝不能留下「配置写了却没生效」或「生效了一半」的中间态。
-	if err := activate(); err != nil {
-		return rollbackErr("使配置生效失败", err, rollback(dataDir, orig))
-	}
-
-	// 状态标记最后写：只有配置与生效都成功，面板才认为自己「已应用」。
-	if err := writeFile(appliedPath(dataDir), []byte("applied\n"), 0o600); err != nil {
-		return rollbackErr("写状态标记失败", err, rollback(dataDir, orig))
-	}
-	return nil
-}
-
-// rollbackErr 把「原错误」和「回滚是否真的干净」分开说清。
-// 回滚本身也可能失败（例如 /proc/sys 变得只读），这时若还宣称「已整体回滚」，
-// 用户会以为系统已复原而不再检查——比原错误更危险。
-func rollbackErr(stage string, cause, rbErr error) error {
-	if rbErr != nil {
-		return fmt.Errorf("%s: %w；回滚不完整，请按报告里的原值人工恢复: %v", stage, cause, rbErr)
-	}
-	return fmt.Errorf("%s，已整体回滚: %w", stage, cause)
-}
-
-// snapshotOrig 只做只读采样，返回应用前的系统与配置原值。
-func snapshotOrig() (bbrOrig, error) {
-	cc, err := readFile(ccPath())
-	if err != nil {
-		return bbrOrig{}, fmt.Errorf("读取 %s: %w", ccPath(), err)
-	}
-	qd, err := readFile(qdiscPath())
-	if err != nil {
-		return bbrOrig{}, fmt.Errorf("读取 %s: %w", qdiscPath(), err)
-	}
-	o := bbrOrig{
-		CurrentCC:    strings.TrimSpace(string(cc)),
-		DefaultQdisc: strings.TrimSpace(string(qd)),
-	}
-	if b, err := readFile(cfgPath); err == nil {
-		o.ConfigExisted = true
-		o.ConfigContent = b
-	}
-	return o, nil
-}
-
-// activate 让刚写的配置真正生效。
-func activate() error {
-	if sysctl, err := lookPath("sysctl"); err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := runCmd(ctx, sysctl, "-p", cfgPath); err != nil {
-			return fmt.Errorf("sysctl -p %s: %w", cfgPath, err)
-		}
+	var t Tune
+	if err := json.Unmarshal(b, &t); err != nil {
 		return nil
 	}
-	// sysctl 不存在：退回直接写 /proc/sys，不依赖任何外部命令。
-	if err := writeFile(ccPath(), []byte("bbr"), 0o644); err != nil {
-		return fmt.Errorf("写 %s: %w", ccPath(), err)
-	}
-	if err := writeFile(qdiscPath(), []byte("fq"), 0o644); err != nil {
-		return fmt.Errorf("写 %s: %w", qdiscPath(), err)
-	}
-	return nil
+	return &t
 }
 
-// rollback 是「失败零改动」的落地点：把系统状态恢复到应用之前。
-//
-// 只回滚系统侧（配置文件 + /proc/sys 运行值 + 状态标记）；dataDir 里的 orig
-// 备份按产品要求刻意保留，供审计追溯「面板曾经改过什么、原值是什么」。
-func rollback(dataDir string, o bbrOrig) error {
-	var errs []string
-	if o.ConfigExisted {
-		if err := writeFile(cfgPath, o.ConfigContent, 0o644); err != nil {
-			errs = append(errs, "恢复原配置: "+err.Error())
-		}
-	} else if err := remove(cfgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, "删除配置: "+err.Error())
-	}
-	// 直接写 /proc/sys 恢复运行值，不依赖 sysctl，避免二次失败。
-	if err := writeFile(ccPath(), []byte(o.CurrentCC), 0o644); err != nil {
-		errs = append(errs, "恢复拥塞控制: "+err.Error())
-	}
-	if err := writeFile(qdiscPath(), []byte(o.DefaultQdisc), 0o644); err != nil {
-		errs = append(errs, "恢复 qdisc: "+err.Error())
-	}
-	if err := remove(appliedPath(dataDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, "删除状态标记: "+err.Error())
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", strings.Join(errs, "; "))
-	}
-	return nil
-}
-
-func revertBBR(dataDir string) error {
-	blob, err := readFile(origPath(dataDir))
-	if err != nil {
-		// 没有备份就绝不动配置文件：否则可能把用户自己写的 sysctl 配置删掉。
-		return fmt.Errorf("缺少备份 %s，拒绝撤销（未删除任何配置）: %w", origPath(dataDir), err)
-	}
-	var o bbrOrig
-	if err := json.Unmarshal(blob, &o); err != nil {
-		return fmt.Errorf("备份文件损坏，拒绝撤销: %w", err)
-	}
-
-	// 先恢复运行值；失败就停在这里，保留配置与标记，避免留下「已撤销却没恢复」的假象。
-	if err := writeFile(ccPath(), []byte(o.CurrentCC), 0o644); err != nil {
-		return fmt.Errorf("恢复 net.ipv4.tcp_congestion_control 失败: %w", err)
-	}
-	if err := writeFile(qdiscPath(), []byte(o.DefaultQdisc), 0o644); err != nil {
-		return fmt.Errorf("恢复 net.core.default_qdisc 失败: %w", err)
-	}
-
-	// 完整回滚配置文件：原本有就还原内容，原本没有就删除。
-	if o.ConfigExisted {
-		if err := writeFile(cfgPath, o.ConfigContent, 0o644); err != nil {
-			return fmt.Errorf("恢复原配置文件失败: %w", err)
-		}
-	} else if err := remove(cfgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("删除配置文件失败: %w", err)
-	}
-	if err := remove(appliedPath(dataDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("删除状态标记失败: %w", err)
-	}
-	// orig 备份刻意保留，供审计。
-	return nil
-}
+func expectedPath(d string) string { return filepath.Join(d, expectedFileName) }

@@ -93,11 +93,28 @@ func TestAndroidCompatFallbacks(t *testing.T) {
 	for _, frag := range []string{
 		"text-size-adjust:100%",            // 关掉 Android 的 Text Autosizing
 		"@supports not (height:100dvh)",    // 老内核改用 --app-h
-		"@supports not ((backdrop-filter",  // 顶栏换不透明底
 		"bottom:calc(12px + env(safe-area", // 底部条让开 Home Indicator
 	} {
 		if !strings.Contains(css, frag) {
 			t.Errorf("缺 Android 老内核兜底 %q", frag)
+		}
+	}
+	// 顶栏在方案 B 里并进了 .cmdbar，命令条用不透明底色，不再依赖
+	// backdrop-filter，原来那条 @supports 兜底随之作废。但「常驻栏不能是
+	// 半透明」这条约束仍然成立，改成直接校验规则体：一旦有人改回 --glass，
+	// 在 X5 上滚过去的内容就会透出来。
+	if i := strings.Index(css, ".cmdbar{"); i < 0 {
+		t.Error("找不到 .cmdbar 规则：命令条已被改名或删除")
+	} else {
+		body := css[i:]
+		if j := strings.Index(body, "}"); j > 0 {
+			body = body[:j]
+		}
+		if !strings.Contains(body, "background:var(--bg)") {
+			t.Error(".cmdbar 必须用不透明底色 var(--bg)：X5 上没有 backdrop-filter，半透明会透出滚动内容")
+		}
+		if strings.Contains(body, "var(--glass)") {
+			t.Error(".cmdbar 不能用 var(--glass)：X5 缺 backdrop-filter，顶栏会变成半透明")
 		}
 	}
 	if !strings.Contains(string(mustReadAsset(t, "app.js")), "--app-h") {

@@ -221,6 +221,7 @@ const MOBILE_NAV = [
 ];
 const svgIcon = (k, size) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.overview}</svg>`;
+/* 分组标题与导航项都用 VIEWS 里的原名，不造简写。 */
 function renderNav() {
   const list = visibleViews();
   // 用 VIEWS 判断而不是 list：「修订与日志」不占导航位（hidden），
@@ -228,9 +229,12 @@ function renderNav() {
   if (!VIEWS.some(([k]) => k === CURRENT)) CURRENT = "overview";
   let html = "", last = null;
   list.forEach(([v, label, sec]) => {
-    if (sec !== last) { html += `<div class="nav-sec">${sec}</div>`; last = sec; }
-    html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}">
-      ${svgIcon(v, 17)}<span>${label}</span></button>`;
+    if (sec !== last) {
+      html += `<div class="nav-sec">${escHtml(sec)}</div>`;
+      last = sec;
+    }
+    html += `<button class="nav-item${v===CURRENT?" on":""}" data-v="${v}" title="${escHtml(label)}">
+      ${svgIcon(v, 18)}<span>${escHtml(label)}</span></button>`;
   });
   $("nav").innerHTML = html;
 
@@ -457,7 +461,9 @@ document.addEventListener("keydown", e => {
    布局存服务端（跨设备一致），localStorage 只作只读账号 / 接口失败时的本机
    降级。卡片可折叠、置顶、排序；拖拽有上移下移按钮作为键盘与触摸的等价
    替代路径——不能只有一种操作方式。 */
-const WB_KEYS = ["todo", "kpis", "trend", "cores", "users", "rank", "quick"];
+/* 默认顺序按方案 B 设计稿：先待办、再看趋势与内核、然后快捷动作，
+   KPI 大数字与占比/排行退到第二屏（用户仍可自行置顶/排序，布局存后端）。 */
+const WB_KEYS = ["todo", "trend", "cores", "quick", "kpis", "users", "rank"];
 const WB_SETTING = "wb_layout";
 let WB = {order: WB_KEYS.slice(), collapsed: [], pinned: []};
 let WB_READY = false, WB_RO = null, WB_DRAG = "";
@@ -675,7 +681,7 @@ async function loadTodos() {
   if (!items.length) items = [{level:"ok", title:"一切正常",
     text:"入站、备份占用与主机优化都没有待处理项", view:"overview"}];
   host.innerHTML = items.map(it =>
-    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}'>
+    `<button class="todo-row" data-act="todoGo" data-args='${escJson([it.view || "overview"])}' title="${escHtml(it.text || it.title)}">
       <span class="todo-ic ${escHtml(it.level || "info")}">${marks[it.level] || "i"}</span>
       <span class="todo-tx"><b>${escHtml(it.title)}</b><span>${escHtml(it.text || "")}</span></span>
       <span class="todo-go">→</span></button>`).join("");
@@ -1048,17 +1054,33 @@ if (DEMO) {
         {name:"默认 qdisc 为 fq/fq_codel",ok:false,warn:false,detail:"net.core.default_qdisc = pfifo_fast"},
         {name:"tc 实测 qdisc",ok:false,warn:false,detail:"eth0 当前为 pfifo_fast"},
         {name:"当前不在容器里",ok:true,warn:false,detail:"未检测到 docker / k8s / lxc / OpenVZ 特征"},
-        {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"}
+        {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"},
+        {name:"时钟同步（NTP）",ok:true,warn:false,detail:"时区 Asia/Shanghai，NTPSynchronized=yes"},
+        {name:"文件描述符上限",ok:false,warn:false,detail:"面板进程 soft=1024 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个；soft 上限低于建议值 65535，高并发时会拒新连接（systemd 服务可设 LimitNOFILE=65535）"},
+        {name:"conntrack 连接跟踪水位",ok:false,warn:true,detail:"未启用 nf_conntrack（没有 NAT / 端口转发时属正常；若做转发请确认模块已加载）"},
+        {name:"sysctl 配置覆盖检查",ok:true,warn:false,detail:"没有更靠后的配置文件覆盖面板管理的 sysctl 键"}
       ],
       suggested:[
-        "# 手动开启 BBR（等价面板的「应用」）",
-        "printf 'net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n' | sudo tee /etc/sysctl.d/99-bbr.conf",
-        "sudo sysctl --system",
+        "# 手动应用（等价面板的「应用」）",
+        "sudo tee /etc/sysctl.d/99-triune-bbr.conf >/dev/null <<'EOF'",
+        "net.ipv4.tcp_congestion_control=bbr",
+        "net.core.default_qdisc=fq",
+        "net.core.rmem_max=16777216",
+        "net.core.wmem_max=16777216",
+        "net.core.somaxconn=8192",
+        "net.ipv4.ip_local_port_range=10240 60999",
+        "EOF",
+        "sudo sysctl -p /etc/sysctl.d/99-triune-bbr.conf",
         "# 验证",
-        "sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc",
+        "sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.somaxconn",
         "sudo tc qdisc show dev eth0"
       ],
-      apply_enabled:true,reason:"",applied:false,config_path:"/etc/sysctl.d/99-triune-bbr.conf"
+      apply_enabled:true,reason:"",applied:false,config_path:"/etc/sysctl.d/99-triune-bbr.conf",
+      tune:{cc:"cubic",qdisc:"pfifo_fast",rmem_max:212992,wmem_max:212992,somaxconn:4096,port_start:32768,port_end:60999},
+      options:{cc:["reno","cubic","bbr"],qdisc:["fq","fq_codel","cake"]},
+      system:{load:[0.42,0.31,0.28],cpu_count:4,mem_total:8589934592,mem_avail:5368709120,
+        disk_total:21474836480,disk_free:12884901888,ipv6:true,mtu:1500,mtu_if:"eth0",warnings:[]},
+      expected:null
     },
     admins:[
       {id:1,username:"admin",role:"owner",enabled:true,has_totp:true,last_ip:"203.0.113.7",last_login:"2026-10-31 09:24:17",created_at:"2026-09-01 10:00:00"},
@@ -1252,14 +1274,28 @@ async function mockRoute(path, opts) {
   }
   if (api === "host-opt" && m === "GET") return MDB.hostOpt;
   if (api === "host-opt" && rest === "/apply") {
-    if (opts.body?.confirm !== "APPLY BBR") throw new Error("需要显式确认");
-    Object.assign(MDB.hostOpt, { applied:true, current_cc:"bbr", default_qdisc:"fq" });
-    return MDB.hostOpt;
+    if (opts.body?.confirm !== "APPLY NET") throw new Error("需要显式确认");
+    const t = opts.body?.tune || MDB.hostOpt.tune;
+    const h = MDB.hostOpt;
+    h.applied = true;
+    h.tune = { ...h.tune, ...t };
+    h.current_cc = t.cc;
+    h.default_qdisc = t.qdisc;
+    h.expected = { ...t };
+    h.checks = h.checks.filter(c => c.name !== "面板写入的参数已生效").concat(
+      [{ name:"面板写入的参数已生效", ok:true, warn:false, detail:"六个参数的实测值与面板写入的一致" }]);
+    return h;
   }
   if (api === "host-opt" && rest === "/revert") {
-    if (opts.body?.confirm !== "REVERT BBR") throw new Error("需要显式确认");
-    Object.assign(MDB.hostOpt, { applied:false, current_cc:"cubic", default_qdisc:"pfifo_fast" });
-    return MDB.hostOpt;
+    if (opts.body?.confirm !== "REVERT NET") throw new Error("需要显式确认");
+    const h = MDB.hostOpt;
+    h.applied = false;
+    h.expected = null;
+    h.tune = { cc:"cubic", qdisc:"pfifo_fast", rmem_max:212992, wmem_max:212992, somaxconn:4096, port_start:32768, port_end:60999 };
+    h.current_cc = "cubic";
+    h.default_qdisc = "pfifo_fast";
+    h.checks = h.checks.filter(c => c.name !== "面板写入的参数已生效");
+    return h;
   }
   // 预检必须排在 apply 前面：api 只取到 "apply"，rest 才是 "/dry-run"，
   // 先命中下面那条就会返回「应用成功」的结构，弹窗里显示 undefined。
@@ -1908,10 +1944,14 @@ async function doBackupPrune(keys) {
   } catch (e) { toast(e.message, "err"); }
 }
 
-/* ================= 主机优化（BBR） =================
+/* ================= 主机优化（网络参数） =================
    体检只读；两个写动作必须回传后端约定的确认字面量，并且只给超级管理员看按钮。
-   这里不做任何「自动优化」——用户不点，系统设置永远不会被改。 */
+   这里不做任何「自动优化」——用户不点，系统设置永远不会被改。
+   参数表由后端定义（六个键），前端只负责填值、预览差异、把选择原样回传。 */
 let HO_REPORT = null;
+let HO_TUNE = null;    // 后端当前的生效值
+const HO_CONFIRM = "APPLY NET";
+const HO_REVERT_CONFIRM = "REVERT NET";
 
 async function loadHostOpt() {
   try {
@@ -1922,6 +1962,112 @@ async function loadHostOpt() {
     if (el) el.textContent = "检测失败：" + e.message;
   }
 }
+
+/* 系统概览：负载 / 内存 / 磁盘 / IPv6 / MTU，纯展示，不参与任何写操作。 */
+function renderHoSys(s) {
+  const host = $("ho_sys");
+  if (!host) return;
+  if (!s) { host.innerHTML = '<p class="muted">当前平台不支持系统概览</p>'; return; }
+  const pctText = (used, total) => total ? Math.round(used / total * 100) + "%" : "—";
+  const rows = [
+    ["负载", (s.load || []).length ? s.load.map(x => x.toFixed(2)).join(" / ") : "—"],
+    ["CPU", s.cpu_count ? s.cpu_count + " 核" : "—"],
+    ["内存", s.mem_total ? `${fmtBytes(s.mem_total - s.mem_avail)} / ${fmtBytes(s.mem_total)}（${pctText(s.mem_total - s.mem_avail, s.mem_total)}）` : "—"],
+    ["数据盘", s.disk_total ? `${fmtBytes(s.disk_total - s.disk_free)} / ${fmtBytes(s.disk_total)}（${pctText(s.disk_total - s.disk_free, s.disk_total)}）` : "—"],
+    ["IPv6", s.ipv6 ? "已启用" : "已禁用"],
+    ["默认网卡 MTU", s.mtu ? `${s.mtu}${s.mtu_if ? "（" + s.mtu_if + "）" : ""}` : "—"],
+  ];
+  host.innerHTML = rows.map(([k, v]) =>
+    `<div style="display:flex;flex-wrap:wrap;gap:2px 12px;padding:7px 0;border-bottom:1px solid var(--line)">
+       <span class="muted" style="flex:0 0 96px">${escHtml(k)}</span>
+       <span class="mono" style="flex:1 1 140px;min-width:0;word-break:break-word">${escHtml(v)}</span>
+     </div>`).join("");
+  const warn = $("ho_sys_warn");
+  if (warn) warn.textContent = (s.warnings || []).join("；");
+}
+
+/* 表单只负责「显示当前值」，第一次渲染后用户改过的内容不会被覆盖。 */
+function fillHoForm(j) {
+  HO_TUNE = j.tune || {};
+  const opt = j.options || {};
+  const fillSel = (id, list, cur) => {
+    const el = $(id);
+    if (!el) return;
+    // 当前值可能不在推荐列表里（例如系统本来是 pfifo_fast）：必须补进去，
+    // 否则 select 会显示成空白，用户以为参数丢了。
+    const vals = [...new Set([cur, ...(list || [])].filter(Boolean))];
+    el.innerHTML = vals.map(v => `<option value="${escHtml(v)}">${escHtml(v)}</option>`).join("");
+    if (cur) el.value = cur;
+  };
+  fillSel("ho_cc", opt.cc, HO_TUNE.cc);
+  fillSel("ho_qdisc", opt.qdisc, HO_TUNE.qdisc);
+  // 缓冲用 MiB 输入，允许两位小数（默认值 212992 B = 0.2 MiB）。
+  const mib = b => parseFloat(((b || 0) / 1048576).toFixed(6));
+  $("ho_rmem").value = mib(HO_TUNE.rmem_max);
+  $("ho_wmem").value = mib(HO_TUNE.wmem_max);
+  $("ho_somaxconn").value = HO_TUNE.somaxconn || 4096;
+  $("ho_pstart").value = HO_TUNE.port_start || 10240;
+  $("ho_pend").value = HO_TUNE.port_end || 60999;
+}
+
+function hoDesired() {
+  const num = id => parseInt($(id).value, 10) || 0;
+  const cur = HO_TUNE || {};
+  // MiB → 字节。输入框是十进制近似值，差 1～2 字节时按原值算：
+  // 否则「没动过的字段」也会被标成变更，差异预览就失去了意义。
+  const bytesOf = (id, curB) => {
+    const v = parseFloat($(id).value);
+    if (!isFinite(v)) return curB || 0;
+    const b = Math.round(v * 1048576);
+    return Math.abs(b - (curB || 0)) <= 2 ? (curB || 0) : b;
+  };
+  return {
+    cc: $("ho_cc").value,
+    qdisc: $("ho_qdisc").value,
+    rmem_max: bytesOf("ho_rmem", cur.rmem_max),
+    wmem_max: bytesOf("ho_wmem", cur.wmem_max),
+    somaxconn: num("ho_somaxconn"),
+    port_start: num("ho_pstart"),
+    port_end: num("ho_pend"),
+  };
+}
+
+/* 「现值 → 目标值」预览。用户改哪一格，这里立刻标红哪一行——
+   应用前就知道会动什么，是这个页面最重要的防线。 */
+function hoDiffRows() {
+  const cur = HO_TUNE || {}, want = hoDesired();
+  // 缓冲按字节展示（fmtBytes 会自动降到 KiB），比一律换算 MiB 更不容易出现 0。
+  return [
+    ["拥塞控制", cur.cc, want.cc],
+    ["队列规则", cur.qdisc, want.qdisc],
+    ["接收缓冲", fmtBytes(cur.rmem_max), fmtBytes(want.rmem_max)],
+    ["发送缓冲", fmtBytes(cur.wmem_max), fmtBytes(want.wmem_max)],
+    ["全连接队列", cur.somaxconn, want.somaxconn],
+    ["本地端口", `${cur.port_start || "—"}–${cur.port_end || "—"}`, `${want.port_start}–${want.port_end}`],
+  ].map(([k, c, v]) => ({ k, c: String(c ?? "—"), v: String(v), ch: String(c) !== String(v) }));
+}
+
+function renderHoDiff() {
+  const host = $("ho_diff");
+  if (!host || !HO_REPORT) return;
+  const rows = hoDiffRows();
+  const n = rows.filter(r => r.ch).length;
+  host.innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:6px">` +
+    (n ? `${n} 项将被修改` : "与当前生效值一致，应用不会改动系统") + `</div>` +
+    rows.map(r =>
+      `<div style="display:flex;flex-wrap:wrap;gap:2px 10px;padding:6px 8px;border-radius:6px;` +
+      `background:${r.ch ? "var(--acc-soft)" : "transparent"};border-bottom:1px solid var(--line)">
+         <span style="flex:0 0 84px;color:var(--muted)">${escHtml(r.k)}</span>
+         <span class="mono" style="flex:1 1 100px;min-width:0;word-break:break-word">${escHtml(r.c)}</span>
+         <span class="muted" style="flex:0 0 14px">→</span>
+         <span class="mono" style="flex:1 1 100px;min-width:0;word-break:break-word;` +
+      `color:${r.ch ? "var(--acc-text)" : "var(--muted)"};font-weight:${r.ch ? "600" : "400"}">${escHtml(r.v)}</span>
+       </div>`).join("");
+}
+
+/* 输入框/下拉一改就重算差异；不写库、不发请求。 */
+function hoEdit() { renderHoDiff(); }
 
 function renderHostOpt(j) {
   const kv = [
@@ -1949,35 +2095,56 @@ function renderHostOpt(j) {
       <span class="muted" style="flex:1 1 100%;min-width:0;word-break:break-word">${escHtml(c.detail || "")}</span>
     </div>`;
   }).join("");
+  renderHoSys(j.system);
+  fillHoForm(j);
+  renderHoDiff();
   $("ho_reason").textContent = (j.apply_enabled
-    ? "此主机可以由面板应用 BBR；应用前会备份原值，生效失败自动整体回滚。"
+    ? "此主机可以由面板应用；应用前会备份每个键的原值，写完回读复检，不符自动整体回滚。"
     : (j.reason || "当前主机不支持由面板应用，请按下面的命令手动处理。")) +
     (!isOwner() && j.apply_enabled ? "（应用与撤销仅超级管理员可操作）" : "");
   $("ho_cmds").textContent = (j.suggested || []).join("\n");
   const canAct = isOwner();
-  $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled || !!j.applied);
+  $("ho_apply").classList.toggle("hide", !canAct || !j.apply_enabled);
   $("ho_revert").classList.toggle("hide", !canAct || !j.applied);
 }
 
 async function hostOptApply() {
-  if (!await ask("应用 BBR",
-    "面板将写入 /etc/sysctl.d/99-triune-bbr.conf 并立即生效（net.core.default_qdisc=fq、" +
-    "net.ipv4.tcp_congestion_control=bbr）。应用前会备份原值，生效失败自动整体回滚。确定继续？")) return;
+  const rows = hoDiffRows().filter(r => r.ch);
+  if (!rows.length) { toast("与当前生效值一致，无需应用"); return; }
+  const list = rows.map(r => `${r.k} ${r.c} → ${r.v}`).join("\n");
+  if (!await ask("应用网络参数",
+    "将写入 /etc/sysctl.d/99-triune-bbr.conf 并立即生效，共 " + rows.length + " 项变更：\n" + list +
+    "\n\n应用前会备份每个键的原值，写完回读复检，不符自动整体回滚。确定继续？")) return;
   try {
-    await req("/api/host-opt/apply", { method:"POST", body:{ confirm:"APPLY BBR" } });
-    toast("已应用 BBR");
+    await req("/api/host-opt/apply", { method:"POST", body:{ confirm: HO_CONFIRM, tune: hoDesired() } });
+    toast("已应用网络参数");
     await loadHostOpt();
   } catch (e) { toast(e.message, "err"); }
 }
 
 async function hostOptRevert() {
-  if (!await ask("撤销 BBR 改动",
-    "将恢复应用前的拥塞控制与 qdisc 原值，并删除面板写入的配置文件。确定继续？")) return;
+  if (!await ask("撤销面板的改动",
+    "将把六个参数恢复成应用前的原值，并删除面板写入的配置文件。确定继续？")) return;
   try {
-    await req("/api/host-opt/revert", { method:"POST", body:{ confirm:"REVERT BBR" } });
-    toast("已撤销面板的 BBR 改动");
+    await req("/api/host-opt/revert", { method:"POST", body:{ confirm: HO_REVERT_CONFIRM } });
+    toast("已撤销面板的改动");
     await loadHostOpt();
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* 导出体检报告：纯前端序列化当前报告，不发请求、不写服务端。 */
+function hoExport() {
+  if (!HO_REPORT) { toast("还没有体检结果", "err"); return; }
+  const blob = new Blob([JSON.stringify(HO_REPORT, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "hostopt-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "") + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast("已导出体检报告");
 }
 
 /* ---- 实时速率 ---- */
@@ -7633,7 +7800,9 @@ let setBarCur = null;
 /* 分组条钉在顶栏下面，top 要等于顶栏实际高度。顶栏高度随字号、窄屏换行变化，
    写死像素迟早对不齐，所以量出来塞进 --topbar-h。 */
 function syncTopbarH() {
-  const tb = document.querySelector(".topbar");
+  // 方案 B 之后顶栏就是命令条本身（原 .topbar 已并入），量的对象跟着换；
+  // 变量名保持 --topbar-h，设置页分组条仍靠它算吸顶位置。
+  const tb = document.querySelector(".cmdbar");
   // 登录页时 #app 是 hide 的，量出来是 0——别拿 0 去覆盖，留 CSS 里的兜底值
   if (!tb || !tb.offsetHeight) return;
   document.documentElement.style.setProperty("--topbar-h", tb.offsetHeight + "px");
@@ -7641,7 +7810,7 @@ function syncTopbarH() {
 syncTopbarH();
 window.addEventListener("resize", syncTopbarH);
 if (window.ResizeObserver) {
-  const tb = document.querySelector(".topbar");
+  const tb = document.querySelector(".cmdbar");
   if (tb) new ResizeObserver(syncTopbarH).observe(tb);
 }
 

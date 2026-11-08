@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.5.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.6.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -27,7 +27,8 @@
   --r-xl:20px; --r-lg:14px; --r:10px; --r-sm:7px;
   --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-  --side-w:240px;
+  /* 侧栏宽度按方案 B 设计稿：72px 窄栏，只放短标签，正文全部让给内容区。 */
+  --side-w:216px;
   --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
 /* THEME:BEGIN 由 deploy/build-theme.py 生成，勿手改 */
@@ -191,7 +192,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
   .login-wrap{min-height:var(--app-h,100vh)}
 }
 .side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:16px 12px 12px;position:relative;z-index:30;min-height:0;
+  display:flex;flex-direction:column;padding:14px 10px 10px;position:relative;z-index:30;min-height:0;
   transition:background var(--t),border-color var(--t)}
 /* 导航区自己滚。窗口高度不够时（笔记本半屏、横屏手机、浏览器控制台占了下半屏）
    11 个入口加起来比视口高，而 .shell 是 overflow:hidden——溢出的入口被裁掉又滑不到，
@@ -201,27 +202,40 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 #nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .side::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
-.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;position:relative}
+/* 品牌区：标识 + 名称 + 版本。 */
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px;position:relative}
 .logo .mark{width:32px;height:32px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
-.logo b{font-size:15px;letter-spacing:.3px;font-weight:650;white-space:nowrap;flex:0 0 auto}
-.logo .logo-v{font-size:10.5px;color:var(--muted);margin-left:auto;font-family:var(--mono);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;min-width:0}
-.nav-sec{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);opacity:.75;
-  padding:12px 12px 6px;font-weight:600}
-.nav-item{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
-  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:14px;text-align:left;margin-bottom:2px;font-family:var(--font);
-  position:relative;transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.logo b{display:block;font-size:15px;letter-spacing:.2px;font-weight:650;white-space:nowrap}
+.logo .logo-v{display:block;margin-left:auto;font-size:10.5px;color:var(--muted);font-family:var(--mono);white-space:nowrap}
+/* 分组标题：原名，小号、加宽字距，靠上留白分节——不画线、不缩字。
+   导航文字一律用 app.js 里 VIEWS 的原名，禁止简写。 */
+.nav-sec{padding:16px 10px 6px;font-size:11px;letter-spacing:.08em;color:var(--muted);
+  opacity:.8;font-weight:600;white-space:nowrap}
+/* 导航项：图标 18 + 原名 14px，行高 38，左对齐让图标连成一列。
+   宽度不够就加宽侧栏，不靠缩字号/缩间距来塞。 */
+.nav-item{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;border:none;background:none;
+  color:var(--muted);padding:9px 10px;border-radius:var(--r);cursor:pointer;font-size:14px;line-height:1.35;
+  font-family:var(--font);position:relative;text-align:left;margin-bottom:2px;
+  transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.nav-item svg{display:block;flex:0 0 auto;opacity:.9}
+.nav-item span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nav-item:hover{background:var(--hover);color:var(--text)}
+.nav-item:hover svg{opacity:1}
 .nav-item.on{background:var(--acc-soft);color:var(--acc-text);font-weight:600}
-.nav-item.on::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:18px;
+.nav-item.on svg{opacity:1}
+.nav-item.on::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;
   border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--acc),var(--acc2))}
-.nav-item .badge{margin-left:auto}
+.nav-item .badge{margin-left:auto;flex:none;font-size:10px;padding:1px 6px}
 .side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;position:relative}
-/* 当前登录账号与角色（多管理员之后必须一眼看出「我是谁、我能干什么」） */
-.whoami{display:flex;align-items:center;gap:7px;padding:0 10px 8px;font-size:12px;min-width:0}
-.whoami-user{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px}
-.whoami-role{flex:none;font-size:10.5px;padding:1px 7px;border-radius:99px;font-weight:600;
+/* 当前登录账号与角色（多管理员之后必须一眼看出「我是谁、我能干什么」）。 */
+.whoami{display:flex;align-items:center;gap:8px;padding:0 10px 8px;font-size:12.5px;min-width:0}
+.whoami-user{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:96px}
+/* 主题与退出并排堆在底部。position:relative 在这里，主题弹窗才能按
+   「侧栏右侧」定位——挂在单个按钮上，弹窗会从侧栏里面钻出来。 */
+.side-tools{display:flex;flex-direction:column;gap:2px;position:relative}
+.side-tools>*{flex:0 0 auto}
+.whoami-role{display:inline-block;flex:none;font-size:11px;padding:1px 8px;border-radius:99px;font-weight:600;
   background:var(--acc-soft);color:var(--acc-text);border:1px solid transparent}
 .whoami-role.owner{background:var(--warn-soft);color:var(--warn)}
 .whoami-role.viewer{background:var(--hover);color:var(--muted)}
@@ -229,17 +243,7 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 body[data-role="viewer"] .need-admin,body[data-role="viewer"] .need-owner{display:none!important}
 body[data-role="admin"] .need-owner{display:none!important}
 .main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:14px 28px;
-  background:var(--glass);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
-  border-bottom:1px solid var(--line)}
-/* 不支持 backdrop-filter 的内核里 --glass 仍是半透明的：内容从顶栏下面滚过时
-   直接透出来，看起来像闪烁/重影。给一层不透明底色兜底，顶栏才真的挡住内容。 */
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .topbar{background:var(--bg)}
-}
-.topbar h2{font-size:17px;font-weight:650;letter-spacing:.2px}
-.topbar .sub{font-size:12px;color:var(--muted);margin-top:1px}
-.topbar .spacer{flex:1}
+/* 顶栏已并入 .cmdbar（方案 B），这里只留状态胶囊本身的样式。 */
 .top-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;font-size:12px;
   background:var(--hover);color:var(--muted);border:1px solid var(--line);transition:all var(--t-fast)}
 .top-pill b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
@@ -362,16 +366,17 @@ body[data-role="admin"] .need-owner{display:none!important}
    桌面：钉在侧栏底部、账号区上方。侧栏是固定高度、只有 #nav 自己滚，
           所以导航滚到哪儿它都在。
    手机：导航条横排，它占最左侧一格（见下面的 @media，order:-1）。 */
-.side-apply{display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  width:100%;height:38px;flex:0 0 auto;margin:12px 0 6px;
+.side-apply{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  width:100%;height:40px;flex:0 0 auto;margin:12px 0 10px;
   border:none;border-radius:var(--r);cursor:pointer;
   background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));color:var(--on-acc);
-  font:600 13px/1 var(--font);
+  font:600 13.5px/1 var(--font);
   box-shadow:0 6px 14px -9px rgba(20,40,80,.55);
   transition:box-shadow var(--t-fast),transform var(--t-fast),background var(--t-fast),color var(--t-fast)}
 .side-apply:hover{box-shadow:0 8px 18px -9px rgba(20,40,80,.7)}
 .side-apply:active{transform:translateY(1px)}
-/* 桌面侧栏放得下全称，手机导航条那一格只够两个字 */
+/* 侧栏够宽，用原名「应用配置」，不再缩成两字。 */
+.side-apply .sa-l{display:inline}
 .side-apply .sa-s{display:none}
 /* 手机上导航条横排：品牌图标只剩一个装饰用的盾牌（文字早就藏了），这块位置让给
    「应用」。order:-1 把它挪到最左侧——DOM 里它排在 #nav 之后，因为桌面上要落在
@@ -642,10 +647,13 @@ td.num{font-variant-numeric:tabular-nums}
 .progress i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width var(--t-slow)}
 
 /* ============ 主题选择 ============ */
-.theme-btn{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--muted);
-  padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
+.theme-btn{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;border:none;background:none;color:var(--muted);
+  padding:9px 10px;border-radius:var(--r);cursor:pointer;font-size:13.5px;font-family:var(--font);transition:background var(--t-fast),color var(--t-fast)}
+/* 侧栏 216px，文字照常显示；窄屏底栏才收成图标（见文末 @media）。 */
+.theme-btn span{display:block}
 .theme-btn:hover{background:var(--hover);color:var(--text)}
-.tpop{position:absolute;bottom:54px;left:10px;width:302px;max-height:calc(100vh - 130px);overflow:auto;
+/* 主题弹窗从窄栏右侧弹出，不能按左对齐的 302px 算——那样整块会压在侧栏上。 */
+.tpop{position:absolute;bottom:0;left:calc(100% + 6px);width:302px;max-height:calc(100vh - 40px);overflow:auto;
   background:var(--card);border:1px solid var(--line);
   border-radius:var(--r);box-shadow:var(--shadow-lg);padding:14px;z-index:50;
   opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;transition:opacity var(--t-fast),transform var(--t-fast)}
@@ -809,8 +817,10 @@ canvas{display:block;width:100%}
 .card{box-shadow:var(--elev-1)}
 .kpi:hover,.quick:hover,.scn-card:hover{box-shadow:var(--elev-2)}
 
-/* ---- 命令条：所有页面常驻，搜索 + 三个高频动作 ---- */
-.cmdbar{position:sticky;top:var(--topbar-h,74px);z-index:15;display:flex;align-items:center;gap:9px;
+/* ---- 命令条：所有页面常驻，也是页面上唯一的顶栏 ----
+   方案 B 之后它同时承担原 .topbar 的职责（页名 + 状态胶囊），
+   所以吸顶位置是 0；--topbar-h 由 app.js 量它自己的高度算出来。 */
+.cmdbar{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:9px;
   flex-wrap:wrap;max-width:1240px;width:100%;margin:0 auto;
   padding:10px 28px;background:var(--bg);border-bottom:1px solid var(--line)}
 .cmdbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:14px;pointer-events:none;
@@ -824,7 +834,12 @@ canvas{display:block;width:100%}
   border:1px solid var(--line);border-radius:4px;padding:3px 5px;background:var(--hover);white-space:nowrap}
 .cmd-quick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .cmd-quick .btn{padding:6px 11px;font-size:12.5px}
-.cmdbar .cmd-hint{font-size:11.5px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* 当前页名：小号、不换行，给命令条一个定位锚点；副标题退到 title 里 */
+.cmd-page{display:inline-flex;align-items:center;min-width:0;flex:0 1 auto}
+.cmd-page h2{font-size:13px;font-weight:650;letter-spacing:.1px;margin:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:150px}
+/* 右侧状态：内核数 / 实时速率 / 版本。挤不进就整体换行，不压搜索框 */
+.cmd-status{display:inline-flex;align-items:center;gap:10px;margin-left:auto;flex:none}
 
 /* ---- 命令面板 ---- */
 .cmd-overlay{position:fixed;top:0;right:0;bottom:0;left:0;z-index:150;display:none;
@@ -886,21 +901,23 @@ canvas{display:block;width:100%}
 .wb-body>.card,.wb-body>.grid-2,.wb-body>.kpis{margin-bottom:0}
 .wb-body>.grid-2{gap:var(--dens-gap)}
 
-/* 今天要处理：可点的待办，注册表式来源，任一接口失败不影响其它条目 */
-.todo-list{display:flex;flex-direction:column;gap:8px}
-.todo-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--r);
-  background:var(--hover);border:1px solid var(--line);min-width:0;width:100%;text-align:left;
+/* 今天要处理：按设计稿做成一行横向胶囊（证书 14 天到期 · 备份 2.1 GB · BBR 可开启）。
+   原来是一列带描述的双行条目，四五项就把首屏占满；胶囊只留标题，
+   详情进 title，鼠标悬停或读屏都能拿到。 */
+.todo-list{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px}
+.todo-row{display:inline-flex;align-items:center;gap:7px;padding:6px 11px 6px 8px;border-radius:99px;
+  background:var(--hover);border:1px solid var(--line);min-width:0;width:auto;max-width:100%;text-align:left;
   font:inherit;cursor:pointer;transition:border-color var(--t-fast),transform var(--t-fast)}
-.todo-row:hover{border-color:var(--acc-soft);transform:translateX(2px)}
-.todo-ic{width:24px;height:24px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;background:var(--acc-soft);color:var(--acc-text)}
+.todo-row:hover{border-color:var(--acc-soft);transform:translateY(-1px)}
+.todo-ic{width:17px;height:17px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;background:var(--acc-soft);color:var(--acc-text)}
 .todo-ic.warn{background:var(--warn-soft);color:var(--warn)}
 .todo-ic.err{background:var(--err-soft);color:var(--err)}
 .todo-ic.ok{background:var(--ok-soft);color:var(--ok)}
-.todo-tx{min-width:0;flex:1}
-.todo-tx b{display:block;font-size:13px;font-weight:600;word-break:break-word}
-.todo-tx span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-word}
-.todo-go{flex:none;color:var(--muted);font-size:12px}
+.todo-tx{min-width:0;flex:0 1 auto}
+.todo-tx b{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.todo-tx span{display:none}
+.todo-go{display:none}
 
 /* ---- 主题弹窗：大预览卡 + 密度圆角两轴 ---- */
 .scheme .prev{height:64px}
@@ -947,7 +964,9 @@ canvas{display:block;width:100%}
   .cmdbar::after{display:none}
   .cmd-trigger{min-width:0;flex:1 1 130px}
   .cmd-trigger .kbd{display:none}
-  .cmdbar .cmd-hint{display:none}
+  /* 窄屏只留页名与搜索，状态胶囊收进「更多」不用挤这一行 */
+  .cmd-page h2{max-width:88px}
+  .cmd-status{display:none}
   .cmd-quick .btn{padding:6px 9px;font-size:0;gap:0}
   .cmd-quick .btn svg{width:16px;height:16px}
   .cmd-overlay{padding:calc(12px + env(safe-area-inset-top)) 10px 10px}
@@ -966,7 +985,10 @@ canvas{display:block;width:100%}
   #nav{display:none}
   .side-apply{display:none}
   .side-foot{gap:0}
-  .side-foot .theme-btn{padding:6px}
+  /* 底栏横排，两个按钮并排、只留图标 */
+  .side-tools{flex-direction:row;gap:4px}
+  .side-foot .theme-btn{width:auto;padding:7px}
+  .side-foot .theme-btn span{display:none}
 }
 @media (max-width:360px){
   .more-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1041,8 +1063,9 @@ canvas{display:block;width:100%}
         <span class="whoami-user" id="whoami_user">—</span>
         <span class="whoami-role" id="whoami_role"></span>
       </div>
-      <div style="position:relative">
-        <button class="theme-btn" id="themeBtn" data-act="toggleThemePop">
+      <div class="side-tools">
+      <div>
+        <button class="theme-btn" id="themeBtn" data-act="toggleThemePop" title="主题外观" aria-label="主题外观">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1 0 1.5-.7 1.2-1.5-.5-1.4.2-2.5 1.8-2.5h1.5c1.4 0 2.5-1.1 2.5-2.5A9 9 0 0 0 12 3z"/></svg>
           <span>主题外观</span>
         </button>
@@ -1071,24 +1094,21 @@ canvas{display:block;width:100%}
           </div>
         </div>
       </div>
-      <button class="theme-btn" data-act="logout">
+      <button class="theme-btn" data-act="logout" title="退出登录" aria-label="退出登录">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
         <span>退出登录</span>
       </button>
+      </div>
     </div>
   </aside>
 
   <main class="main">
-    <div class="topbar">
-      <div><h2 id="pageTitle">概览</h2><div class="sub" id="pageSub">一屏掌握入站、用户、流量与内核状态</div></div>
-      <span class="spacer"></span>
-      <span class="top-pill" id="pillCore"><i class="pulse"></i> 内核 <b>0/0</b></span>
-      <span class="top-pill" id="pillLive">↓ —</span>
-      <span class="muted mono" id="verinfo"></span>
-    </div>
-    <!-- 命令中枢：所有页面常驻。搜索索引视图与高频动作，右侧三个按钮不必先找页面。
-         手机上压成「一行搜索 + 三个图标」，窄屏也不挤掉内容。 -->
+    <!-- 顶栏按方案 B 设计稿并进命令条：原来标题、副标题、状态胶囊各占一行，
+         首屏有一小半被这些不动的信息吃掉。现在一行里放「当前页名 + 搜索 +
+         三个动作 + 右侧状态」，页面名降为小号说明，副标题进 title。
+         元素 id 全部保留（goto() 仍会写 pageTitle/pageSub）。 -->
     <div class="cmdbar" id="cmdbar">
+      <span class="cmd-page"><h2 id="pageTitle">概览</h2><span class="sub hide" id="pageSub">一屏掌握入站、用户、流量与内核状态</span></span>
       <button class="cmd-trigger" data-act="openCommand" aria-label="搜索页面与操作">
         <span class="ci"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
         <span>搜索页面与操作</span><span class="kbd">Ctrl K</span>
@@ -1101,34 +1121,26 @@ canvas{display:block;width:100%}
         <button class="btn need-admin" data-act="openApply" title="应用配置">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span>应用配置</span></button>
       </span>
-      <span class="cmd-hint muted" id="cmdHint">按 Ctrl K 直达任意页面</span>
+      <span class="cmd-status">
+        <span class="top-pill" id="pillCore"><i class="pulse"></i> 内核 <b>0/0</b></span>
+        <span class="top-pill" id="pillLive">↓ —</span>
+        <span class="muted mono" id="verinfo"></span>
+      </span>
     </div>
     <div class="content">
 
     <!-- 概览：命令工作台。卡片可折叠 / 置顶 / 排序，布局存后端设置；
          瀑布流只在桌面启用，DOM 顺序始终等于视觉与 Tab 顺序。 -->
     <section id="v-overview" class="view active">
-      <div class="hero">
-        <div class="hero-inner">
-          <div class="hero-txt">
-            <h1>Triune Panel · <span class="grad-text">三内核统一控制台</span></h1>
-            <p>mihomo · sing-box · xray 统一纳管。配置渲染 → 内核校验 → 原子替换 → 备份 → 回滚，
-               任一环节失败都不影响现网运行；升级与切换全程可回滚。</p>
-            <p class="muted" style="margin-top:8px">用上方命令条搜索任意页面，或直接新建入站、生成配置、应用配置。下面的卡片可以折叠、置顶与排序，布局会被记住。</p>
-            <p id="last_login_line" class="hide" style="font-size:12.5px;margin-top:6px;opacity:.75"></p>
-          </div>
-        </div>
-      </div>
+      <!-- 方案 B 设计稿：命令条下面直接进工作台，不做占满首屏的 Hero。
+           原来的品牌大卡把第一屏全吃掉，四张卡片要滚动才看得见；
+           现在保留同样信息但不占位。上次登录时间降级成一行脚注。 -->
+      <p id="last_login_line" class="hide" style="font-size:11.5px;margin:0 2px 9px"></p>
 
       <div id="workbench">
         <div class="wb-card" data-wb="todo" data-title="今天要处理" data-hint="汇总待办，点一下直达">
           <div class="wb-head"></div>
           <div class="wb-body"><div class="todo-list" id="wbTodo"></div></div>
-        </div>
-
-        <div class="wb-card" data-wb="kpis" data-title="关键指标" data-hint="入站、用户与流量概览">
-          <div class="wb-head"></div>
-          <div class="wb-body"><div class="kpis" id="kpis"></div></div>
         </div>
 
         <div class="wb-card" data-wb="trend" data-title="流量趋势" data-hint="近 14 天 · 上行 / 下行">
@@ -1182,8 +1194,13 @@ canvas{display:block;width:100%}
               <button class="quick need-admin" data-act="openApply"><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>应用配置</button>
               <button class="quick" data-act="goto" data-args='["settings"]'><span class="qi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统设置</button>
             </div>
-            <p class="muted" style="margin-top:14px">「未配置」表示尚未设置内核二进制路径 —— 可在下方「设置」中填入，或到<button type="button" class="lnk" data-act="goto" data-args='["settings","maintain"]'>设置 → 组件更新与版本管理</button>里<b>一键安装</b>面板专用副本（与系统现有二进制完全隔离，不影响其他服务）。</p>
           </div>
+        </div>
+
+        <!-- 关键指标按设计稿后置：先看趋势与内核，KPI 大数字退到第二屏。 -->
+        <div class="wb-card" data-wb="kpis" data-title="关键指标" data-hint="入站、用户与流量概览">
+          <div class="wb-head"></div>
+          <div class="wb-body"><div class="kpis" id="kpis"></div></div>
         </div>
       </div>
     </section>
@@ -1928,23 +1945,61 @@ canvas{display:block;width:100%}
 
     <!-- 主机优化：BBR 只读体检 + 显式确认后才写系统配置 -->
     <section id="v-hostopt" class="view">
+      <div class="grid-2">
+        <div class="card">
+          <h3>系统概览<span class="spacer"></span>
+            <button class="btn sm" data-act="loadHostOpt">重新检测</button>
+          </h3>
+          <div id="ho_sys"></div>
+          <p class="muted" id="ho_sys_warn" style="margin-top:8px;font-size:12px"></p>
+        </div>
+
+        <div class="card">
+          <h3>网络参数<span class="spacer"></span>
+            <button class="btn sm" data-act="hoExport">导出报告</button>
+          </h3>
+          <p class="muted" style="margin-bottom:12px">
+            面板只会写下面这六个键，写入 <code>/etc/sysctl.d/99-triune-bbr.conf</code>。
+            <b>应用前先备份每个键的原值，写完回读复检，不符自动整体回滚。</b>
+          </p>
+          <div class="frm" id="ho_form" style="margin-bottom:0">
+            <div><label>拥塞控制</label>
+              <select id="ho_cc" class="input" data-act="hoEdit"></select></div>
+            <div><label>队列规则</label>
+              <select id="ho_qdisc" class="input" data-act="hoEdit"></select></div>
+            <div><label>接收缓冲（MiB）</label>
+              <input id="ho_rmem" class="input" type="number" min="0.0625" step="0.1" data-act="hoEdit"></div>
+            <div><label>发送缓冲（MiB）</label>
+              <input id="ho_wmem" class="input" type="number" min="0.0625" step="0.1" data-act="hoEdit"></div>
+            <div><label>全连接队列 somaxconn</label>
+              <input id="ho_somaxconn" class="input" type="number" min="128" step="128" data-act="hoEdit"></div>
+            <div><label>本地端口范围</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="ho_pstart" class="input" type="number" min="1024" max="65535" data-act="hoEdit">
+                <span class="muted">–</span>
+                <input id="ho_pend" class="input" type="number" min="1024" max="65535" data-act="hoEdit">
+              </div>
+            </div>
+          </div>
+          <div id="ho_diff" style="margin-top:14px"></div>
+          <p class="muted" id="ho_reason" style="margin-top:10px;line-height:1.7"></p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn primary hide" id="ho_apply" data-act="hostOptApply">应用网络参数</button>
+            <button class="btn danger hide" id="ho_revert" data-act="hostOptRevert">撤销面板的改动</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
-        <h3>主机网络体检<span class="spacer"></span>
-          <button class="btn sm" data-act="loadHostOpt">重新检测</button>
-        </h3>
+        <h3>主机网络体检</h3>
         <p class="muted" style="margin-bottom:12px">
           这里只做<b>只读检测</b>：不创建文件、不改 sysctl、不重启任何服务。
-          应用与撤销会写 <code>/etc/sysctl.d/99-triune-bbr.conf</code>，仅超级管理员可用，
-          且必须先备份原值、失败整体回滚。
+          检测覆盖 BBR 支持、时钟同步、文件描述符、conntrack 水位与 sysctl 覆盖。
         </p>
         <div id="ho_meta" style="margin-bottom:12px"></div>
         <div id="ho_checks"></div>
-        <div id="ho_reason" class="muted" style="margin-top:10px;line-height:1.7"></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-          <button class="btn primary hide" id="ho_apply" data-act="hostOptApply">应用 BBR</button>
-          <button class="btn danger hide" id="ho_revert" data-act="hostOptRevert">撤销面板的改动</button>
-        </div>
       </div>
+
       <div class="card">
         <h3>手动执行 / 验证命令</h3>
         <p class="muted" style="margin-bottom:10px">不放心让面板写系统配置时，复制下列命令自己执行即可；效果与面板的应用完全一致。</p>

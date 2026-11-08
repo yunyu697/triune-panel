@@ -25,6 +25,10 @@ type fixture struct {
 	cc               string
 	avail            string
 	qdisc            string
+	rmem             string
+	wmem             string
+	somaxconn        string
+	portRange        string
 	version          string
 	route            string
 	moduleDir        bool
@@ -40,24 +44,47 @@ type fixture struct {
 	cmdHook func()
 	cmdErr  error
 
+	// 扩展体检项的桩（时钟 / fd / conntrack / sysctl 覆盖）。
+	timedatectlFound bool
+	clockOut         string
+	clockErr         error
+	limits           string // /proc/self/limits 内容
+	fileMax          string
+	fileNr           string
+	ctMax            string // 空 = 未启用 nf_conntrack
+	ctCount          string
+
 	// 记录任何写动作，用于断言「confirm 错 / 不支持时绝不落盘」与「Detect 只读」。
 	mutations int
 }
 
 func defaultFixture() *fixture {
 	return &fixture{
-		goosVal:     "linux",
-		root:        true,
-		cgroup:      "0::/\n",
-		cc:          "bbr\n",
-		avail:       "reno cubic bbr\n",
-		qdisc:       "fq\n",
+		goosVal: "linux",
+		root:    true,
+		cgroup:  "0::/\n",
+		cc:      "bbr\n",
+		avail:   "reno cubic bbr\n",
+		qdisc:   "fq\n",
+		// 这四个用「系统默认值」，与 DefaultTune() 不同，应用/回滚才真的可观测。
+		rmem:        "212992\n",
+		wmem:        "212992\n",
+		somaxconn:   "4096\n",
+		portRange:   "32768\t60999\n",
 		version:     "Linux version 5.15.0-91-generic (buildd@lcy02) #101-Ubuntu SMP\n",
 		route:       "Iface\tDestination\tGateway\tFlags\neth0\t00000000\t0100000A\t0003\n",
 		moduleDir:   true,
 		tcFound:     true,
 		sysctlFound: true,
 		tcOutput:    "qdisc fq 8001: dev eth0 root refcnt 2 limit 10000p buckets 1024\n",
+		// 时钟：默认「timedatectl 不存在」，各用例按需打开。
+		// fd / conntrack：默认是健康值，个别用例改成病态值。
+		limits: "Limit                     Soft Limit           Hard Limit           Units\n" +
+			"Max open files            1048576              1048576              files\n",
+		fileMax: "9223372036854775807\n",
+		fileNr:  "1280\t0\t9223372036854775807\n",
+		ctMax:   "262144\n",
+		ctCount: "1024\n",
 	}
 }
 
@@ -72,6 +99,11 @@ func (f *fixture) install(t *testing.T) {
 	oCfg, oSysctlDir, oProcSys := cfgPath, sysctlDir, procSys
 	oVer, oRoute, oCgroup := procVersion, procRoute, procCgroup
 	oModule, oVZ, oDocker, oContainerEnv := bbrModuleDir, procVZDir, dockerEnv, containerEnv
+	oFileMax, oFileNr, oSelfLim := procFileMax, procFileNr, procSelfLimits
+	oCtMax, oCtCnt := procCtMax, procCtCount
+	oEtcConf, oLoad, oMem := etcSysctlConf, procLoadAvg, procMemInfo
+	oIPv6, oNet, oTZ := procIPv6Off, sysClassNet, etcTimezone
+	oReadDir, oCPU, oDisk := readDir, cpuCount, diskFree
 	t.Cleanup(func() {
 		readFile, writeFile, stat, mkdirAll, remove, rename = oRead, oWrite, oStat, oMkdir, oRemove, oRename
 		geteuid, lookPath, lookupEnv, runCmd = oGeteuid, oLookPath, oLookupEnv, oRunCmd
@@ -79,6 +111,11 @@ func (f *fixture) install(t *testing.T) {
 		cfgPath, sysctlDir, procSys = oCfg, oSysctlDir, oProcSys
 		procVersion, procRoute, procCgroup = oVer, oRoute, oCgroup
 		bbrModuleDir, procVZDir, dockerEnv, containerEnv = oModule, oVZ, oDocker, oContainerEnv
+		procFileMax, procFileNr, procSelfLimits = oFileMax, oFileNr, oSelfLim
+		procCtMax, procCtCount = oCtMax, oCtCnt
+		etcSysctlConf, procLoadAvg, procMemInfo = oEtcConf, oLoad, oMem
+		procIPv6Off, sysClassNet, etcTimezone = oIPv6, oNet, oTZ
+		readDir, cpuCount, diskFree = oReadDir, oCPU, oDisk
 	})
 
 	// 所有路径指向临时目录，绝不碰真实 /proc / /etc。
@@ -94,6 +131,22 @@ func (f *fixture) install(t *testing.T) {
 	dockerEnv = filepath.Join(f.dir, ".dockerenv")
 	containerEnv = filepath.Join(f.dir, ".containerenv")
 
+	procFileMax = filepath.Join(procSys, "fs", "file-max")
+	procFileNr = filepath.Join(procSys, "fs", "file-nr")
+	procSelfLimits = filepath.Join(f.dir, "proc", "self", "limits")
+	procCtMax = filepath.Join(procSys, "net", "netfilter", "nf_conntrack_max")
+	procCtCount = filepath.Join(procSys, "net", "netfilter", "nf_conntrack_count")
+	etcSysctlConf = filepath.Join(f.dir, "etc", "sysctl.conf")
+	procLoadAvg = filepath.Join(f.dir, "proc", "loadavg")
+	procMemInfo = filepath.Join(f.dir, "proc", "meminfo")
+	procIPv6Off = filepath.Join(procSys, "net", "ipv6", "conf", "all", "disable_ipv6")
+	sysClassNet = filepath.Join(f.dir, "sys", "class", "net")
+	etcTimezone = filepath.Join(f.dir, "etc", "timezone")
+
+	readDir = os.ReadDir
+	cpuCount = func() int { return 2 }
+	diskFree = func(string) (uint64, uint64, error) { return 100 << 30, 60 << 30, nil }
+
 	mustMkdir(t, filepath.Join(procSys, "net", "ipv4"))
 	mustMkdir(t, filepath.Join(procSys, "net", "core"))
 	mustMkdir(t, sysctlDir)
@@ -103,6 +156,27 @@ func (f *fixture) install(t *testing.T) {
 	mustWrite(t, ccPath(), f.cc)
 	mustWrite(t, availPath(), f.avail)
 	mustWrite(t, qdiscPath(), f.qdisc)
+	mustWrite(t, keyPath(keyRmem), f.rmem)
+	mustWrite(t, keyPath(keyWmem), f.wmem)
+	mustWrite(t, keyPath(keySomaxconn), f.somaxconn)
+	mustWrite(t, keyPath(keyPortRange), f.portRange)
+
+	mustMkdir(t, filepath.Dir(procFileMax))
+	mustWrite(t, procFileMax, f.fileMax)
+	mustWrite(t, procFileNr, f.fileNr)
+	mustMkdir(t, filepath.Dir(procSelfLimits))
+	mustWrite(t, procSelfLimits, f.limits)
+	if f.ctMax != "" {
+		mustMkdir(t, filepath.Dir(procCtMax))
+		mustWrite(t, procCtMax, f.ctMax)
+		mustWrite(t, procCtCount, f.ctCount)
+	}
+	mustWrite(t, procLoadAvg, "0.12 0.20 0.18 1/240 4321\n")
+	mustWrite(t, procMemInfo, "MemTotal:        2048000 kB\nMemFree:          512000 kB\nMemAvailable:    1024000 kB\n")
+	mustMkdir(t, filepath.Dir(procIPv6Off))
+	mustWrite(t, procIPv6Off, "0\n")
+	mustMkdir(t, filepath.Join(sysClassNet, "eth0"))
+	mustWrite(t, filepath.Join(sysClassNet, "eth0", "mtu"), "1500\n")
 	mustWrite(t, procVersion, f.version)
 	mustWrite(t, procRoute, f.route)
 	mustWrite(t, procCgroup, f.cgroup)
@@ -161,16 +235,25 @@ func (f *fixture) install(t *testing.T) {
 			if f.sysctlFound {
 				return filepath.Join(f.dir, "bin", "sysctl"), nil
 			}
+		case "timedatectl":
+			if f.timedatectlFound {
+				return filepath.Join(f.dir, "bin", "timedatectl"), nil
+			}
 		}
 		return "", fmt.Errorf("%s: not found", name)
 	}
 	runCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte(f.clockOut), f.clockErr
+		}
 		if len(args) > 0 && args[0] == "qdisc" {
 			return []byte(f.tcOutput), nil
 		}
-		// sysctl -p：先模拟「配置已生效」，再按用例决定成功/失败。
+		// sysctl -p <file>：没自定义钩子时，按真实语义把文件里的键值写进 /proc。
 		if f.cmdHook != nil {
 			f.cmdHook()
+		} else if args[0] == "-p" && len(args) > 1 {
+			applyConfigFile(args[1])
 		}
 		return nil, f.cmdErr
 	}
@@ -180,6 +263,30 @@ func mustMkdir(t *testing.T, p string) {
 	t.Helper()
 	if err := os.MkdirAll(p, 0o700); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", p, err)
+	}
+}
+
+// applyConfigFile 模拟 `sysctl -p <file>`：把配置里的键值真的写进（假的）/proc，
+// 这样「写完回读复检」才有东西可查，而不是永远读到旧值。
+func applyConfigFile(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(s, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if !isManagedKey(k) {
+			continue
+		}
+		_ = os.WriteFile(keyPath(k), []byte(strings.TrimSpace(v)), 0o644)
 	}
 }
 
@@ -427,17 +534,27 @@ func TestApplySuccess(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	// 配置内容恰好两行，且权限 0644。
+	// 配置内容与参数表一致（一行来源注释 + 六个键），且权限 0644。
 	content, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != bbrConfig {
+	if string(content) != configText(DefaultTune()) {
 		t.Fatalf("配置内容不符: %q", content)
 	}
-	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) != 2 || lines[0] != "net.core.default_qdisc=fq" || lines[1] != "net.ipv4.tcp_congestion_control=bbr" {
-		t.Fatalf("配置应恰好两行: %q", lines)
+	var keys []string
+	for _, line := range strings.Split(string(content), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, _, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("配置行不是 key=value: %q", line)
+		}
+		keys = append(keys, strings.TrimSpace(k))
+	}
+	if strings.Join(keys, ",") != strings.Join(managedKeys(), ",") {
+		t.Fatalf("配置应恰好包含参数表里的六个键，实际 %v", keys)
 	}
 	if fi, err := os.Stat(cfgPath); err != nil || fi.Mode().Perm() != 0o644 {
 		t.Errorf("配置文件权限应为 0644: %v %v", fi, err)
@@ -556,10 +673,6 @@ func TestRevertRestoresAndKeepsAudit(t *testing.T) {
 	f := defaultFixture()
 	f.cc = "cubic\n"
 	f.qdisc = "pfifo_fast\n"
-	f.cmdHook = func() {
-		_ = os.WriteFile(ccPath(), []byte("bbr"), 0o644)
-		_ = os.WriteFile(qdiscPath(), []byte("fq"), 0o644)
-	}
 	f.install(t)
 
 	if err := Apply(f.dir, ApplyConfirm); err != nil {
