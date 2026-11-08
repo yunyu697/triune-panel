@@ -297,12 +297,22 @@ function goto(v, sect, animate = true) {
   if (v === "outbounds") loadOutbounds();
   if (v === "audit") loadAudit();
   if (v === "configs") loadSavedConfigs();
-  if (v === "settings") setTimeout(() => {
-    syncTopbarH();     // 进页面时补量一次：登录前量到的是 0
+  if (v === "settings") {
+    /* 分组必须在**当前这个 JS 任务**里恢复。原来 setSectSaved() 排在下面的
+       30ms 定时器里，浏览器有充足时间先画一帧 HTML 默认的「常用」再跳回
+       「运维」——用户看到的就是「刷新先跳常用」。boot.js 的 data-boot-sect
+       只兜住 app.js 执行之前的那段首帧，这里接手时 setSect() 会撤掉标记，
+       两边必须得出同一个结果，否则仍会跳一下。
+       同步调用是安全的：setSect() 只依赖已在 DOM 里的卡片与角色，
+       .active 上面已经摆好，offsetParent 量得到东西。 */
     if (sect && SET_SECTS[sect]) setSect(sect, true);   // 深链接：用户点的，记住它
     else setSectSaved();
-    loadPanelTLS();
-  }, 30);
+    setTimeout(() => {
+      syncTopbarH();     // 进页面时补量一次：登录前量到的是 0
+      loadPanelTLS();
+      updateSetBar();    // 顶栏高度补量完再判一次常驻保存条
+    }, 30);
+  }
 }
 
 /* ================= Toast / Modal / Confirm ================= */
@@ -374,29 +384,72 @@ function schemeVars(mode, scheme) {
   probe.remove();
   return out;
 }
+/* 预览卡上每个色块对应哪个 CSS 变量、悬停时显示什么名字。
+   renderSchemes() 第一次建 DOM，之后只改已有节点的 style/title/class。 */
+const SCHEME_DOTS = [
+  ["bg", "背景"], ["side", "侧栏"], ["card", "卡片"],
+  ["text", "文字"], ["acc", "主色"], ["acc2", "辅色"]
+];
+function schemeMarkup([id, name]) {
+  return `<button class="scheme" data-s="${id}">
+      <span class="prev"><i class="p-side"></i><i class="p-card"></i><i class="p-ln"></i><i class="p-ln2"></i><i class="p-btn"></i></span>
+      <span class="nm"><b>${name}</b><span class="chk">✓</span></span>
+      <span class="dots">${SCHEME_DOTS.map(() => "<i></i>").join("")}</span>
+      <span class="hex">—</span>
+    </button>`;
+}
+/* 增量刷新一张预览卡。原来每次切主题都用 innerHTML 重建 7 张（每张 12 个
+   节点），弹窗里的网格会整块闪一下。这里一个节点都不换：文字用
+   textNode.nodeValue 改（characterData，不是 childList），颜色只写 style，
+   选中态只切 class——MutationObserver 盯 childList 应当一条都记不到。 */
+function paintScheme(btn, id, name) {
+  const c = schemeVars(themeMode, id);
+  btn.classList.toggle("on", id === themeScheme);
+  btn.title = MODE_NAME[themeMode] + " · " + name;
+  btn.querySelector(".prev").style.background = c.bg;
+  const side = btn.querySelector(".p-side");
+  side.style.background = c.side;
+  side.style.borderRightColor = c.line;
+  const card = btn.querySelector(".p-card");
+  card.style.background = c.card;
+  card.style.borderColor = c.line;
+  btn.querySelector(".p-ln").style.background = c.text;
+  btn.querySelector(".p-ln2").style.background = c.text;
+  btn.querySelector(".p-btn").style.background = `linear-gradient(135deg,${c.acc},${c.acc2})`;
+  const dots = btn.querySelectorAll(".dots i");
+  SCHEME_DOTS.forEach(([k, label], i) => {
+    dots[i].style.background = c[k];
+    dots[i].title = `${label} ${c[k]}`;
+  });
+  btn.querySelector(".hex").firstChild.nodeValue = `${c.acc} · ${c.acc2}`;
+}
 function renderSchemes() {
   const cur = SCHEMES.find(s => s[0] === themeScheme);
   $("themeNow").textContent = MODE_NAME[themeMode] + " · " + (cur ? cur[1] : "蔚蓝");
   $("schemeN").textContent = SCHEMES.length + " 套";
   document.querySelectorAll("#modeSeg button").forEach(b => b.classList.toggle("on", b.dataset.mode === themeMode));
-  $("schemes").innerHTML = SCHEMES.map(([id, name]) => {
-    const c = schemeVars(themeMode, id);
-    const dot = (col, label) => `<i style="background:${col}" title="${label} ${col}"></i>`;
-    return `<button class="scheme${id === themeScheme ? " on" : ""}" data-s="${id}" title="${MODE_NAME[themeMode]} · ${name}">
-      <span class="prev" style="background:${c.bg}">
-        <i class="p-side" style="background:${c.side};border-right-color:${c.line}"></i>
-        <i class="p-card" style="background:${c.card};border-color:${c.line}"></i>
-        <i class="p-ln" style="background:${c.text}"></i>
-        <i class="p-ln2" style="background:${c.text}"></i>
-        <i class="p-btn" style="background:linear-gradient(135deg,${c.acc},${c.acc2})"></i>
-      </span>
-      <span class="nm"><b>${name}</b><span class="chk">✓</span></span>
-      <span class="dots">${dot(c.bg, "背景")}${dot(c.side, "侧栏")}${dot(c.card, "卡片")}${dot(c.text, "文字")}${dot(c.acc, "主色")}${dot(c.acc2, "辅色")}</span>
-      <span class="hex">${c.acc} · ${c.acc2}</span>
-    </button>`;
-  }).join("");
+  const host = $("schemes");
+  if (!host.children.length) host.innerHTML = SCHEMES.map(schemeMarkup).join("");
+  [...host.querySelectorAll(".scheme")].forEach(btn => {
+    const s = SCHEMES.find(x => x[0] === btn.dataset.s);
+    if (s) paintScheme(btn, s[0], s[1]);
+  });
+}
+let themeSwitchSeq = 0;
+/* 切换瞬间给 <html> 挂 data-theme-switch：index.html 用它把整页的
+   transition/animation 压成 none，CSS 变量一次换到位，不再插值出一串
+   中间色。两帧后撤——一帧让浏览器按「无过渡」算出新样式，第二帧兜住
+   样式重算与合成。序号挡住连点：前一次的定时器不能撤掉后一次的标记。 */
+function markThemeSwitch() {
+  const r = document.documentElement;
+  const seq = ++themeSwitchSeq;
+  r.setAttribute("data-theme-switch", "");
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (seq === themeSwitchSeq) r.removeAttribute("data-theme-switch");
+  }));
 }
 function applyTheme() {
+  markThemeSwitch();   // 必须排在改 data-mode/scheme 之前，同一个 JS 任务里
   const r = document.documentElement;
   r.dataset.mode = themeMode;
   r.dataset.scheme = themeScheme;
@@ -1059,6 +1112,8 @@ function clearBootFlag() {
   const h = document.documentElement;
   h.removeAttribute("data-boot");
   h.removeAttribute("data-boot-view");
+  // 首屏分组规则是 !important 的，留着会一直压住用户之后切组。
+  h.removeAttribute("data-boot-sect");
 }
 function showLogin(){ clearBootFlag(); $("login").classList.remove("hide"); $("app").classList.add("hide"); }
 /* 恢复上次停留的页面。boot.js 已在首帧用 data-boot-view 把目标页画出来了，
@@ -6906,6 +6961,10 @@ function setSectUsable(cards) {
 // persist 只在「用户自己点的」时候为真；按存储恢复、角色变化后的重算都不写，
 // 否则只读账号被顶到「安全」会把 owner 存的「运维」冲掉。
 function setSect(name, persist = true) {
+  // 首屏 CSS 用 !important 藏了非目标组的卡片。量 offsetParent 之前必须撤掉，
+  // 否则 setSectUsable() 会把「被首屏规则藏住」误当成「当前角色没权限」，
+  // 于是 usable 只剩一组，分组条被收起来、权限判定也跟着错。
+  document.documentElement.removeAttribute("data-boot-sect");
   const cards = [...document.querySelectorAll("#v-settings .card[data-sect]")];
   const usable = setSectUsable(cards);
   // 上次存的那组在这个角色下可能是空的（只读账号没有「常用」「运维」），

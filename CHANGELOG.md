@@ -8,6 +8,62 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.3.2
+
+### 刷新剩下的两处跳变：设置页分组与切主题
+
+v1.3.1 之后还剩两个只在真浏览器首帧量得出来的中间态，页面 load 完再看都已经
+被 `app.js` 抹平，手工点复现不出来。
+
+- **停在「运维」刷新先画一帧「常用」**：HTML 里三组卡片默认全可见、「常用」
+  按钮写死 `.on`，而 `app.js` 的 `setSectSaved()` 排在 `goto()` 的 30ms
+  定时器里。现在 `boot.js` 在 `<head>` 同步读 `triune_settings_sect`
+  （白名单 `common/security/maintain`，非法值回落 common），只在设置页打
+  `data-boot-sect`；CSS 首帧只留目标组并高亮对应按钮。接手侧三点必须同时成立：
+  `goto()` **同步**恢复分组（不能回定时器）、`clearBootFlag()` 撤标记、
+  `setSect()` 在 `setSectUsable()` 量 `offsetParent` **之前**撤——首屏规则带
+  `!important`，留着会把「被首屏藏住」误判成「当前角色没权限」。
+- **切主题整页渐变换色**：CSS 变量是瞬变的，但 body/.card/.seg 的
+  background/color transition 会慢慢追过去（亮→暗实测 6 个中间背景色），
+  没写过渡的阴影、图标却已经跳到新值；同时 `renderSchemes()` 每次
+  `innerHTML` 重建 7 张预览卡，网格整块闪一下。现在 `applyTheme()` 先挂
+  `data-theme-switch`（CSS 把全页 transition/animation 压成 `none!important`，
+  两帧后撤，连点用序号挡住旧定时器），预览卡首次建 DOM 之后只改
+  style/class/textNode.nodeValue —— `MutationObserver` 记不到 childList。
+
+### 首屏回归进 CI，发版后一条命令验完
+
+- `.e2e/` 从「整目录忽略」改成逐项白名单，8 个浏览器脚本、`package.json` /
+  `package-lock.json` 与变异脚本入库；`.github/workflows/ci.yml` 新增
+  `first-paint` job：Playwright 自带 Chromium + 中文字体 → 先跑
+  `TestDemoHTMLMatchesIndex`（离线回归全跑在 demo.html 上，它过期不会报错），
+  再跑 6 个离线脚本，最后用真 `tp serve` 跑 `first-paint-server.js`
+  （`/api/status` 延迟 800ms / 401 / 网络错误 / 正常 200；CSP 下探针必须是
+  同源外部脚本，注入内联脚本测的就不是线上那份页面）。
+  `internal/webui/e2e_wiring_test.go` 双向钉住「白名单里的脚本 ci.yml 点名了」
+  和「ci.yml 要跑的脚本白名单里有」——漏配不报错，只会静默不跑。
+- `internal/webui/no_flicker_test.go` 钉住 boot.js / app.js / CSS 三处链路：
+  分组白名单逐项一致、同步恢复、撤标记顺序、禁过渡规则与两帧撤销、预览卡增量更新。
+- `deploy/release.sh` 新增 `--resume`：GitHub 报 422/500/EOF 时那次请求可能
+  已经生效了一部分，盲目重跑原命令会撞「tag 已存在」。续跑先查远端真实状态
+  （草稿 / 缺哪几个资产 / tag 指向哪），只补没做完的步骤；`go`/`gh` 依赖预检
+  前移到开头（后台 shell 不加载交互 profile），仓库根路径改取物理路径
+  （macOS `/tmp` 是 `/private/tmp` 的符号链接，`git rev-parse` 给物理路径）。
+- 新增 `deploy/verify-release.sh <版本>`：匿名 API 核元数据与版本索引、
+  tag 本地/远端一致性、5 个资产下载下来与 `dist/` 逐字节 `cmp`、工作区干净，
+  把每次发版后手工敲的那串检查固化成一条命令。顺带修一个 bash 3.2 边界：
+  Release 一个资产都没有时展开空数组会 `unbound variable`，脚本挂在这里而不是
+  打印 FAIL——而「资产没传完」正是它要发现的状态。
+
+**验证**：`go test ./...` 全绿；`python3 deploy/build-demo.py` 重建后
+`TestDemoHTMLMatchesIndex` 通过；浏览器离线 6 脚本共 159 项
+（first-paint-flicker 40 / view-restore 33 / theme-switch-flicker 16 /
+section-restore 23 / bypass-server 14 / layout-check 33）、真后端
+`first-paint-server.js` 57 项全过；`.e2e/mutate-no-flicker.py` 四处变异
+（删首屏分组 CSS、分组恢复退回定时器、去掉禁过渡标记、预览网格改回 innerHTML）
+Go 与浏览器双双转红，恢复后 0 问题；`bash -n`、shellcheck 0.10.0
+`-S warning -e SC2206`、「中文标点紧跟变量」扫描、`check-version.sh v1.3.2` 全过。
+
 ## v1.3.1
 
 ### 刷新时主题与入场动画不再闪一下

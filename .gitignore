@@ -11,4 +11,17 @@ downloads/
 *.update-new
 *.rollback-new
 .DS_Store
-.e2e/
+# e2e 回归脚本要进 CI，但运行产物（探针页 / 临时后端 / 数据目录 / 日志 / 截图）
+# 一律不入库。先整目录忽略、再逐个白名单，避免新脚本忘了配就被静默漏掉。
+.e2e/*
+!.e2e/browser.js
+!.e2e/bypass-server.js
+!.e2e/first-paint-flicker.js
+!.e2e/first-paint-server.js
+!.e2e/layout-check.js
+!.e2e/mutate-no-flicker.py
+!.e2e/package.json
+!.e2e/package-lock.json
+!.e2e/section-restore.js
+!.e2e/theme-switch-flicker.js
+!.e2e/view-restore.js

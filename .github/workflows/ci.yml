@@ -1,8 +1,8 @@
 name: CI
 
-# 只做三件事：静态检查、单元测试、三平台能否编译。
+# 静态检查、单元测试、四平台能否编译、发布脚本静态检查、首屏浏览器回归。
 # 之所以加这道闸：apply/回滚这类路径一旦回归会直接改坏用户的运行配置，
-# 而本项目此前完全依赖手工 e2e 验证。
+# 而首屏闪动 / 主题切换这类问题 Go 单测完全碰不到，必须在真浏览器里量首帧。
 
 on:
   push:
@@ -81,7 +81,8 @@ jobs:
         run: |
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
           shellcheck -S warning -e SC2206 \
-            deploy/install.sh deploy/uninstall.sh deploy/check-version.sh deploy/release.sh
+            deploy/install.sh deploy/uninstall.sh deploy/check-version.sh \
+            deploy/release.sh deploy/verify-release.sh
 
       - name: 中文标点紧跟变量（$VAR，）
         run: |
@@ -104,3 +105,56 @@ jobs:
               sys.exit(1)
           print("OK：没有变量紧跟中文标点")
           PY
+
+  first-paint:
+    name: 首屏回归（Playwright / Chromium）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .e2e/package-lock.json
+
+      - name: 安装 Playwright 与 Chromium
+        run: |
+          npm ci --prefix .e2e
+          # 走命令行的绝对路径，别用 npx --prefix（npm 版本不同行为不一致）
+          ./.e2e/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: 中文字体（布局断言要量真实文本宽度）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: demo.html 与 index.html 必须同步
+        # 离线回归全部跑在 demo.html 上；它一旦过期，浏览器测的就是旧界面，
+        # 而且不会报错——只能靠 TestDemoHTMLMatchesIndex 钉住。
+        run: go test ./internal/webui/ -run TestDemoHTMLMatchesIndex -count=1
+
+      - name: 离线首屏 / 主题 / 分组回归（file://demo.html）
+        env:
+          # browser.js 默认用本机 Chrome；CI 没有，改用 Playwright 自带的 Chromium
+          E2E_CHANNEL: bundled
+        run: |
+          set -euo pipefail
+          for s in first-paint-flicker view-restore theme-switch-flicker \
+                   section-restore bypass-server layout-check; do
+            echo "→ ${s}"
+            node ".e2e/${s}.js"
+          done
+
+      - name: 真后端首屏回归（/api/status 延迟 / 401 / 网络错误）
+        env:
+          E2E_CHANNEL: bundled
+        run: |
+          set -euo pipefail
+          # 传绝对路径给 E2E_TP_BIN：脚本自己构建时会顺手把产物删掉，
+          # 这里复用 CI 刚编好的二进制，也省一次 go build。
+          go build -o .e2e/tp-first-paint ./cmd/server
+          E2E_TP_BIN="$PWD/.e2e/tp-first-paint" node .e2e/first-paint-server.js

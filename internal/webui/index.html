@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.3.1 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.2 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -132,6 +132,14 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
    新增属性前先确认 X5 认不认。 */
 body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t);
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+/* 切主题的一瞬间压掉所有过渡/动画（配合 app.js 的 data-theme-switch）。
+   applyTheme() 改的是 <html> 上的 data-mode/data-scheme，CSS 变量是瞬变的，
+   但 body/.card/.seg 上的 background、color、border 过渡会慢慢追过去——
+   亮→暗实测出现 6 个中间背景色；而没写 transition 的阴影、图标却已经跳到
+   新值，看起来就是「一半慢慢变、一半立刻变」的闪。这里让整页原子换色，
+   applyTheme() 两帧后撤掉标记，正常交互的过渡照旧。 */
+html[data-theme-switch] *,html[data-theme-switch] *::before,html[data-theme-switch] *::after{
+  transition:none!important;animation:none!important}
 svg{flex:none}
 a{color:var(--acc-text);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -164,6 +172,23 @@ html[data-boot-view="configs"] #v-configs,
 html[data-boot-view="apply"] #v-apply,
 html[data-boot-view="settings"] #v-settings,
 html[data-boot-view="audit"] #v-audit{display:block!important}
+/* 首屏设置页分组恢复（配合 boot.js 的 data-boot-sect）：HTML 里三组卡片
+   默认全可见、「常用」按钮写死 .on，app.js 的 setSectSaved() 原来还排在
+   goto() 的 30ms 定时器里——停在「运维」刷新就会先画一帧「常用」。
+   这里在首帧只留目标组；setSect() 一接手就撤掉属性，恢复由 [hidden] 控制。
+   必须撤：setSectUsable() 要临时展开所有卡片量 offsetParent，被 !important
+   压住的话会误判成「只有当前这一组有内容」。 */
+html[data-boot-sect="common"] #v-settings .card[data-sect]:not([data-sect="common"]),
+html[data-boot-sect="security"] #v-settings .card[data-sect]:not([data-sect="security"]),
+html[data-boot-sect="maintain"] #v-settings .card[data-sect]:not([data-sect="maintain"]){display:none!important}
+/* 按钮高亮：先把 HTML 写死的「常用 .on」还原成未选中，再给目标组套上
+   .seg-lg button.on 的同一套观感。两条同权重，靠源序决定，别调换。 */
+html[data-boot-sect] #set_sect_seg button.on{background:none;color:var(--muted);box-shadow:none}
+html[data-boot-sect="common"] #set_sect_seg button[data-sect="common"],
+html[data-boot-sect="security"] #set_sect_seg button[data-sect="security"],
+html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
+  background:var(--acc-soft);color:var(--acc-text);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 42%,transparent)}
 .muted{color:var(--muted);font-size:12px}
 .mono{font-family:var(--mono);font-size:12px}
 /* 正文里的行内跳转：长得像链接，行为是按钮（不占一个按钮的体量） */
