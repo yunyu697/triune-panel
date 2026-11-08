@@ -8,6 +8,51 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.3.1
+
+### 刷新时主题与入场动画不再闪一下
+
+v1.3.0 修掉了「刷新先闪登录页、再被送回概览」，但首屏还剩两处中间态，用户看到的是
+「刷新还是会闪，而且颜色主题会先显示默认再跳回正确的主题」。用
+`.e2e/first-paint-flicker.js` 把探针插在 `app.js` 内联脚本**之前**读真实
+computedStyle 才量得出来：等页面 load 完再看，`initTheme()` 与 `clearBootFlag()`
+早把中间那一帧抹掉了，手工点怎么都复现不出来。修复前 13 红 / 13 绿。
+
+- **主题**：`index.html` 第 3 行写死 `data-mode="light" data-scheme="azure"`，
+  `initTheme()` 在 body 末尾才读 `triune_mode` / `triune_scheme` 改成用户偏好，
+  而 `body` 带 background/color transition——深色 / 非默认配色用户每次刷新都看着
+  整页从浅色渐变过去。现在 `boot.js` 在 `<head>` 同步读偏好（含旧版
+  `triune_theme` 迁移表与白名单）写到 `<html>`，首帧直接用正确的 CSS 变量；
+  `app.js` 接手后写的是同一个值，不会触发过渡。主题与登录态无关，登录页也用
+  同一套配色。非法值回落 light/azure，原型链键（`__proto__`）用
+  `legacy && legacy.length === 2` 挡掉：写进 `<html>` 一个不存在的 scheme，
+  CSS 变量就没了，首帧会画成没有样式的一页。
+- **动画**：`.view.active` 自带 `fadeUp`，而 HTML 里概览页写死 `.active`，刷新首帧
+  就从 `opacity:0` 淡入；v1.3.0 的 `html[data-boot-view] .view{animation:none}`
+  只在停在**非概览页**时命中——`triune_view = overview` 时不设这个属性，最常见的
+  一格正好漏掉。现在改成「`.view.active` 只负责显示、`.view.active.enter` 才播
+  fadeUp」：`goto(v, sect, animate=true)` 给主动切页加 `.enter`，`restoreView()`
+  传 `false`；`html[data-boot] .view{animation:none!important}` 兜底首屏。
+- **补播**：`showApp()` 必须先 `restoreView()` 再 `clearBootFlag()`。撤标记后若
+  `restoreView()` 误把 `animate` 传成 `true`，`goto()` 会补加 `.enter`，在探针
+  看不见的地方再淡入一次——所以脚本额外查 app.js 接手后的 `animationName` 与
+  `.enter`，并保留「主动点导航仍有 fadeUp」的正向场景，免得把「刷新不闪」做成
+  「永远没有动画」。
+- `theme-color` meta 只影响 PWA 状态栏顶色，不参与页面绘制，由 `applyTheme()`
+  按 `--bg` 补设，不必要求首帧 meta 与最终值相等。
+
+新增 `internal/webui/first_paint_test.go` 钉住 boot.js 与 app.js 的 `MODE_NAME` /
+`SCHEMES` / `LEGACY_THEME` 白名单与迁移表逐项一致、主题属性在首帧同步写入、
+`.enter` 动画链路与 `restoreView()` 关闭动画；`layout_test.go` / `embed_test.go`
+的断言同步改到 `.enter` / 三参 `goto`。
+
+验证：`go test ./...` 全绿；浏览器 `.e2e/first-paint-flicker.js` 40 项（暗色 +
+forest 概览、浅色 + ocean 设置页、旧版 `triune_theme=midnight` 迁移、非法偏好
+兜底、无偏好默认、主动切页正向）、`view-restore.js` 33 项、`bypass-server.js`
+14 项、`layout-check.js` 33 项共 120 项全过。变异验证：恢复旧 CSS 8 红、
+`goto(v, undefined, false)` 改回 `goto(v)` 10 红、删掉 boot.js 两行
+`setAttribute` 9 红，重建后 40/0，报错正文都对得上。
+
 ## v1.3.0
 
 ### 刷新不再闪登录页，也不再被送回概览
