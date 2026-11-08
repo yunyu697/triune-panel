@@ -166,7 +166,7 @@ func TestCustomUIGetsRelaxedCSP(t *testing.T) {
 func TestAssetScriptsServed(t *testing.T) {
 	a := newSecurityTestServer(t)
 	h := a.Handler()
-	for _, name := range []string{"app.js", "qr.js"} {
+	for _, name := range []string{"app.js", "qr.js", "boot.js"} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/assets/"+name, nil))
 		if w.Code != http.StatusOK {

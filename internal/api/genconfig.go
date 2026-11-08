@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -540,6 +541,16 @@ type genReq struct {
 	// 就让老用户已经跑通的配置悄悄换下载地址。
 	RuleMirror       string `json:"rule_mirror"`
 	RuleMirrorPrefix string `json:"rule_mirror_prefix"`
+	// BypassServer 自动把导出节点所用的服务器地址写成最高优先级 DIRECT 规则。
+	//
+	// 主路由 / 旁路由 / TUN 接管全机流量后，代理客户端「连节点服务器本身」的
+	// 那条连接也会被 MATCH,PROXY 吸进隧道，变成「用隧道去连隧道端点」的回环：
+	// 配置能正常加载、节点却永远握不上手，日志里只有超时。地址由面板从
+	// publicHost 自动带出，不需要用户手填。
+	//
+	// 默认 false：老版本 UI / 直接调 API 的脚本不带这个字段时保持原行为，
+	// 不悄悄改写别人已经跑通的分流规则。前端默认勾选。
+	BypassServer bool `json:"bypass_server"`
 }
 
 // mirror 归一请求里的下载源选择（非法值退回官方，理由见 resolveMirror）。
@@ -633,6 +644,16 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	// 解析规则集选择 + 自定义规则集
 	sets, warns := normalizeSets(q)
 
+	// 自动直连节点服务器：地址直接从这批导出节点里取，与配置里 proxies 的
+	// server 是同一个值，不会出现「规则写 A、客户端连 B」的错位。
+	var bypass bypassSpec
+	if q.BypassServer {
+		bypass = collectBypassHosts(nodes)
+		if bypass.empty() {
+			warns = append(warns, "已开启「绕过节点服务器」，但节点没有可用地址，未生成直连规则")
+		}
+	}
+
 	// 客户端配置里的 server 就是 publicHost 的结果。没填「公网地址」而管理员又是
 	// 用 127.0.0.1 / localhost 打开的面板时，导出的节点会指向回环地址——拿到
 	// 另一台机器上永远连不上，而配置本身每一项都是对的，用户只能反复怀疑节点。
@@ -684,9 +705,9 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 
 	var g *generator
 	if q.Core == "mihomo" {
-		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, mir)
+		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, mir, bypass)
 	} else {
-		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, mir)
+		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, mir, bypass)
 	}
 
 	var content string
@@ -712,6 +733,11 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		// 而不是让用户自己在几百行 YAML 里翻 rule-providers 的 url 才看得出来。
 		"rule_mirror":  mir.ID,
 		"mirror_label": mir.label(),
+	}
+	// 回显实际直连了哪些地址：TUN 模式下这几行规则决定「能不能连上节点」，
+	// 用户需要能在页面上一眼核对，而不是去几百行 YAML 里翻。
+	if q.BypassServer {
+		resp["bypass_servers"] = bypass.hosts()
 	}
 	// 版本信息回传给前端显示：用户得知道这份配置是给哪个版本写的，
 	// 否则拿 1.14 的 JSON 去喂 1.11 只会得到一句看不懂的 FATAL。
@@ -856,6 +882,71 @@ type generator struct {
 	header string
 }
 
+// bypassSpec 是「自动直连节点服务器」生成出来的规则原料。
+// 域名与 IP 必须分开：mihomo 用 DOMAIN / IP-CIDR，sing-box 用 domain / ip_cidr，
+// 混在一起会让其中一边拿到永远匹配不上的规则（而且内核不报错）。
+type bypassSpec struct {
+	Domains []string
+	CIDRs   []string
+}
+
+func (b bypassSpec) empty() bool { return len(b.Domains) == 0 && len(b.CIDRs) == 0 }
+
+// hosts 回显给前端：用户得看见「这次到底直连了哪些地址」，否则一个开关
+// 打开后配置里多了几行语法不明的规则，出问题时没法核对。
+func (b bypassSpec) hosts() []string {
+	out := append([]string{}, b.Domains...)
+	return append(out, b.CIDRs...)
+}
+
+// normalizeNodeHost 抹掉「公网地址」设置里可能带的端口、IPv6 方括号与尾点。
+// publicHost() 是原样返回用户填的值，有人会写 1.2.3.4:443 或 [2001:db8::1]:443；
+// 直接拿去生成 DOMAIN / IP-CIDR 就是一条永远匹配不上的规则，而且两种内核
+// 都不会报错——症状仍然是「直连规则写了却照样回环」。
+func normalizeNodeHost(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return ""
+	}
+	// 只在真的能拆出 host:port 时才剥端口：裸 IPv6（2001:db8::1）里的冒号
+	// 不是端口，SplitHostPort 会报错，此时保留原串交给 ParseIP。
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	h = strings.Trim(h, "[]")
+	return strings.TrimSuffix(strings.ToLower(h), ".")
+}
+
+// collectBypassHosts 从导出节点里收集去重的服务器地址。
+// 同一个公网地址下会有「入站 × 用户」很多个节点，不去重会生成几十条一样的
+// 规则；IPv4 补 /32、IPv6 补 /128，否则 sing-box 的 ip_cidr 不认裸 IP。
+func collectBypassHosts(nodes []*link.Node) bypassSpec {
+	var b bypassSpec
+	seenD, seenC := map[string]bool{}, map[string]bool{}
+	for _, n := range nodes {
+		h := normalizeNodeHost(n.Host)
+		if h == "" {
+			continue
+		}
+		if ip := net.ParseIP(h); ip != nil {
+			cidr := h + "/32"
+			if ip.To4() == nil {
+				cidr = h + "/128"
+			}
+			if !seenC[cidr] {
+				seenC[cidr] = true
+				b.CIDRs = append(b.CIDRs, cidr)
+			}
+			continue
+		}
+		if !seenD[h] {
+			seenD[h] = true
+			b.Domains = append(b.Domains, h)
+		}
+	}
+	return b
+}
+
 // parseCustomRule 解析 clash 风格自定义规则：TYPE,VALUE,POLICY[,no-resolve]
 // 支持 DOMAIN / DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR / IP-CIDR6 / GEOSITE / GEOIP
 func parseCustomRule(line string) (typ, val, pol string, ok bool) {
@@ -936,7 +1027,7 @@ func targetNote(target string) string {
 
 // ==================== mihomo 生成器 ====================
 
-func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel) *generator {
+func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel, bypass bypassSpec) *generator {
 	router := target != "client"
 
 	proxies := []any{}
@@ -948,8 +1039,18 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		}
 	}
 
-	// 规则：自定义 → 规则集 → 私网 → MATCH（normalizeSets 已按 REJECT>PROXY>DIRECT 排序）
+	// 规则：节点服务器直连 → 自定义 → 规则集 → 私网 → MATCH
+	// （normalizeSets 已按 REJECT>PROXY>DIRECT 排序）
+	// 节点服务器那几条**必须排在最前**：下面任何一条（自定义 REJECT、境外规则集
+	// PROXY、末尾的 MATCH,PROXY）都可能把它吸进隧道，形成「用隧道去连隧道
+	// 端点」的回环。放在私网段里也不行——公网 IP 根本不在私网段内。
 	rules := []any{}
+	for _, d := range bypass.Domains {
+		rules = append(rules, fmt.Sprintf("DOMAIN,%s,DIRECT", d))
+	}
+	for _, c := range bypass.CIDRs {
+		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,DIRECT,no-resolve", c))
+	}
 	for _, line := range customRules {
 		typ, val, pol, ok := parseCustomRule(line)
 		if !ok {
@@ -1016,12 +1117,17 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		}
 	}
 
+	// TUN + fake-ip 下，节点域名也会被映射成 198.18.x.x。把它排除掉，代理
+	// 客户端拿到的是真实 IP，直连规则与连接目标才对得上。先复制一份：
+	// 直接 append 到全局 fakeIPFilter 的别名上会污染后续所有配置。
+	filter := append([]string{}, fakeIPFilter...)
+	filter = append(filter, bypass.Domains...)
 	dns := map[string]any{
 		"enable":             true,
 		"ipv6":               false,
 		"enhanced-mode":      map[bool]string{true: "fake-ip", false: "redir-host"}[router],
 		"fake-ip-range":      "198.18.0.1/16",
-		"fake-ip-filter":     toAnySlice(fakeIPFilter),
+		"fake-ip-filter":     toAnySlice(filter),
 		"nameserver":         toAnySlice([]string{"https://223.5.5.5/dns-query", "https://doh.pub/dns-query"}),
 		"default-nameserver": toAnySlice([]string{"223.5.5.5", "119.29.29.29"}),
 	}
@@ -1067,6 +1173,9 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	if !mir.direct() {
 		header += "# 规则集下载源：" + mir.label() + "\n"
 	}
+	if !bypass.empty() {
+		header += "# 节点服务器直连（避免回环）：" + strings.Join(bypass.hosts(), "、") + "\n"
+	}
 	header += "\n"
 	return &generator{doc: doc, header: header}
 }
@@ -1088,7 +1197,7 @@ func sbDNSServers(caps sbCaps) []any {
 	}
 }
 
-func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel) *generator {
+func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel, bypass bypassSpec) *generator {
 	router := target != "client"
 	caps := capsFor(ver)
 
@@ -1118,9 +1227,20 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 		map[string]any{"type": "direct", "tag": "direct"},
 	)
 
-	// 路由规则：DNS 劫持 → 自定义 → 规则集 → 私网
+	// 路由规则：DNS 劫持 → 节点服务器直连 → 自定义 → 规则集 → 私网
+	// hijack-dns 只对 DNS 报文生效，紧跟其后的直连规则对其它流量仍是最高优先级。
+	// 少了它，TUN 模式下连节点服务器本身的那条连接会被 final:PROXY 吸进隧道，
+	// 变成「用隧道连隧道端点」的回环。
 	routeRules := []any{
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+	}
+	if len(bypass.Domains) > 0 {
+		routeRules = append(routeRules,
+			map[string]any{"domain": toAnySlice(bypass.Domains), "outbound": "direct"})
+	}
+	if len(bypass.CIDRs) > 0 {
+		routeRules = append(routeRules,
+			map[string]any{"ip_cidr": toAnySlice(bypass.CIDRs), "outbound": "direct"})
 	}
 	outboundOf := func(p string) string {
 		switch p {
@@ -1175,8 +1295,15 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 		})
 	}
 
-	// DNS：国内域名走本地，其余走代理侧 DoH
-	dnsRules := []any{map[string]any{"rule_set": []any{"geosite-cn"}, "server": "local"}}
+	// DNS：节点域名必须走本地解析。否则它落到 final:remote（经代理的 DoH），
+	// 而代理本身还没连上——先有鸡还是先有蛋，1.11 没有 default_domain_resolver
+	// 时尤其明显。国内域名走本地，其余走代理侧 DoH。
+	dnsRules := []any{}
+	if len(bypass.Domains) > 0 {
+		dnsRules = append(dnsRules,
+			map[string]any{"domain": toAnySlice(bypass.Domains), "server": "local"})
+	}
+	dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-cn"}, "server": "local"})
 	if hasSet(sets, "geosite-private") {
 		dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-private"}, "server": "local"})
 	}

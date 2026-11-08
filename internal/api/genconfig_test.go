@@ -164,7 +164,7 @@ func TestNormalizeSetsFallsBackToCatalogPolicy(t *testing.T) {
 // 就会连到一个没人监听的端口——现象是「节点在线、网页全打不开」，很难自己查出来。
 // 所以头注释必须点明，且写出来的数字要和 doc 里实际的值一致。
 func TestMihomoClientHeaderPortHint(t *testing.T) {
-	g := genMihomo("client", testNodes(), nil, nil, new([]string), ruleMirrorSel{})
+	g := genMihomo("client", testNodes(), nil, nil, new([]string), ruleMirrorSel{}, bypassSpec{})
 
 	port, ok := g.doc["mixed-port"].(int)
 	if !ok || port != mihomoMixedPort {
@@ -184,7 +184,7 @@ func TestMihomoClientHeaderPortHint(t *testing.T) {
 // 路由模式是内核直跑，没有客户端插在中间改端口，这段提示只会变成噪音。
 func TestMihomoRouterHeaderNoPortHint(t *testing.T) {
 	for _, target := range []string{"main-router", "side-router"} {
-		g := genMihomo(target, testNodes(), nil, nil, new([]string), ruleMirrorSel{})
+		g := genMihomo(target, testNodes(), nil, nil, new([]string), ruleMirrorSel{}, bypassSpec{})
 		if strings.Contains(g.header, "端口提示") {
 			t.Errorf("%s 不该出现客户端端口提示：\n%s", target, g.header)
 		}

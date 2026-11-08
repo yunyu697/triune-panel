@@ -1,8 +1,11 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
+<!-- 首屏引导必须**同步**跑在 <head> 里：等 app.js 从 /api/status 回来再决定
+     画什么，就会先闪一帧登录页。见 boot.js 的说明。 -->
+<script src="/assets/boot.js"></script>
 <!-- viewport-fit=cover 让页面铺到刘海/Home Indicator 区域；配合下面的
      env(safe-area-inset-*) 把内容推回安全区，否则 iPhone 底部一排按钮会被横条压住。 -->
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -133,6 +136,30 @@ svg{flex:none}
 a{color:var(--acc-text);text-decoration:none}
 a:hover{text-decoration:underline}
 .hide{display:none!important}
+/* 首屏防闪（配合 head 里的 boot.js）：本地已存会话时，第一帧就画主界面，
+   不等 /api/status 往返。app.js 接手显隐后会清掉 data-boot，之后一切照旧
+   由 .hide 决定——所以这两条 !important 只在页面刚解析的那一小段时间生效。
+   boot.js 没跑（脚本被禁、自定义 UI 删了引用）时属性不存在，退回原行为。 */
+html[data-boot="app"] #login{display:none!important}
+html[data-boot="app"] #app{display:flex!important}
+/* 首屏视图恢复（配合 boot.js 的 data-boot-view）：HTML 里 #v-overview 写死带
+   .active，不等 app.js 跑 goto() 就会先画一帧概览——刷新「配置生成」页时
+   看上去就是跳回主页。这里在首帧把概览藏掉、把上次那一页显示出来。
+   app.js 的 clearBootFlag() 会撤掉属性，之后仍由 .view.active 决定显隐，
+   所以这些 !important 只在页面刚解析的那一小段时间生效。
+   新增视图必须在这里补一条，TestViewRestoreOnReload 会盯着清单同步。 */
+html[data-boot-view] #v-overview{display:none!important}
+html[data-boot-view] .view{animation:none!important}
+html[data-boot-view="inbounds"] #v-inbounds,
+html[data-boot-view="outbounds"] #v-outbounds,
+html[data-boot-view="clients"] #v-clients,
+html[data-boot-view="traffic"] #v-traffic,
+html[data-boot-view="import"] #v-import,
+html[data-boot-view="gen"] #v-gen,
+html[data-boot-view="configs"] #v-configs,
+html[data-boot-view="apply"] #v-apply,
+html[data-boot-view="settings"] #v-settings,
+html[data-boot-view="audit"] #v-audit{display:block!important}
 .muted{color:var(--muted);font-size:12px}
 .mono{font-family:var(--mono);font-size:12px}
 /* 正文里的行内跳转：长得像链接，行为是按钮（不占一个按钮的体量） */
@@ -1114,6 +1141,18 @@ canvas{display:block;width:100%}
         <div><label>选择入站（可多选，节点名 = 入站名-用户名）</label>
           <div class="inb-pick" id="gen_inbounds"></div>
         </div>
+        <label style="display:flex;gap:9px;align-items:flex-start;margin-top:16px;cursor:pointer">
+          <input type="checkbox" id="gen_bypass" checked
+                 data-act="genOptionChanged" data-args='[]' data-el="checked"
+                 style="margin-top:3px;accent-color:var(--acc);flex:none">
+          <span style="font-size:13.5px">绕过节点服务器（自动直连）</span>
+        </label>
+        <p class="muted" style="margin:6px 0 0 25px;line-height:1.6">
+          自动把导出节点所用的服务器地址写成<b>最高优先级 DIRECT 规则</b>。主路由 / 旁路由 / TUN
+          接管全机流量后，代理客户端连节点服务器本身的那条连接也会被送进隧道，形成回环——
+          配置能正常加载、节点却永远连不上。地址由「设置 → 公网地址」自动带出，无需手填；
+          关闭后按原有规则分流。
+        </p>
       </div>
 
       <div class="card">
@@ -1435,8 +1474,23 @@ canvas{display:block;width:100%}
         <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
           <div style="flex:1;min-width:300px">
             <b style="font-size:13px">方式一：验证器 App（TOTP 动态口令）</b>
-            <p class="muted" style="font-size:12.5px;margin:6px 0">Google / Microsoft Authenticator、1Password、FreeOTP 等均支持。绑定：验证器 App → 手动输入密钥（需设备时间准确）。</p>
+            <p class="muted" style="font-size:12.5px;margin:6px 0">Google / Microsoft Authenticator、1Password、FreeOTP 等均支持。生成密钥后可直接扫码绑定，也可手动输入密钥（需设备时间准确）。</p>
             <div id="fa_totp_box" class="hide" style="margin:8px 0">
+              <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 12px">
+                <!-- 二维码全在本地用 qr.js 画，密钥不出浏览器；白底 + 静区保证扫码识别率 -->
+                <canvas id="fa_totp_qr" width="180" height="180" aria-label="TOTP 绑定二维码"
+                        style="width:180px;height:180px;flex:none;box-sizing:content-box;padding:8px;background:#fff;
+                               border:1px solid var(--line);border-radius:10px;image-rendering:pixelated"></canvas>
+                <div style="flex:1;min-width:170px">
+                  <b style="font-size:13px">扫一扫绑定</b>
+                  <p class="muted" style="font-size:12.5px;margin:6px 0 0;line-height:1.7">
+                    验证器 App →「添加账号 / 扫描二维码」，对着左侧扫一下即可。<br>
+                    设备扫不了码时，再手动输入下方密钥。设备时间不准会让动态口令一直被判错。
+                  </p>
+                  <p class="muted" id="fa_totp_qr_msg" style="font-size:12px;margin:8px 0 0"></p>
+                  <button class="btn sm" style="margin-top:8px" data-act="faCopyUri">复制绑定 URI</button>
+                </div>
+              </div>
               <div class="frm">
                 <div class="full"><label>密钥（base32，手动输入到验证器 App）</label><input id="fa_secret" class="input mono" readonly></div>
                 <div class="full"><label>绑定 URI（otpauth，可导入支持的应用）</label><input id="fa_uri" class="input mono" readonly style="font-size:11.5px"></div>

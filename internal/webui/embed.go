@@ -28,7 +28,8 @@ var indexHTML []byte
 // CSP 才能收紧到 script-src 'self'，不再需要 'unsafe-inline'
 // （内联 <script> 和内联 onclick 只能靠它放行，而那一条同时也放行了注入的脚本）。
 //
-//go:embed qr.js app.js
+// boot.js 在 <head> 同步执行，决定首屏画登录页还是主界面（刷新时不再闪登录页）。
+//go:embed qr.js app.js boot.js
 var scriptAssets embed.FS
 
 // AssetFile 读取内嵌的前端脚本，并返回内容的 ETag。

@@ -208,6 +208,7 @@ func (a *Server) Handler() http.Handler {
 	// 且 CSP 收紧到 script-src 'self' 之后必须能同源加载。
 	mux.HandleFunc("GET /assets/app.js", a.handleAsset("app.js"))
 	mux.HandleFunc("GET /assets/qr.js", a.handleAsset("qr.js"))
+	mux.HandleFunc("GET /assets/boot.js", a.handleAsset("boot.js"))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 禁止中间层/浏览器长期缓存页面：升级面板后旧 UI 常驻缓存会导致

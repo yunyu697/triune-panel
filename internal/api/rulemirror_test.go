@@ -163,7 +163,7 @@ func TestMihomoRuleProvidersDownloadDirect(t *testing.T) {
 	g := genMihomo("client", testNodes(), []normSet{{
 		Tag: "geosite-cn", URL: "https://example.com/cn.mrs",
 		Behavior: "domain", Format: "mrs", Interval: 86400,
-	}}, nil, warns, ruleMirrorSel{})
+	}}, nil, warns, ruleMirrorSel{}, bypassSpec{})
 	provs, ok := g.doc["rule-providers"].(map[string]any)
 	if !ok || len(provs) == 0 {
 		t.Fatalf("没生成 rule-providers：%#v", g.doc["rule-providers"])
@@ -178,12 +178,12 @@ func TestMihomoRuleProvidersDownloadDirect(t *testing.T) {
 
 func TestGenMihomoHeaderShowsMirror(t *testing.T) {
 	warns := new([]string)
-	g := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{ID: "gh-proxy"})
+	g := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{ID: "gh-proxy"}, bypassSpec{})
 	if !strings.Contains(g.header, "规则集下载源：gh-proxy.com") {
 		t.Fatalf("头注释应写明下载源，实际：\n%s", g.header)
 	}
 	// 官方源不写这一行，免得默认配置多一条噪声
-	g = genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{ID: MirrorOfficial})
+	g = genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{ID: MirrorOfficial}, bypassSpec{})
 	if strings.Contains(g.header, "规则集下载源") {
 		t.Fatalf("官方源不该写下载源注释：\n%s", g.header)
 	}

@@ -12,7 +12,7 @@ import (
 // 面板是自托管的，绝大多数实例直接挂在公网 IP 上，所以浏览器侧的防线
 // 不能指望"用户会自己配 nginx 加头"。这里统一下发。
 //
-// 关于 CSP：脚本已经全部从 HTML 里挪出来（内嵌 qr.js / app.js，经
+// 关于 CSP：脚本已经全部从 HTML 里挪出来（内嵌 boot.js / qr.js / app.js，经
 // /assets/*.js 同源加载），内联事件属性也换成了 document 级事件委托
 // （见 webui/app.js 顶部说明）。所以 script-src 不再需要 'unsafe-inline'——
 // 这一条以前同时放行了注入的 <script>，是这套界面最后一个执行型缺口。

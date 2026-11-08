@@ -1,8 +1,60 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.2.9 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
+<!-- triune-panel-web/v1.3.0 自定义此文件时请同步更新标记，否则升级会被覆盖 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
+<!-- 首屏引导必须**同步**跑在 <head> 里：等 app.js 从 /api/status 回来再决定
+     画什么，就会先闪一帧登录页。见 boot.js 的说明。 -->
+<script>
+/* 首屏引导：在 <head> 里同步决定「第一帧画登录页还是主界面」，
+ * 以及「主界面里画哪一页」。
+ *
+ * 原来 index.html 里登录页默认可见、#app 默认 .hide，而 app.js 要等
+ * /api/status 一个网络往返回来才 showApp()——刷新时这一来一回就是用户
+ * 看到的「先闪一下登录页，然后跳回主页」。网络慢或面板刚重启时更明显。
+ * 第二个问题是 HTML 里 #v-overview 写死带 .active，刷新一律回概览：
+ * 上次停在「配置生成」按一下 F5，先画概览，等 app.js 跑完才切回去。
+ *
+ * 这里只做一件事：按本地存下来的会话与页面偏好，给 <html> 打上
+ * data-boot / data-boot-view，index.html 的 CSS 据此在**首次绘制之前**
+ * 把登录页藏掉、把主界面和上次那一页显示出来。之后 app.js 调
+ * showApp() / showLogin() 时会清掉这两个属性，显隐重新由 .hide / .active
+ * 全权决定，CSS 的 !important 不会和它打架。
+ *
+ * 这不是权限判断：token 可能已过期，真正的校验仍在服务端（/api/status 与
+ * 每个 API 的 401）。伪造 localStorage 只能让本机先看到一层没有数据的空壳。
+ * 只读账号的页面纠正由 app.js 的 goto() 在同一个 JS 任务里完成，浏览器
+ * 不会绘制中间态，所以这里不需要复制一份角色白名单。
+ *
+ * 必须外置：CSP 是 script-src 'self'，内联 <script> 会被浏览器直接忽略。
+ * localStorage 在隐私模式 / file:// 下可能抛异常，那时退回「登录页优先」。
+ */
+
+/* 与 app.js 的 VIEWS 保持一致，由 embed_test.go 的 TestViewRestoreOnReload 钉住。
+ * 只认白名单里的值：localStorage 是同源可控数据，但手改/旧版本残留一个
+ * 不存在的页面名时，CSS 的「先藏概览」会没有对应显示规则 → 整页空白。
+ * 非法值干脆不设属性，退回 index.html 默认的概览页。 */
+var BOOT_VIEWS = ["overview", "inbounds", "outbounds", "clients", "traffic",
+  "import", "gen", "configs", "apply", "settings", "audit"];
+
+(function () {
+  var boot = "guest", view = "";
+  try {
+    if (window.localStorage) {
+      if (localStorage.getItem("triune_token")) boot = "app";
+      view = localStorage.getItem("triune_view") || "";
+    }
+  } catch (e) { /* 存储不可用：保持登录页 / 概览页 */ }
+
+  var root = document.documentElement;
+  root.setAttribute("data-boot", boot);
+  // 概览是 HTML 默认页，不需要标记；只有停在别处时才需要首帧纠偏，
+  // 这样「属性存在但值没匹配上」的风险面只剩这一种情况，且已被白名单挡住。
+  if (boot === "app" && view !== "overview" && BOOT_VIEWS.indexOf(view) >= 0) {
+    root.setAttribute("data-boot-view", view);
+  }
+})();
+</script>
 <!-- viewport-fit=cover 让页面铺到刘海/Home Indicator 区域；配合下面的
      env(safe-area-inset-*) 把内容推回安全区，否则 iPhone 底部一排按钮会被横条压住。 -->
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -133,6 +185,30 @@ svg{flex:none}
 a{color:var(--acc-text);text-decoration:none}
 a:hover{text-decoration:underline}
 .hide{display:none!important}
+/* 首屏防闪（配合 head 里的 boot.js）：本地已存会话时，第一帧就画主界面，
+   不等 /api/status 往返。app.js 接手显隐后会清掉 data-boot，之后一切照旧
+   由 .hide 决定——所以这两条 !important 只在页面刚解析的那一小段时间生效。
+   boot.js 没跑（脚本被禁、自定义 UI 删了引用）时属性不存在，退回原行为。 */
+html[data-boot="app"] #login{display:none!important}
+html[data-boot="app"] #app{display:flex!important}
+/* 首屏视图恢复（配合 boot.js 的 data-boot-view）：HTML 里 #v-overview 写死带
+   .active，不等 app.js 跑 goto() 就会先画一帧概览——刷新「配置生成」页时
+   看上去就是跳回主页。这里在首帧把概览藏掉、把上次那一页显示出来。
+   app.js 的 clearBootFlag() 会撤掉属性，之后仍由 .view.active 决定显隐，
+   所以这些 !important 只在页面刚解析的那一小段时间生效。
+   新增视图必须在这里补一条，TestViewRestoreOnReload 会盯着清单同步。 */
+html[data-boot-view] #v-overview{display:none!important}
+html[data-boot-view] .view{animation:none!important}
+html[data-boot-view="inbounds"] #v-inbounds,
+html[data-boot-view="outbounds"] #v-outbounds,
+html[data-boot-view="clients"] #v-clients,
+html[data-boot-view="traffic"] #v-traffic,
+html[data-boot-view="import"] #v-import,
+html[data-boot-view="gen"] #v-gen,
+html[data-boot-view="configs"] #v-configs,
+html[data-boot-view="apply"] #v-apply,
+html[data-boot-view="settings"] #v-settings,
+html[data-boot-view="audit"] #v-audit{display:block!important}
 .muted{color:var(--muted);font-size:12px}
 .mono{font-family:var(--mono);font-size:12px}
 /* 正文里的行内跳转：长得像链接，行为是按钮（不占一个按钮的体量） */
@@ -1114,6 +1190,18 @@ canvas{display:block;width:100%}
         <div><label>选择入站（可多选，节点名 = 入站名-用户名）</label>
           <div class="inb-pick" id="gen_inbounds"></div>
         </div>
+        <label style="display:flex;gap:9px;align-items:flex-start;margin-top:16px;cursor:pointer">
+          <input type="checkbox" id="gen_bypass" checked
+                 data-act="genOptionChanged" data-args='[]' data-el="checked"
+                 style="margin-top:3px;accent-color:var(--acc);flex:none">
+          <span style="font-size:13.5px">绕过节点服务器（自动直连）</span>
+        </label>
+        <p class="muted" style="margin:6px 0 0 25px;line-height:1.6">
+          自动把导出节点所用的服务器地址写成<b>最高优先级 DIRECT 规则</b>。主路由 / 旁路由 / TUN
+          接管全机流量后，代理客户端连节点服务器本身的那条连接也会被送进隧道，形成回环——
+          配置能正常加载、节点却永远连不上。地址由「设置 → 公网地址」自动带出，无需手填；
+          关闭后按原有规则分流。
+        </p>
       </div>
 
       <div class="card">
@@ -1435,8 +1523,23 @@ canvas{display:block;width:100%}
         <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
           <div style="flex:1;min-width:300px">
             <b style="font-size:13px">方式一：验证器 App（TOTP 动态口令）</b>
-            <p class="muted" style="font-size:12.5px;margin:6px 0">Google / Microsoft Authenticator、1Password、FreeOTP 等均支持。绑定：验证器 App → 手动输入密钥（需设备时间准确）。</p>
+            <p class="muted" style="font-size:12.5px;margin:6px 0">Google / Microsoft Authenticator、1Password、FreeOTP 等均支持。生成密钥后可直接扫码绑定，也可手动输入密钥（需设备时间准确）。</p>
             <div id="fa_totp_box" class="hide" style="margin:8px 0">
+              <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 12px">
+                <!-- 二维码全在本地用 qr.js 画，密钥不出浏览器；白底 + 静区保证扫码识别率 -->
+                <canvas id="fa_totp_qr" width="180" height="180" aria-label="TOTP 绑定二维码"
+                        style="width:180px;height:180px;flex:none;box-sizing:content-box;padding:8px;background:#fff;
+                               border:1px solid var(--line);border-radius:10px;image-rendering:pixelated"></canvas>
+                <div style="flex:1;min-width:170px">
+                  <b style="font-size:13px">扫一扫绑定</b>
+                  <p class="muted" style="font-size:12.5px;margin:6px 0 0;line-height:1.7">
+                    验证器 App →「添加账号 / 扫描二维码」，对着左侧扫一下即可。<br>
+                    设备扫不了码时，再手动输入下方密钥。设备时间不准会让动态口令一直被判错。
+                  </p>
+                  <p class="muted" id="fa_totp_qr_msg" style="font-size:12px;margin:8px 0 0"></p>
+                  <button class="btn sm" style="margin-top:8px" data-act="faCopyUri">复制绑定 URI</button>
+                </div>
+              </div>
               <div class="frm">
                 <div class="full"><label>密钥（base32，手动输入到验证器 App）</label><input id="fa_secret" class="input mono" readonly></div>
                 <div class="full"><label>绑定 URI（otpauth，可导入支持的应用）</label><input id="fa_uri" class="input mono" readonly style="font-size:11.5px"></div>
@@ -4587,6 +4690,11 @@ function goto(v, sect) {
   // 只读账号直接跳走隐藏页时，退回概览——避免「页面空白 + 一串 403」
   if (isViewer() && !VIEWER_VIEWS.includes(v)) v = "overview";
   CURRENT = v;
+  // 记住当前页：刷新后 boot.js 会在首帧直接画这一页，不用先过一遍概览。
+  // 存的是**纠正后**的 v——只读账号点进无权页面时 goto 会退回概览，不能把
+  // 那个页面写进偏好，否则下次刷新又白闪一次再被踢回来。
+  // 这是界面偏好而非会话身份，所以登出时不清：换账号回来仍停在熟悉的页面。
+  try { localStorage.setItem("triune_view", v); } catch (_) {}
   // 给 CSS 一个「现在是哪一页」的钩子：手机端常驻的「应用」按钮在设置页（有自己的
   // 常驻保存条）和应用页（本来就在那儿）要藏起来，否则两套按钮叠在一起。
   document.body.dataset.view = v;
@@ -4761,7 +4869,7 @@ async function req(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { showLogin(); throw new Error(j.error || "unauthorized"); }
+  if (r.status === 401) { dropSession(); showLogin(); throw new Error(j.error || "unauthorized"); }
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
@@ -5361,8 +5469,47 @@ function demoFillInbound(text, core) {
 
 /* ================= 登录 ================= */
 if (DEMO) $("demoTag").classList.remove("hide");
-function showLogin(){ $("login").classList.remove("hide"); $("app").classList.add("hide"); }
-function showApp(){ $("login").classList.add("hide"); $("app").classList.remove("hide"); loadAll(); }
+/* boot.js 在 <head> 里按本地 token 决定了首屏画谁（见 index.html 的
+   html[data-boot] 规则）。这里一旦真正接手显隐，就撤掉那个标记：否则 CSS 的
+   !important 会一直压着 .hide——会话过期想回登录页都回不去。 */
+function clearBootFlag() {
+  const h = document.documentElement;
+  h.removeAttribute("data-boot");
+  h.removeAttribute("data-boot-view");
+}
+function showLogin(){ clearBootFlag(); $("login").classList.remove("hide"); $("app").classList.add("hide"); }
+/* 恢复上次停留的页面。boot.js 已在首帧用 data-boot-view 把目标页画出来了，
+   这里补齐标题、导航高亮和该页的数据加载，最后才撤标记。
+   顺序很关键：先 clearBootFlag() 就会露出一帧 HTML 默认激活的概览页，
+   「刷新后跳回主页」等于没修。goto() 内部已经 loadAll()，showApp() 不再
+   单独调一次，避免同一批接口拉两遍。 */
+function restoreView() {
+  let v = "";
+  try { v = localStorage.getItem("triune_view") || ""; } catch (_) {}
+  // 旧版本残留 / 手改的非法值退回概览，别让 TITLES[v] 变成 undefined
+  if (!VIEWS.some(([k]) => k === v)) v = "overview";
+  // 先把 .active 摆到与首屏一致的位置：等下 goto() 里的 toggle 不再改动
+  // class，撤掉 data-boot-view 时也就不会补播一次 fadeUp 入场动画。
+  VIEWS.forEach(([k]) => $("v-" + k).classList.toggle("active", k === v));
+  goto(v);
+}
+function showApp(){
+  $("login").classList.add("hide");
+  $("app").classList.remove("hide");
+  restoreView();
+  clearBootFlag();
+}
+/* 会话作废：清干净本地身份，否则每次刷新都会「先按 token 画主界面，再被 401
+   打回登录页」，把一次性的过期变成每天都能看见的闪屏。 */
+function dropSession() {
+  TOKEN = "";
+  try {
+    localStorage.removeItem("triune_token");
+    localStorage.removeItem("triune_role");
+    localStorage.removeItem("triune_user");
+  } catch (_) {}
+  ROLE = ""; ME = { user: "", role: "" };
+}
 
 /* 二次验证：第一步提交账密，服务端返回 need_2fa 后展示验证码输入行 */
 let LOGIN_2FA = ""; // "totp" | "email" | ""
@@ -5446,9 +5593,7 @@ function logout(){
   // 演示模式没有后端，跳过。
   const t = TOKEN;
   if (t && !DEMO) fetch("api/logout", { method: "POST", headers: { Authorization: "Bearer " + t } }).catch(() => {});
-  TOKEN=""; localStorage.removeItem("triune_token");
-  localStorage.removeItem("triune_role"); localStorage.removeItem("triune_user");
-  ROLE=""; ME={user:"",role:""};
+  dropSession();
   resetLoginUI(); showLogin();
 }
 
@@ -7850,8 +7995,20 @@ function buildGenParams() {
   const mir = mirrorArgs();
   body.rule_mirror = mir.mirror || "official";
   if (mir.mirror === "custom") body.rule_mirror_prefix = mir.prefix;
+  // 自动直连节点服务器。存进 params，重新生成时才能还原同一份规则——
+  // 只写进配置正文、不写进参数的话，一周后重跑会悄悄少掉这组防回环规则。
+  body.bypass_server = !!$("gen_bypass").checked;
   if (genCore === "singbox") body.core_version = genSBVer;
   return body;
+}
+
+/* 开关变了以后，界面上那份生成结果就过期了：不清掉的话用户点「下载」
+   拿到的是旧配置，却以为是刚勾的选项生效了（和换 sing-box 版本同理）。 */
+function genOptionChanged() {
+  genLast = null;
+  ["gen_dl", "gen_verify", "gen_save"].forEach(id => $(id).disabled = true);
+  ["gen_out", "gen_vres", "gen_check"].forEach(id => $(id).classList.add("hide"));
+  $("gen_fn").textContent = "";
 }
 
 async function genGenerate() {
@@ -7864,7 +8021,8 @@ async function genGenerate() {
     if (DEMO) {
       await new Promise(r => setTimeout(r, 600));
       j = { filename: `demo-${target}-${body.scenario}-${core}.${core === "mihomo" ? "yaml" : "json"}`,
-            content: demoGenConfig(core, target, genSBVer), warnings: [] };
+            content: demoGenConfig(core, target, genSBVer, body.bypass_server), warnings: [] };
+      if (body.bypass_server) j.bypass_servers = ["demo.example.com"];
       if (core === "singbox") {
         const o = SB_VERS.find(x => x.v === genSBVer);
         j.core_version = genSBVer;
@@ -7894,6 +8052,11 @@ async function genGenerate() {
     // 取决于这个源，事后要看得见（YAML 头注释里也写了，但 JSON 没有注释）。
     if (j.rule_mirror && j.rule_mirror !== "official") {
       vparts.push(`规则集下载源：<b>${escHtml(j.mirror_label || j.rule_mirror)}</b>`);
+    }
+    // TUN 下这几行规则决定「能不能连上节点」，把实际直连的地址摆出来，
+    // 用户不用去几百行配置里翻，也能发现「公网地址没填、直连的是 127.0.0.1」。
+    if (j.bypass_servers && j.bypass_servers.length) {
+      vparts.push(`节点服务器直连：<b>${escHtml(j.bypass_servers.join("、"))}</b>`);
     }
     const vres = $("gen_vres");
     if (vparts.length) {
@@ -7970,9 +8133,12 @@ function genDownload() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
-function demoGenConfig(core, target, ver) {
+function demoGenConfig(core, target, ver, bypass) {
+  // 不传时读当前开关：离线演示里「下载已保存配置」也走这里，而它保存时
+  // 的开关状态未必等于页面当前状态，所以下面两处调用会显式传值。
+  const on = bypass === undefined ? !!$("gen_bypass").checked : !!bypass;
   if (core === "mihomo") return `# Triune Panel 生成 | mihomo | ${target}（演示数据）
-mode: rule
+${on ? "# 节点服务器直连（避免回环）：demo.example.com\n" : ""}mode: rule
 mixed-port: 7890
 allow-lan: ${target !== "client"}
 tun:
@@ -8002,7 +8168,7 @@ rule-providers:
     format: mrs
     url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geosite-cn.mrs
 rules:
-  - RULE-SET,geosite-cn,DIRECT
+${on ? "  - DOMAIN,demo.example.com,DIRECT\n" : ""}  - RULE-SET,geosite-cn,DIRECT
   - MATCH,PROXY`;
 
   /* 演示数据也按版本走真实分支，否则用户切到 1.11 看到的仍是 1.14 的写法，
@@ -8029,6 +8195,7 @@ rules:
   const route = {
     rules: [
       { protocol: "dns", action: "hijack-dns" },
+      ...(on ? [{ domain: ["demo.example.com"], outbound: "direct" }] : []),
       { rule_set: ["geosite-cn"], outbound: "direct" },
       { ip_cidr: ["192.168.0.0/16", "10.0.0.0/8"], outbound: "direct" }
     ],
@@ -8246,7 +8413,9 @@ async function downloadConfig(id) {
   const ext = c.core === "mihomo" ? "yaml" : "json";
   try {
     if (DEMO) {
-      saveBlob(new Blob([demoGenConfig(c.core, c.target, c.core_version)], { type: "text/plain" }),
+      let by = true;
+      try { by = JSON.parse(c.params || "{}").bypass_server !== false; } catch (_) {}
+      saveBlob(new Blob([demoGenConfig(c.core, c.target, c.core_version, by)], { type: "text/plain" }),
         `${c.name}.${ext}`);
       toast("已开始下载 " + c.name + "." + ext);
       return;
@@ -8308,8 +8477,8 @@ async function regenerateConfig(id) {
     let old, fresh;
     if (DEMO) {
       await new Promise(r => setTimeout(r, 500));
-      old = { content: demoGenConfig(c.core, c.target, c.core_version) };
-      fresh = { content: demoGenConfig(c.core, c.target, c.core_version) };
+      old = { content: demoGenConfig(c.core, c.target, c.core_version, params.bypass_server) };
+      fresh = { content: demoGenConfig(c.core, c.target, c.core_version, params.bypass_server) };
     } else {
       old = await req("/api/configs/" + id);
       fresh = await req("/api/export/config", { method: "POST", body: params });
@@ -10638,6 +10807,57 @@ async function testNotify() {
 }
 
 /* ================= 登录二次验证（2FA 管理） ================= */
+
+/* TOTP 绑定二维码：内容就是后端给的 otpauth:// URI，和下方只读输入框一字不差。
+   必须本地画（qr.js 已在 /assets 里）——把密钥发给第三方二维码服务等于把
+   二次验证直接交出去。白底 + 4 模块静区是手机识别率的最低要求。 */
+function renderTotpQR(uri) {
+  const cv = $("fa_totp_qr"), msg = $("fa_totp_qr_msg");
+  if (!cv) return;
+  const size = 180;
+  cv.width = cv.height = size;                 // 顺带擦掉上一次的密钥
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size, size);
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(uri); qr.make();
+    const n = qr.getModuleCount();
+    const cell = Math.max(1, Math.floor((size - 16) / n));  // 上下左右各留 4 模块静区
+    const off = Math.floor((size - cell * n) / 2);
+    ctx.fillStyle = "#111";
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+      if (qr.isDark(r, c)) ctx.fillRect(off + c * cell, off + r * cell, cell, cell);
+    if (msg) msg.textContent = "二维码已生成：扫码后输入下方 6 位口令确认绑定。";
+  } catch (e) {
+    if (msg) msg.textContent = "二维码生成失败，请手动输入下方密钥：" + e.message;
+  }
+}
+/* 启用成功 / 关闭 2FA 后把暂存密钥从界面上清掉：二维码贴在屏幕上等于把
+   二次验证的凭据留在明处，别人路过拍一张就能算出后续所有动态口令。 */
+function clearTotpStaged() {
+  ["fa_secret", "fa_uri", "fa_totp_code"].forEach(id => { $(id).value = ""; });
+  const cv = $("fa_totp_qr");
+  if (cv) {
+    cv.width = cv.height = 180;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 180, 180);
+  }
+  $("fa_totp_qr_msg").textContent = "";
+  $("fa_totp_box").classList.add("hide");
+  $("fa_totp_start").classList.remove("hide");
+}
+async function faCopyUri() {
+  const uri = $("fa_uri").value;
+  if (!uri) { toast("请先生成密钥", "warn"); return; }
+  try {
+    if (!navigator.clipboard) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(uri);
+    toast("绑定 URI 已复制");
+  } catch (e) {
+    viewContent("绑定 URI", uri);   // file:// / 非安全上下文里选中复制兜底
+  }
+}
+
 async function loadAuth2FA() {
   try {
     const j = await req("/api/auth2fa");
@@ -10654,7 +10874,8 @@ async function faTotpSetup() {
     $("fa_secret").value = j.secret;
     $("fa_uri").value = j.uri;
     $("fa_totp_code").value = "";
-    toast("密钥已生成：在验证器 App 中「手动输入密钥」绑定，再输入当前口令确认", "info");
+    renderTotpQR(j.uri || "");
+    toast("密钥已生成：用验证器 App 扫码，或手动输入密钥，再输入当前口令确认", "info");
   } catch(e){ toast(e.message, "err"); }
 }
 async function faTotpEnable() {
@@ -10663,8 +10884,7 @@ async function faTotpEnable() {
   try {
     await req("/api/auth2fa/totp/enable", { method:"POST", body:{ code } });
     toast("TOTP 二次验证已启用，下次登录需要输入动态口令");
-    $("fa_totp_box").classList.add("hide");
-    $("fa_totp_start").classList.remove("hide");
+    clearTotpStaged();
     loadAuth2FA();
   } catch(e){ toast(e.message, "err"); }
 }
@@ -10699,6 +10919,7 @@ async function faDisable() {
   try {
     await req("/api/auth2fa/disable", { method:"POST", body:{} });
     toast("二次验证已关闭");
+    clearTotpStaged();
     loadAuth2FA();
   } catch(e){ toast(e.message, "err"); }
 }
@@ -11530,8 +11751,16 @@ if (DEMO) {
   applyRole();
   showApp();
 } else if (TOKEN) {
+  /* 首屏已经由 boot.js 画成主界面，这里**不再等** /api/status 的往返才决定显隐：
+     立刻套上本地角色（只读账号不该闪一下管理员按钮）并开始拉数据。 */
+  applyRole();
+  showApp();
+  /* 会话可能在别的设备上被吊销、或面板重启后 token 失效：后台复核一次，
+     只有明确的 401 才回登录页。网络暂时不通（面板正在重启、断网重连）不踢人，
+     否则一次抖动就变成「刷新一下要重新登录」。 */
   fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
-    .then(r => r.ok ? showApp() : showLogin()).catch(showLogin);
+    .then(r => { if (r.status === 401) { dropSession(); showLogin(); } })
+    .catch(() => {});
 } else showLogin();
 </script>
 </body>
