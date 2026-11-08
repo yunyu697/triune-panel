@@ -160,7 +160,9 @@ func serve(args []string) {
 
 	// 内置 Web UI（若外置 web 目录不存在则使用嵌入版）
 	if err := webui.EmbedIfNeeded(*dataDir); err != nil {
-		log.Printf("embed web ui: %v", err)
+		// 写不进去也不能继续服务上一版的 data/web/index.html（症状：升级后
+		// 界面没变）。API 层还有 webui.ResolvePage 兜底，这里把原因说清楚。
+		log.Printf("[ui] 无法更新 data/web/index.html（%v）；将直接服务二进制内嵌界面，请检查目录属主/权限或是否为只读挂载", err)
 	}
 
 	// 审计日志保留期清理：启动跑一次，之后每 12 小时一次。

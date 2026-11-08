@@ -29,6 +29,7 @@ var indexHTML []byte
 // （内联 <script> 和内联 onclick 只能靠它放行，而那一条同时也放行了注入的脚本）。
 //
 // boot.js 在 <head> 同步执行，决定首屏画登录页还是主界面（刷新时不再闪登录页）。
+//
 //go:embed qr.js app.js boot.js
 var scriptAssets embed.FS
 
@@ -89,6 +90,23 @@ func embeddedMarker() string {
 		return string(m[1])
 	}
 	return ""
+}
+
+// ResolvePage 保证 HTTP 实际发出去的页面不会是上一版。
+//
+// EmbedIfNeeded 在启动时把 data/web/index.html 覆盖成内嵌版，但那一步可能
+// 失败（目录只读、属主不是面板运行用户、只读挂载），而 main 里只记一行日志
+// 就继续服务磁盘文件——用户看到的就是「明明升级了，界面还是旧的」。
+// 这里做第二道防线：磁盘页面带 build 标记且版本与当前二进制不一致时，
+// 直接用内嵌页面响应，不依赖能不能写盘。
+//
+// 没有标记的页面一律原样返回：那是用户自己替换的自定义 UI（见包注释），
+// 不能因为缺标记就把它换掉，否则自定义界面会被内置页顶掉、连 CSP 都会变。
+func ResolvePage(disk []byte) []byte {
+	if m := webBuildMarker.FindSubmatch(disk); len(m) >= 2 && string(m[1]) != embeddedMarker() {
+		return indexHTML
+	}
+	return disk
 }
 
 // EmbedIfNeeded 确保数据目录下的 UI 文件与当前二进制的内嵌版本一致：

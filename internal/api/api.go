@@ -18,6 +18,7 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 	"triune/internal/ops"
 	"triune/internal/proc"
 	"triune/internal/store"
+	"triune/internal/webui"
 )
 
 type Server struct {
@@ -228,7 +230,19 @@ func (a *Server) Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		// 启动时写盘失败（权限 / 只读挂载）或旧版页面残留时，以当前二进制
+		// 内嵌的 UI 为准。没有标记的自定义 UI 原样保留，见 webui.ResolvePage。
+		data = webui.ResolvePage(data)
 		w.Header().Set("Cache-Control", "no-cache")
+		// 页面 URL 永远不变，给一个内容 ETag：浏览器与合规反代据此判断
+		// 「这次升级要不要换页面」，而不是靠缓存时间猜。内容变了摘要必变。
+		sum := sha256.Sum256(data)
+		etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		// 自定义 UI（data/web/index.html 被换成自己的构建产物）可能仍在用内联
 		// 脚本或内联事件属性。对这类页面单独放宽 CSP，否则收紧的那一下会把
 		// 人家整套界面打死；内置 UI 不带这些形态，始终走严格策略。
