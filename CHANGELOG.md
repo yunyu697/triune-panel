@@ -8,6 +8,75 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.3.0
+
+### 刷新不再闪登录页，也不再被送回概览
+
+刷新一次要闪两下：HTML 里登录页默认可见、`#app` 默认 `.hide`，而 `app.js` 要等
+`/api/status` 一个网络往返回来才 `showApp()`；紧接着 HTML 里写死带 `.active` 的
+概览页又盖掉上次停留的页面，等 `app.js` 跑完 `goto()` 才切回去。面板刚重启或网络
+慢时这一来一回能到几百毫秒，看起来像「登录态断了又被接回来」。
+
+现在首屏由 `<head>` 里**同步**执行的 `boot.js` 决定：读本地 `triune_token` 与
+`triune_view`，给 `<html>` 打上 `data-boot` / `data-boot-view`，`index.html` 的 CSS
+据此在首次绘制之前藏掉登录页、显示主界面和上次那一页，并关掉整页入场动画。脚本
+必须外置——CSP 是 `script-src 'self'`，内联 `<script>` 会被浏览器直接忽略；因此
+同时补了 `//go:embed`、`/assets/boot.js` 路由、`security_test.go` 和
+`build-demo.py` 的生成链。
+
+几个边界：
+
+- **不是权限判断**：本地 token 可能已过期，真正的校验仍在服务端。启动时立即
+  `applyRole(); showApp();`，后台再复核 `/api/status`，只有明确 `401` 才清会话回
+  登录页；网络错误不踢人，否则断网刷新会被误判成掉线。
+- **401 / 退出登录清本地身份**（`dropSession()`）：否则过期 token 每次刷新都会
+  重复「先画主界面 → 再回登录页」这一段。
+- **视图白名单**：`BOOT_VIEWS` 与 `app.js` 的 `VIEWS`、`index.html` 的页面清单由
+  `TestViewRestoreOnReload` 钉住一致；手改或旧版残留一个不存在的页面名时，「先藏
+  概览」没有对应的显示规则会整页空白，所以非法值干脆不设属性、退回默认概览。
+- **顺序**：`showApp()` 必须先 `restoreView()` 再 `clearBootFlag()`；反了会露出一帧
+  HTML 默认的概览页。首屏的 `!important` 规则在 app.js 接手后全部撤掉，不会长期
+  压过 `.hide` / `.active`。
+
+### TOTP 双重验证可以扫码绑定
+
+绑定 2FA 原来只能在验证器里手输 32 位 base32 密钥或整串 `otpauth://` URI，手机上
+手输容易错、错了还看不出是哪一位。现在生成密钥后直接显示二维码，用项目已有的
+`qr.js` 在**浏览器本地**画到 canvas——`otpauth://` URI 里含密钥，不能拿去请求
+第三方二维码服务。仍保留「复制绑定 URI」和手动输入密钥两条路；启用成功或关闭
+2FA 后清掉二维码、暂存密钥和口令输入框，屏幕不留密钥。后端无需改动：
+`auth2fa/totp/setup` 本来就返回 `{secret, uri}`。
+
+### 生成配置：绕过节点服务器（默认开启）
+
+主路由 / 旁路由 / TUN 接管全机流量后，客户端连**节点服务器本身**的那条连接也会
+被送进隧道，形成回环：配置能正常加载、节点却永远连不上，日志里还看不出原因。
+现在生成 mihomo / sing-box 客户端配置时自动把导出节点所用的服务器地址写成
+**最高优先级 DIRECT 规则**，地址由「设置 → 公网地址」带出，无需手填。
+
+- **mihomo**：规则表开头插入 `DOMAIN,<域名>,DIRECT` 与
+  `IP-CIDR,<IP>/32,DIRECT,no-resolve`，排在所有自定义规则、规则集、私网规则和
+  `MATCH` 之前；TUN / fake-ip 下把节点域名加进 `fake-ip-filter`（复制切片，不污染
+  全局列表），否则域名被解析成假 IP 就匹配不到域名规则。
+- **sing-box**：`route.rules` 在 `hijack-dns` 之后紧跟 `domain` / `ip_cidr` 的
+  `outbound: direct`；`dns.rules` 开头让节点域名走 `local` 解析，避免落到经代理的
+  DoH 上变成「先连上代理才能解析代理地址」。
+- 地址归一化处理端口、IPv6 方括号、尾点与大小写，去重后 IPv4 补 `/32`、IPv6 补
+  `/128`；响应回显 `bypass_servers`，结果页显示实际生效的地址。没有可用地址时给
+  warning，不静默生成空规则。
+- **开关默认勾选，但 API 里 `bypass_server` 默认 false**：老的脚本 / 第三方调用
+  不带这个字段时行为与以前完全一致，不会被悄悄改写。开关变化会让旧生成结果失效，
+  `bypass_server` 也进了保存的 `params`，一周后「重新生成」不会丢掉防回环规则。
+
+验证：新增 `genconfig_bypass_test.go` 8 项（地址归一化、去重、两个内核的规则位置、
+开关 opt-in、HTTP 回显）与 `genconfig_ui_test.go`（前端参数链、保存后重新生成、
+demo 两种内核的规则）；`TestFirstPaintBootGuard` / `TestViewRestoreOnReload` 钉住
+首屏链路（三份视图清单一致、`restoreView` 先于 `clearBootFlag`）。变异验证：去掉
+`restoreView()`、删掉某页首屏 CSS、把 `if q.BypassServer` 改成 `if true` 分别转红。
+浏览器实测 `.e2e/view-restore.js` 33 项（app.js 接手前的首帧 computedStyle、二维码
+真实绘制、URI、启用后清除）与 `.e2e/bypass-server.js` 14 项（真点开关、两种内核
+规则位置、保存参数）；`go test ./...` 全绿。
+
 ## v1.2.9
 
 ### 「应用配置」改成弹窗，「应用 / 修订」退出导航
