@@ -161,6 +161,43 @@ func TestFrostedChromeIsGuarded(t *testing.T) {
 	}
 }
 
+// TestSettingsTabsShareCardShell 钉住设置页分组条的外壳参数。
+//
+// 这条曾经退化成「左右 padding 为 0 的实色带」：玻璃层一开就变成一条通栏
+// 白带，宽度与卡片一样却看不出边界，里面又嵌一个灰底胶囊，看起来像另一个
+// 系统的顶栏。分组条必须和内容卡片、命令条用同一套外壳（等宽、圆角、描边、
+// 浮起阴影），标签本身不带壳。
+func TestSettingsTabsShareCardShell(t *testing.T) {
+	css := stripCSSComments(string(indexHTML))
+
+	tabs := cssRule(t, css, ".set-tabs")
+	for _, frag := range []string{
+		"border-radius:var(--r-lg)",      // 与 .card / .cmdbar 同圆角
+		"border:1px solid var(--line)",   // 没有描边就看不出卡片边界
+		"box-shadow:var(--float-shadow)", // 浮起，不是贴在内容上的一条底色
+		"padding:14px 16px",              // 左右必须留内边距，否则又变成通栏带
+	} {
+		if !strings.Contains(tabs, frag) {
+			t.Errorf(".set-tabs 缺 %q：分组条会退回「通栏白带」，与卡片不是一套外壳", frag)
+		}
+	}
+	// 底部不许再垫实色渐隐：玻璃本身半透明，实色渐变会在卡片下缘多出一道横带。
+	if strings.Contains(css, ".set-tabs::after") {
+		t.Error(".set-tabs 不要再用 --bg 实色渐隐盖住下方内容：玻璃卡片下缘会多一道横带")
+	}
+
+	seg := cssRule(t, css, ".seg-lg")
+	for _, frag := range []string{"border:none", "background:none", "padding:0"} {
+		if !strings.Contains(seg, frag) {
+			t.Errorf(".seg-lg 缺 %q：卡片里再套一层灰胶囊，和侧栏导航的选中语言不一致", frag)
+		}
+	}
+	// 选中态仍是「自己上色」的胶囊，不能退回白卡片那套（深色主题会变成凹进去）。
+	if on := cssRule(t, css, ".seg-lg button.on"); !strings.Contains(on, "background:var(--acc-soft)") {
+		t.Error(".seg-lg button.on 必须用主色浅底胶囊")
+	}
+}
+
 // TestLoginSplitLayoutIsGuarded 把登录页「左侧中间登录 + 右侧同材质品牌面板」
 // 的最终效果参数钉住。三条最容易在后续改样式时被顺手破坏的约束：
 //  1. #login 必须是 flex —— boot.js 首帧显隐、view-restore / first-paint-server

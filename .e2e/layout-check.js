@@ -71,6 +71,38 @@ const ck = (n, want, got) => {
     await page.close();
   }
 
+  // ---- 1.5 设置页：命令条 / 分组条 / 内容卡片必须等宽对齐 ----
+  // 分组条曾经是「左右 padding 为 0 的实色带」，玻璃层一开就成了一条通栏白带，
+  // 里面再嵌一个灰底胶囊，看着像另一个系统的顶栏。这里量真实坐标钉死。
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.goto(URL);
+    await page.waitForTimeout(800);
+    await page.evaluate(() => window.goto("settings"));
+    await page.waitForTimeout(500);
+    const r = await page.evaluate(() => {
+      const box = s => {
+        const e = document.querySelector(s), b = e.getBoundingClientRect(), c = getComputedStyle(e);
+        return {
+          left: Math.round(b.left), right: Math.round(b.right), w: Math.round(b.width),
+          radius: parseFloat(c.borderTopLeftRadius), padL: parseFloat(c.paddingLeft),
+        };
+      };
+      return {
+        bar: box(".cmdbar"), tabs: box(".set-tabs"),
+        card: box("#v-settings .card:not([hidden])"), seg: box(".seg-lg"),
+      };
+    });
+    console.log("\n-- 设置页 1440x900 --");
+    ck("分组条与命令条等宽对齐", true,
+      r.tabs.left === r.bar.left && r.tabs.right === r.bar.right);
+    ck(`分组条与内容卡片等宽对齐（条 ${r.tabs.w}px / 卡 ${r.card.w}px）`, true,
+      r.tabs.left === r.card.left && r.tabs.right === r.card.right);
+    ck("分组条是圆角卡片且左右留内边距", true, r.tabs.radius > 0 && r.tabs.padL > 0);
+    ck("标签组不再套灰底胶囊壳", true, r.seg.padL === 0 && r.seg.w < r.tabs.w);
+    await page.close();
+  }
+
   // ---- 2. 手机竖屏：无横向溢出，且能滚到内容底部 ----
   for (const [w, h] of [[390, 844], [360, 640], [320, 568]]) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true });
