@@ -160,6 +160,84 @@ const ck = (n, want, got) => {
   ck("撤销后回到未应用", true, reverted.meta.includes("未应用"));
   ck("撤销后隐藏撤销按钮", false, reverted.revertShown);
 
+  // ---- 6. 体检项的一键修复与回退 ----
+  // 体检只报状态时用户还得自己查「该改哪个键」。能代劳的项带修复按钮；
+  // 不能代劳的项按钮禁用并写明原因（藏起来会被当成页面漏了）。
+  // 这里的断言全部走事件委托链路：data-act 没挂上时点击会静默无反应。
+  const fixUI = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#ho_checks > div")];
+    const row = t => rows.find(x => x.textContent.includes(t));
+    const fdRow = row("文件描述符上限"), ckRow = row("时钟同步");
+    const fdBtn = fdRow && fdRow.querySelector('button[data-act="hostOptFix"]');
+    const ckBtn = ckRow && ckRow.querySelector('button[data-act="hostOptFix"]');
+    return {
+      fdBtn: !!fdBtn, fdLabel: fdBtn ? fdBtn.textContent.trim() : "", fdDisabled: fdBtn ? fdBtn.disabled : null,
+      ckBtn: !!ckBtn, ckDisabled: ckBtn ? ckBtn.disabled : null,
+      ckReason: ckRow ? ckRow.textContent.includes("NTP=yes") : false,
+      fixedArea: (document.getElementById("ho_fixes").textContent || "").trim(),
+    };
+  });
+  ck("失败的体检项带修复按钮", true, fixUI.fdBtn);
+  ck("修复按钮写明目标值", true, fixUI.fdLabel.includes("65535"));
+  ck("可修复项按钮可点", false, fixUI.fdDisabled);
+  ck("不可修复项仍显示按钮", true, fixUI.ckBtn);
+  ck("不可修复项按钮禁用", true, fixUI.ckDisabled);
+  ck("不可修复项写明原因", true, fixUI.ckReason);
+  ck("未修复前没有回退区", "", fixUI.fixedArea);
+
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#ho_checks > div")];
+    rows.find(x => x.textContent.includes("文件描述符上限"))
+      .querySelector('button[data-act="hostOptFix"]').click();
+  });
+  await page.waitForTimeout(150);
+  ck("修复前有二次确认", true,
+    await page.evaluate(() => document.getElementById("mConfirm").classList.contains("show")));
+  ck("确认弹窗说明会记原值并可回退", true,
+    await page.evaluate(() => document.getElementById("cf_text").textContent.includes("回退")));
+  await page.evaluate(() => document.getElementById("cf_ok").click());
+  await page.waitForTimeout(800);
+
+  const afterFix = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#ho_checks > div")];
+    const fdRow = rows.find(x => x.textContent.includes("文件描述符上限"));
+    const area = document.getElementById("ho_fixes");
+    return {
+      rowOk: fdRow ? fdRow.textContent.includes("✓") : false,
+      stillBtn: !!(fdRow && fdRow.querySelector('button[data-act="hostOptFix"]')),
+      areaText: (area.textContent || "").trim(),
+      revertBtn: !!(area.querySelector('button[data-act="hostOptRevertFix"]')),
+      changes: area.textContent.includes("65535"),
+    };
+  });
+  ck("修复后体检项转 OK", true, afterFix.rowOk);
+  ck("修复后行内按钮消失", false, afterFix.stillBtn);
+  ck("修复后出现「已修复」区", true, afterFix.areaText.includes("面板已修复 1 项"));
+  ck("已修复区写明改了什么", true, afterFix.changes);
+  ck("已修复区提供回退按钮", true, afterFix.revertBtn);
+
+  await page.evaluate(() => document.querySelector('#ho_fixes button[data-act="hostOptRevertFix"]').click());
+  await page.waitForTimeout(150);
+  ck("回退前有二次确认", true,
+    await page.evaluate(() => document.getElementById("mConfirm").classList.contains("show")));
+  const revertText = await page.evaluate(() => document.getElementById("cf_text").textContent);
+  ck("回退确认写明恢复原值", true, revertText.includes("恢复"));
+  await page.evaluate(() => document.getElementById("cf_ok").click());
+  await page.waitForTimeout(800);
+
+  const afterRevert = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#ho_checks > div")];
+    const fdRow = rows.find(x => x.textContent.includes("文件描述符上限"));
+    return {
+      rowFail: fdRow ? fdRow.textContent.includes("✕") : false,
+      btnBack: !!(fdRow && fdRow.querySelector('button[data-act="hostOptFix"]')),
+      areaText: (document.getElementById("ho_fixes").textContent || "").trim(),
+    };
+  });
+  ck("回退后体检项重新失败", true, afterRevert.rowFail);
+  ck("回退后修复按钮回来", true, afterRevert.btnBack);
+  ck("回退后清空已修复区", "", afterRevert.areaText);
+
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   await browser.close();
   process.exit(fail ? 1 : 0);

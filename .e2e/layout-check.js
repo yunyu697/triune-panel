@@ -141,6 +141,61 @@ const ck = (n, want, got) => {
     await page.close();
   }
 
+  // ---- 2.5 组件更新表：长版本串不许把「操作」列顶出卡片 ----
+  // mihomo `-v` 的第一行有 60 多个字符，而 td 默认 nowrap：版本号会把整张表撑宽，
+  // 「操作」列被推到卡片右侧外面，看起来就像按钮被版本号遮住了。这里注入真实长度的
+  // 版本串再量按钮右缘——只断言「元素存在」抓不到这类溢出。
+  const LONG_VER = {
+    singbox: "sing-box version 1.12.0-alpha.5 (go1.24.2 linux/amd64 CGO disabled)",
+    mihomo: "Mihomo Meta v1.19.1 linux amd64 with go1.24.1 Sat Jun 21 2025",
+  };
+  for (const w of [1440, 1280, 1080, 390, 320]) {
+    const page = await browser.newPage({ viewport: { width: w, height: 900 }, isMobile: w < 500, hasTouch: w < 500 });
+    await page.goto(URL);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      document.querySelector('.nav-item[data-v="settings"]').click();
+      document.querySelector('#set_sect_seg button[data-sect="maintain"]').click();
+    });
+    await page.waitForTimeout(400);
+    const m = await page.evaluate((LONG) => {
+      const rows = document.querySelectorAll("#updtbody tr");
+      if (rows[1]) rows[1].children[1].textContent = LONG.singbox;
+      if (rows[2]) rows[2].children[1].textContent = LONG.mihomo;
+      const card = document.getElementById("set_card_update");
+      const wrap = card.querySelector(".tbl-wrap");
+      const btns = [...card.querySelectorAll("#updtbody .btn")];
+      const over = Math.max(...btns.map(b => b.getBoundingClientRect().right)) - card.getBoundingClientRect().right;
+      return { over: Math.round(over), hscroll: wrap.scrollWidth - wrap.clientWidth, n: btns.length };
+    }, LONG_VER);
+    ck(`${w}px：长版本串下操作按钮仍在卡片内（${m.n} 个）`, true, m.over <= 1);
+    ck(`${w}px：组件更新表不需要横向滑动`, true, m.hscroll <= 1);
+    await page.close();
+  }
+
+  // ---- 2.6 表头形状：上面圆、下面直角 ----
+  // 表头曾经四角全圆而下方的数据行是直角，接缝处多出两块缺口，整张表像两种形状
+  // 拼起来的。CSS 里写成 shorthand 很难看出圆的是哪两个角，这里直接量 computed。
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.goto(URL);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      document.querySelector('.nav-item[data-v="settings"]').click();
+      document.querySelector('#set_sect_seg button[data-sect="maintain"]').click();
+    });
+    await page.waitForTimeout(600);
+    const r = await page.evaluate(() => {
+      const th = document.querySelector(".upd-tbl thead th");
+      if (!th) return null;
+      const cs = getComputedStyle(th);
+      return { top: cs.borderTopLeftRadius, bottom: cs.borderBottomLeftRadius };
+    });
+    ck("表头上角是圆的", true, !!r && r.top !== "0px");
+    ck("表头下角是直角（与数据行齐平）", "0px", r ? r.bottom : "null");
+    await page.close();
+  }
+
   // ---- 3. 截图留档 ----
   for (const [w, h, name] of [[1440, 400, "short"], [390, 844, "390x844"], [320, 568, "320x568"]]) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, isMobile: w < 500, hasTouch: w < 500 });

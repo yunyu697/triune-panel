@@ -70,7 +70,10 @@ func TestHostOptWriteRequiresExplicitConfirm(t *testing.T) {
 	a, dir, _ := newBackupTestServer(t)
 	before := dirNames(t, dir)
 
-	for _, path := range []string{"/api/host-opt/apply", "/api/host-opt/revert"} {
+	for _, path := range []string{
+		"/api/host-opt/apply", "/api/host-opt/revert",
+		"/api/host-opt/fix", "/api/host-opt/fix/revert",
+	} {
 		for _, body := range []map[string]string{{}, {"confirm": ""}, {"confirm": "yes"}, {"confirm": "APPLY BBR "}} {
 			w := authedReq(t, a, "POST", path, body)
 			if w.Code != 400 {
@@ -96,6 +99,8 @@ func TestHostOptWriteRoutesAreOwnerOnly(t *testing.T) {
 	for _, line := range []string{
 		`mux.HandleFunc("POST /api/host-opt/apply", a.ownerOnly(a.handleHostOptApply))`,
 		`mux.HandleFunc("POST /api/host-opt/revert", a.ownerOnly(a.handleHostOptRevert))`,
+		`mux.HandleFunc("POST /api/host-opt/fix", a.ownerOnly(a.handleHostOptFix))`,
+		`mux.HandleFunc("POST /api/host-opt/fix/revert", a.ownerOnly(a.handleHostOptFixRevert))`,
 	} {
 		if !strings.Contains(string(src), line) {
 			t.Errorf("路由权限被改弱或丢失：%s", line)

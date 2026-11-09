@@ -56,6 +56,47 @@ func (a *Server) handleHostOptRevert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, hostopt.Detect(a.DataDir))
 }
 
+// hostOptFixReq 是单项修复/回退的请求体。key 是体检项对应的动作标识
+// （clock / fd / conntrack），必须与 hostopt 里的注册表一致。
+type hostOptFixReq struct {
+	Confirm string `json:"confirm"`
+	Key     string `json:"key"`
+}
+
+// POST /api/host-opt/fix —— 执行一项体检项修复。
+//
+// 与 apply/revert 同一套闸门：ownerOnly + 精确确认串 + 先备份原值 + 回读复检，
+// 失败零改动。区别只在粒度——这里修的是「时钟没开对时」「fd 上限太低」
+// 「conntrack 快满表」这类单点问题，不动六个网络参数。
+func (a *Server) handleHostOptFix(w http.ResponseWriter, r *http.Request) {
+	var req hostOptFixReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, 400, "请求体格式有误："+err.Error())
+		return
+	}
+	if err := hostopt.ApplyFix(a.DataDir, req.Confirm, req.Key); err != nil {
+		a.hostOptFail(w, r, "fix:"+req.Key, err)
+		return
+	}
+	a.auditOK(r, AuditHostOpt, "fix", "主机网络优化：修复 "+req.Key)
+	writeJSON(w, 200, hostopt.Detect(a.DataDir))
+}
+
+// POST /api/host-opt/fix/revert —— 按修复记录回退。
+func (a *Server) handleHostOptFixRevert(w http.ResponseWriter, r *http.Request) {
+	var req hostOptFixReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, 400, "请求体格式有误："+err.Error())
+		return
+	}
+	if err := hostopt.RevertFix(a.DataDir, req.Confirm, req.Key); err != nil {
+		a.hostOptFail(w, r, "unfix:"+req.Key, err)
+		return
+	}
+	a.auditOK(r, AuditHostOpt, "unfix", "主机网络优化：回退修复 "+req.Key)
+	writeJSON(w, 200, hostopt.Detect(a.DataDir))
+}
+
 func (a *Server) hostOptFail(w http.ResponseWriter, r *http.Request, action string, err error) {
 	a.auditFail(r, AuditHostOpt, action, err.Error())
 	switch {

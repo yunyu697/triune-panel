@@ -140,14 +140,14 @@ func TestNoInsetShorthand(t *testing.T) {
 func TestFrostedChromeIsGuarded(t *testing.T) {
 	css := string(indexHTML)
 	for _, frag := range []string{
-		"--float-gap:14px",                    // 侧栏与命令条共用同一离屏距离
+		"--float-gap:14px", // 侧栏与命令条共用同一离屏距离
 		"margin:var(--float-gap) 0 var(--float-gap) var(--float-gap)", // 四边离屏
-		"border-radius:var(--r-xl)",           // 侧栏是圆角卡片，不是贴边的墙
-		"var(--float-shadow)",                 // 浮起阴影带主色晕
-		"@media (min-width:961px){",           // 窄屏不上磨砂（Android 滚动闪白）
+		"border-radius:var(--r-xl)",                                   // 侧栏是圆角卡片，不是贴边的墙
+		"var(--float-shadow)",                                         // 浮起阴影带主色晕
+		"@media (min-width:961px){",                                   // 窄屏不上磨砂（Android 滚动闪白）
 		"@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){",
 		"backdrop-filter:blur(24px) saturate(170%)",
-		"background:var(--glass)",             // 磨砂层用高不透明度玻璃
+		"background:var(--glass)", // 磨砂层用高不透明度玻璃
 	} {
 		if !strings.Contains(css, frag) {
 			t.Errorf("悬浮玻璃设计缺 %q：实现与最终效果图不一致", frag)
@@ -195,6 +195,82 @@ func TestSettingsTabsShareCardShell(t *testing.T) {
 	// 选中态仍是「自己上色」的胶囊，不能退回白卡片那套（深色主题会变成凹进去）。
 	if on := cssRule(t, css, ".seg-lg button.on"); !strings.Contains(on, "background:var(--acc-soft)") {
 		t.Error(".seg-lg button.on 必须用主色浅底胶囊")
+	}
+}
+
+// TestComponentTableKeepsActionsVisible 组件更新表的「操作」列不许被版本号挤出去。
+//
+// 内核的版本串是二进制自己输出的第一行：mihomo 的 `-v` 是
+// 「Mihomo Meta v1.19.1 linux amd64 with go1.24.1 Sat Jun 21 2025」，60 多个字符。
+// 而全局 td 是 `white-space:nowrap`，这一格会把整张表顶宽，最后一列（操作）
+// 被推到卡片外面——用户看到的就是「按钮被版本号遮住了」。修法有三处，缺一不可：
+//  1. 版本列允许换行（nowrap 会让 min-content 等于整行长度）；
+//  2. 操作列 `width:1%`，按内容收缩，永远分到它需要的宽度；
+//  3. 窄屏（≤360px）四列实在挤不下时改成两行式，而不是靠横向滑动藏按钮。
+//
+// 颜色/尺寸之外这类「看不见的布局」最容易在改表格样式时被顺手删掉，钉住。
+func TestComponentTableKeepsActionsVisible(t *testing.T) {
+	html := string(indexHTML)
+	css := stripCSSComments(html)
+
+	if !strings.Contains(html, `<table class="upd-tbl">`) {
+		t.Fatal("组件更新表丢了 class=\"upd-tbl\"，下面的列宽规则会全部失效")
+	}
+
+	ver := cssRule(t, css, ".upd-tbl td:nth-child(2)")
+	for _, frag := range []string{"white-space:normal", "overflow-wrap:anywhere"} {
+		if !strings.Contains(ver, frag) {
+			t.Errorf(".upd-tbl 版本列缺 %q：长版本串会把表格顶宽，操作列被推出卡片", frag)
+		}
+	}
+	if act := cssRule(t, css, ".upd-tbl th:nth-child(4)"); !strings.Contains(act, "width:1%") {
+		t.Error(".upd-tbl 操作列必须 width:1%（按内容收缩），否则会被版本列挤掉")
+	}
+
+	// 窄屏兜底：320px 上四列怎么压都差几十像素，必须换成两行式。
+	i := strings.Index(css, "@media (max-width:360px)")
+	if i < 0 {
+		t.Fatal("缺少 ≤360px 的组件表兜底：320px 下操作按钮会落在视口外")
+	}
+	block := css[i:]
+	if j := strings.Index(block, "\n}"); j >= 0 {
+		block = block[:j]
+	}
+	for _, frag := range []string{".upd-tbl thead{display:none}", ".upd-tbl tr{display:grid"} {
+		if !strings.Contains(block, frag) {
+			t.Errorf("≤360px 兜底缺 %q：四列在 320px 上挤不下，按钮又会被挤出去", frag)
+		}
+	}
+
+	// 渲染侧：版本串来自二进制输出，必须转义后再进 innerHTML（别只当样式问题）。
+	app, _, err := AssetFile("app.js")
+	if err != nil {
+		t.Fatalf("读 app.js 失败: %v", err)
+	}
+	src := string(app)
+	for _, frag := range []string{
+		`class="mono upd-ver" title="${escHtml(c.version || "")}"`,
+		`class="muted mono upd-bin" title="${escHtml(c.bin || "")}"`,
+	} {
+		if !strings.Contains(src, frag) {
+			t.Errorf("app.js 缺 %q：版本/路径未转义或丢了 title（长串截断后看不到全文）", frag)
+		}
+	}
+}
+
+// TestTableHeaderRoundsOnlyTop 表头只圆上面两个角，下面必须跟数据行齐平。
+//
+// 原来的写法是 left 给 `8px 0 0 8px`、right 给 `0 8px 8px 0`——四角全圆，
+// 而下方的数据行是直角，接缝处多出两块缺口，整张表看着像两种形状拼起来的。
+// 这条规则是全局的（所有表格共用），所以只改一处就能全部对齐，也正因如此
+// 它很容易在某次「调表格样式」时被顺手改回去。
+func TestTableHeaderRoundsOnlyTop(t *testing.T) {
+	css := stripCSSComments(string(indexHTML))
+	if first := cssRule(t, css, "th:first-child"); !strings.Contains(first, "border-radius:8px 0 0 0") {
+		t.Errorf("th:first-child 应只圆左上角，实际 %q", first)
+	}
+	if last := cssRule(t, css, "th:last-child"); !strings.Contains(last, "border-radius:0 8px 0 0") {
+		t.Errorf("th:last-child 应只圆右上角，实际 %q", last)
 	}
 }
 

@@ -212,6 +212,10 @@ func (a *Server) Handler() http.Handler {
 	// 写 /etc/sysctl.d 属于系统级改动：只有超级管理员、且带回传的确认字面量才会执行
 	mux.HandleFunc("POST /api/host-opt/apply", a.ownerOnly(a.handleHostOptApply))
 	mux.HandleFunc("POST /api/host-opt/revert", a.ownerOnly(a.handleHostOptRevert))
+	// 体检项的单项修复（时钟对时 / fd 上限 / conntrack 上限）同样会改系统状态，
+	// 权限与确认字面量要求一致，只有粒度更细。
+	mux.HandleFunc("POST /api/host-opt/fix", a.ownerOnly(a.handleHostOptFix))
+	mux.HandleFunc("POST /api/host-opt/fix/revert", a.ownerOnly(a.handleHostOptFixRevert))
 
 	// 前端脚本从内嵌副本走（见 webui.AssetFile）：内容与二进制严格对应，
 	// 且 CSP 收紧到 script-src 'self' 之后必须能同源加载。

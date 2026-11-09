@@ -8,6 +8,72 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.8.0
+
+### 主机网络体检：失败项可以一键修复，并且能回退
+
+体检以前只回答「有没有问题」，修复得自己 SSH 上去敲命令——而失败项里至少有三项是
+面板完全能安全代办的。这一版把它们变成带确认、带回读、带回退的按钮：
+
+- **时钟未同步**：`timedatectl set-ntp true` 重新打开 NTP。回退即关掉（恢复「修复前
+  是关闭状态」）。
+- **文件描述符 soft 过低**：把 `RLIMIT_NOFILE` 的 **Cur 抬到 hard 或警戒线**（
+  `rlimit_unix.go`，非 unix 平台明确降级）；只动 Cur 不动 Max——Max 降下去非 root
+  就提不回来了。回退写回原 soft 值。
+- **conntrack 表将满**：翻倍 `nf_conntrack_max`，上限 262144（约 80 MiB 表项），写
+  `/etc/sysctl.d/98-triune-conntrack.conf` 并 `sysctl -p`；前缀 `98-` 明确排在面板
+  自己的 `99-triune-bbr.conf` 之前。回退删掉该文件并还原原值。
+
+约束与参数应用是同一套：**超级管理员 + 精确确认串 `APPLY FIX` / `REVERT FIX`**
+（与 `APPLY NET` / `REVERT NET` 互不通用），先记原值到 `data/hostopt-fixes.json`，
+写完**回读复检**，不符即恢复原状；记录写不进磁盘时宁可撤销这次修复，也不留一份
+改过却没留痕的系统状态。
+
+界面上的两条讲究：**做不到的项不藏按钮，而是禁用并写明原因**——比如 fd 是被其它
+进程吃到系统级 80%，那不是调面板的 rlimit 能解决的，老实说「需要调大 `fs.file-max`
+或排查泄漏」；**回退入口不挂在体检行上**，修复成功后该项转绿、行内按钮就该消失，
+所以要还原时去「面板已修复」区点回退，那里常驻每条改动的检查名、变化与时间。
+
+`internal/hostopt/fix.go` 是动作注册表（`FixAction`：Key / Label / Note / Ready /
+Blocked / Applied / Changes），`GET` 报告新增 `fixes`；新增 `POST /api/host-opt/fix`
+与 `POST /api/host-opt/fix/revert`，都挂 `ownerOnly`，审计动作 `fix` / `unfix`。
+`timedatectl show --value` 在 NTP 开关上可能返回 `yes` / `true` / `1` / `on`，统一
+判定，否则会把自己刚打开的开关判成未打开并误回滚。
+
+验证：`internal/hostopt/fix_test.go` 9 例（列表只读、fd 修复+回退、hard 不足被拦、
+时钟修复+回退、时钟复检失败回拨、conntrack 修复+回退、生效失败清理、原有配置逐字
+还原、确认串与无记录守卫、记录写失败撤销、`fix` 标识都能解析），`go test ./...`
+全绿；`.e2e/backups-hostopt.js` 35 → 54 项（含修完转绿、禁用项带原因、已修复区
+回退、非超级管理员不可见）；六项变异（去掉复检、去掉记录撤销、确认串借用
+`APPLY NET`、回退入口挪回体检行、不可修复项照旧给按钮、`ntpEnabled` 只认 `yes`）
+全部转红并逐字节还原——其中确认串那一次是**假绿**，`"APPLY FIX"` 在 mock 与常量里
+各出现一次，替换到第一处没影响断言，改成精确替换常量后才转红。
+
+### 组件更新表：长版本号不再把「操作」顶出卡片
+
+`td` 默认 `white-space:nowrap`，`1.12.0-alpha.5` 这类串会把整张表顶宽，最后一列
+（操作按钮）被推出卡片外。修法是「版本列认换行 + 操作列按内容收缩」：版本列
+`white-space:normal` + `overflow-wrap:anywhere`（宽屏 284px，保证 `1.12.0-alpha.5`
+不会被断成两行）、操作列 `width:1%`，路径列截断并带 `title`；≤760px 放开版本列宽并
+`word-break:break-all`，≤560px 整体收一档，≤360px 直接改成**两行式 `display:grid`**
+（路径与版本占第一行、版本与操作占第二行）——靠横向滑动把按钮藏起来不算修好，手指
+根本不知道右边还有东西。
+
+### 表头形状：上圆下直
+
+表格的表头是圆角、下面的数据行是直角，接缝处两块缺口看着很别扭。根因是
+`th:first-child` 用了 `8px 0 0 8px`（四角全圆）。现在统一为
+`8px 0 0 0` / `0 8px 0 0`，一处改动让入站、审计、备份、组件四张表一起对齐。
+
+验证：新增 `TestComponentTableKeepsActionsVisible`（版本列必须可换行、操作列
+`width:1%`、≤360px 必须 grid、`app.js` 的版本与路径要转义并带 `title`）与
+`TestTableHeaderRoundsOnlyTop`，`layout-check.js` 36 → 49 项（5 个宽度 × 2 条溢出
+断言 + 表头几何）；三项变异（版本列改回 nowrap、去掉 360px 断点、表头改回四角全圆）
+在 Go 与浏览器侧同时转红。8 个离线 e2e 脚本全绿，真后端首屏 57/0，主题生成器一致
+性通过，`deploy/tests` 五个脚本通过。
+
+---
+
 ## v1.7.1
 
 ### 修正设置页分组条与顶栏的「不合群」

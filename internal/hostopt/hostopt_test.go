@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixture 用 t.TempDir() 造一整套假的 /proc 与 /etc，所有可替换变量在
@@ -48,14 +49,24 @@ type fixture struct {
 	timedatectlFound bool
 	clockOut         string
 	clockErr         error
+	ntpState         string // timedatectl show -p NTP --value 的当前值（no/yes）
+	setNtpErr        error
 	limits           string // /proc/self/limits 内容
 	fileMax          string
 	fileNr           string
 	ctMax            string // 空 = 未启用 nf_conntrack
 	ctCount          string
 
+	// fd 修复动作的桩：进程内 rlimit 的当前值 / 设置失败。
+	nofileCur uint64
+	nofileMax uint64
+	nofileErr error
+
 	// 记录任何写动作，用于断言「confirm 错 / 不支持时绝不落盘」与「Detect 只读」。
 	mutations int
+
+	// cmds 记录真实执行过的外部命令（如 set-ntp true），用于断言回滚确实发生了。
+	cmds []string
 }
 
 func defaultFixture() *fixture {
@@ -85,6 +96,10 @@ func defaultFixture() *fixture {
 		fileNr:  "1280\t0\t9223372036854775807\n",
 		ctMax:   "262144\n",
 		ctCount: "1024\n",
+		// 进程内 rlimit：默认是「装好后 systemd 给了 65535」的健康值，
+		// 个别用例把它调低来演练修复动作。
+		nofileCur: 65536,
+		nofileMax: 1048576,
 	}
 }
 
@@ -104,6 +119,8 @@ func (f *fixture) install(t *testing.T) {
 	oEtcConf, oLoad, oMem := etcSysctlConf, procLoadAvg, procMemInfo
 	oIPv6, oNet, oTZ := procIPv6Off, sysClassNet, etcTimezone
 	oReadDir, oCPU, oDisk := readDir, cpuCount, diskFree
+	oNoFileGet, oNoFileSet := getNofile, setNofile
+	oCtConf, oNow := conntrackConfPath, nowFn
 	t.Cleanup(func() {
 		readFile, writeFile, stat, mkdirAll, remove, rename = oRead, oWrite, oStat, oMkdir, oRemove, oRename
 		geteuid, lookPath, lookupEnv, runCmd = oGeteuid, oLookPath, oLookupEnv, oRunCmd
@@ -116,6 +133,8 @@ func (f *fixture) install(t *testing.T) {
 		etcSysctlConf, procLoadAvg, procMemInfo = oEtcConf, oLoad, oMem
 		procIPv6Off, sysClassNet, etcTimezone = oIPv6, oNet, oTZ
 		readDir, cpuCount, diskFree = oReadDir, oCPU, oDisk
+		getNofile, setNofile = oNoFileGet, oNoFileSet
+		conntrackConfPath, nowFn = oCtConf, oNow
 	})
 
 	// 所有路径指向临时目录，绝不碰真实 /proc / /etc。
@@ -146,6 +165,23 @@ func (f *fixture) install(t *testing.T) {
 	readDir = os.ReadDir
 	cpuCount = func() int { return 2 }
 	diskFree = func(string) (uint64, uint64, error) { return 100 << 30, 60 << 30, nil }
+
+	// rlimit 与 conntrack 配置文件同样落到临时目录/内存桩，绝不碰真实进程与 /etc。
+	conntrackConfPath = filepath.Join(sysctlDir, "98-triune-conntrack.conf")
+	getNofile = func() (uint64, uint64, bool) { return f.nofileCur, f.nofileMax, true }
+	setNofile = func(cur, max uint64) error {
+		if f.nofileErr != nil {
+			return f.nofileErr
+		}
+		f.nofileCur, f.nofileMax = cur, max
+		// 真实内核会同步刷新 /proc/self/limits，桩也照做——否则「修复完复检」
+		// 读到的还是旧值，测出来的结论是假的。
+		f.limits = fmt.Sprintf("Limit                     Soft Limit           Hard Limit           Units\n"+
+			"Max open files            %d              %d              files\n", cur, max)
+		_ = os.WriteFile(procSelfLimits, []byte(f.limits), 0o600)
+		return nil
+	}
+	nowFn = func() time.Time { return time.Date(2026, 11, 10, 2, 30, 0, 0, time.UTC) }
 
 	mustMkdir(t, filepath.Join(procSys, "net", "ipv4"))
 	mustMkdir(t, filepath.Join(procSys, "net", "core"))
@@ -243,8 +279,24 @@ func (f *fixture) install(t *testing.T) {
 		return "", fmt.Errorf("%s: not found", name)
 	}
 	runCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		f.cmds = append(f.cmds, strings.Join(append([]string{filepath.Base(name)}, args...), " "))
 		if len(args) > 0 && args[0] == "show" {
+			// -p NTP 是修复动作读的开关本身；体检项读的是 NTPSynchronized + Timezone。
+			for _, a := range args {
+				if a == "NTP" {
+					return []byte(f.ntpState + "\n"), nil
+				}
+			}
 			return []byte(f.clockOut), f.clockErr
+		}
+		if len(args) > 0 && args[0] == "set-ntp" {
+			if f.setNtpErr != nil {
+				return nil, f.setNtpErr
+			}
+			if len(args) > 1 {
+				f.ntpState = args[1]
+			}
+			return nil, nil
 		}
 		if len(args) > 0 && args[0] == "qdisc" {
 			return []byte(f.tcOutput), nil
@@ -283,6 +335,11 @@ func applyConfigFile(path string) {
 			continue
 		}
 		k = strings.TrimSpace(k)
+		// conntrack 修复写的是同一类 sysctl 文件，但键不在六参数表里。
+		if k == "net.netfilter.nf_conntrack_max" && procCtMax != "" {
+			_ = os.WriteFile(procCtMax, []byte(strings.TrimSpace(v)), 0o644)
+			continue
+		}
 		if !isManagedKey(k) {
 			continue
 		}

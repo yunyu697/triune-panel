@@ -1055,10 +1055,24 @@ if (DEMO) {
         {name:"tc 实测 qdisc",ok:false,warn:false,detail:"eth0 当前为 pfifo_fast"},
         {name:"当前不在容器里",ok:true,warn:false,detail:"未检测到 docker / k8s / lxc / OpenVZ 特征"},
         {name:"面板具备 root 权限",ok:true,warn:false,detail:"当前以 root 运行，可写 /etc/sysctl.d"},
-        {name:"时钟同步（NTP）",ok:true,warn:false,detail:"时区 Asia/Shanghai，NTPSynchronized=yes"},
-        {name:"文件描述符上限",ok:false,warn:false,detail:"面板进程 soft=1024 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个；soft 上限低于建议值 65535，高并发时会拒新连接（systemd 服务可设 LimitNOFILE=65535）"},
+        {name:"时钟同步（NTP）",ok:false,warn:false,fix:"clock",detail:"时区 Asia/Shanghai，NTPSynchronized=no；未同步会让 REALITY 握手与证书校验随缘失败，建议启用 systemd-timesyncd 或 chrony"},
+        {name:"文件描述符上限",ok:false,warn:false,fix:"fd",detail:"面板进程 soft=1024 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个；soft 上限低于建议值 65535，高并发时会拒新连接（可直接点「修复」，或给 systemd 服务设 LimitNOFILE=65535）"},
         {name:"conntrack 连接跟踪水位",ok:false,warn:true,detail:"未启用 nf_conntrack（没有 NAT / 端口转发时属正常；若做转发请确认模块已加载）"},
         {name:"sysctl 配置覆盖检查",ok:true,warn:false,detail:"没有更靠后的配置文件覆盖面板管理的 sysctl 键"}
+      ],
+      // 三项修复动作：只给「面板能安全代劳」的体检项。演示里 fd 真的失败，
+      // 另外两项是健康状态（点了会说「无需调整」），正好覆盖 ready/blocked 两种渲染。
+      fixes:[
+        {key:"clock",check:"时钟同步（NTP）",label:"启用时间同步",revert_label:"关回自动对时",
+         note:"用 timedatectl 打开 NTP 自动对时。对时完成需要几十秒，之后再点「重新检测」即可看到结果。",
+         ready:false,blocked:"自动对时开关已是启用状态（NTP=yes）；未完成对时请检查上游 NTP 是否可达，面板不重复启用",
+         applied:false},
+        {key:"fd",check:"文件描述符上限",label:"提高到 65535",revert_label:"恢复原上限",
+         note:"把面板进程的 RLIMIT_NOFILE soft 上限提到 65535（不超过 hard）；面板 fork 的内核进程会继承它。",
+         ready:true,applied:false},
+        {key:"conntrack",check:"conntrack 连接跟踪水位",label:"调大连接跟踪上限",revert_label:"恢复原上限",
+         note:"把 nf_conntrack_max 翻倍（最多到 262144），写入 /etc/sysctl.d/98-triune-conntrack.conf 并立即生效。",
+         ready:false,blocked:"本机未启用 nf_conntrack（没有 NAT / 端口转发时无需调整）",applied:false}
       ],
       suggested:[
         "# 手动应用（等价面板的「应用」）",
@@ -1284,6 +1298,33 @@ async function mockRoute(path, opts) {
     h.expected = { ...t };
     h.checks = h.checks.filter(c => c.name !== "面板写入的参数已生效").concat(
       [{ name:"面板写入的参数已生效", ok:true, warn:false, detail:"六个参数的实测值与面板写入的一致" }]);
+    return h;
+  }
+  if (api === "host-opt" && rest === "/fix") {
+    if (opts.body?.confirm !== "APPLY FIX") throw new Error("需要显式确认");
+    const h = MDB.hostOpt, key = opts.body?.key;
+    const a = (h.fixes || []).find(x => x.key === key);
+    if (!a) throw new Error("未知的修复项");
+    if (!a.ready) throw new Error(a.blocked || "该项当前不可修复");
+    a.applied = true;
+    a.at = "2026-11-10 02:30:00";
+    a.changes = "面板进程 soft 上限 1024 → 65535";
+    h.checks = h.checks.map(c => c.fix === key
+      ? { name:c.name, ok:true, warn:false,
+          detail:"面板进程 soft=65535 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个" }
+      : c);
+    return h;
+  }
+  if (api === "host-opt" && rest === "/fix/revert") {
+    if (opts.body?.confirm !== "REVERT FIX") throw new Error("需要显式确认");
+    const h = MDB.hostOpt, key = opts.body?.key;
+    const a = (h.fixes || []).find(x => x.key === key);
+    if (!a || !a.applied) throw new Error("没有找到该项的修复记录，拒绝回退");
+    a.applied = false; a.at = ""; a.changes = "";
+    h.checks = h.checks.map(c => c.name === "文件描述符上限"
+      ? { name:c.name, ok:false, warn:false, fix:"fd",
+          detail:"面板进程 soft=1024 hard=1048576，系统 fs.file-max=9223372036854775807，已分配 1280 个；soft 上限低于建议值 65535，高并发时会拒新连接（可直接点「修复」，或给 systemd 服务设 LimitNOFILE=65535）" }
+      : c);
     return h;
   }
   if (api === "host-opt" && rest === "/revert") {
@@ -1952,6 +1993,10 @@ let HO_REPORT = null;
 let HO_TUNE = null;    // 后端当前的生效值
 const HO_CONFIRM = "APPLY NET";
 const HO_REVERT_CONFIRM = "REVERT NET";
+// 单项修复与「应用六个参数」是两件事，确认串也分开：
+// 前者改时钟开关 / 资源上限 / 连接跟踪表，后者改网络栈性能。
+const HO_FIX_CONFIRM = "APPLY FIX";
+const HO_FIX_REVERT_CONFIRM = "REVERT FIX";
 
 async function loadHostOpt() {
   try {
@@ -2086,18 +2131,11 @@ function renderHostOpt(j) {
        <span class="muted" style="flex:0 0 128px">${escHtml(k)}</span>
        <span class="mono" style="flex:1 1 140px;min-width:0;word-break:break-word">${escHtml(v)}</span>
      </div>`).join("");
-  $("ho_checks").innerHTML = (j.checks || []).map(c => {
-    const mark = c.ok ? "✓" : (c.warn ? "!" : "✕");
-    const color = c.ok ? "var(--ok, var(--acc))" : (c.warn ? "var(--warn)" : "var(--err, #d44)");
-    return `<div style="display:flex;flex-wrap:wrap;gap:3px 9px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line)">
-      <b style="color:${color};width:16px;flex:none">${mark}</b>
-      <span style="flex:1 1 150px;min-width:0">${escHtml(c.name)}</span>
-      <span class="muted" style="flex:1 1 100%;min-width:0;word-break:break-word">${escHtml(c.detail || "")}</span>
-    </div>`;
-  }).join("");
+  renderHoChecks(j);
   renderHoSys(j.system);
   fillHoForm(j);
   renderHoDiff();
+  renderHoFixes(j);
   $("ho_reason").textContent = (j.apply_enabled
     ? "此主机可以由面板应用；应用前会备份每个键的原值，写完回读复检，不符自动整体回滚。"
     : (j.reason || "当前主机不支持由面板应用，请按下面的命令手动处理。")) +
@@ -2117,6 +2155,89 @@ function syncHoApplyState() {
   const n = hoDiffRows().filter(r => r.ch).length;
   btn.disabled = n === 0;
   btn.textContent = n ? `应用 ${n} 项变更` : "应用网络参数";
+}
+
+/* ---- 体检项的单项修复 ----
+   后端只给「确实失败、且面板能安全代劳」的项填 fix 标识；前端据此挂按钮，
+   没有标识的项保持纯展示。ready=false 时不藏按钮而是禁用 + 写明原因：
+   藏起来用户只会以为是页面漏了，禁用+原因才告诉他下一步该动哪里。 */
+function hoFixOf(j, key) {
+  return ((j && j.fixes) || []).find(a => a.key === key) || null;
+}
+
+function renderHoChecks(j) {
+  const canAct = isOwner();
+  $("ho_checks").innerHTML = (j.checks || []).map(c => {
+    const mark = c.ok ? "✓" : (c.warn ? "!" : "✕");
+    const color = c.ok ? "var(--ok, var(--acc))" : (c.warn ? "var(--warn)" : "var(--err, #d44)");
+    const a = c.fix ? hoFixOf(j, c.fix) : null;
+    let btn = "", reason = "";
+    if (a && canAct) {
+      btn = a.ready
+        ? `<button class="btn sm" style="flex:none" data-act="hostOptFix" data-args='${escJson([a.key])}'>${escHtml(a.label)}</button>`
+        : `<button class="btn sm" style="flex:none" disabled data-act="hostOptFix" data-args='${escJson([a.key])}' title="${escHtml(a.blocked || "")}">${escHtml(a.label)}</button>`;
+      // 原因单独占一行：塞进按钮同一格会把按钮撑成一条横带，两端还不齐。
+      if (!a.ready) {
+        reason = `<span class="muted" style="flex:1 1 100%;font-size:12px;line-height:1.6">${escHtml(a.blocked || "")}</span>`;
+      }
+    } else if (a) {
+      reason = `<span class="muted" style="flex:1 1 100%;font-size:12px">修复需超级管理员</span>`;
+    }
+    return `<div style="display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">
+      <b style="color:${color};width:16px;flex:none">${mark}</b>
+      <span style="flex:1 1 150px;min-width:0">${escHtml(c.name)}</span>
+      ${btn}
+      <span class="muted" style="flex:1 1 100%;min-width:0;word-break:break-word">${escHtml(c.detail || "")}</span>
+      ${reason}
+    </div>`;
+  }).join("");
+}
+
+/* 已修复记录 + 回退入口。
+   修复成功后体检项会转成 OK，行内修复按钮随之消失——所以回退不能挂在体检行上，
+   必须单独驻留：「改过什么、什么时候改的、怎么还原」三件事都在这一块。 */
+function renderHoFixes(j) {
+  const host = $("ho_fixes");
+  if (!host) return;
+  const applied = ((j && j.fixes) || []).filter(a => a.applied);
+  if (!applied.length) { host.innerHTML = ""; return; }
+  host.innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:6px">` +
+    `面板已修复 ${applied.length} 项；回退按记录恢复原值，不猜。` +
+    `<button class="btn sm" style="margin-left:8px" data-act="loadHostOpt">刷新</button></div>` +
+    applied.map(a => `
+      <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 10px;
+                  border:1px solid var(--line);border-radius:var(--r);margin-bottom:6px">
+        <b style="flex:0 0 auto">${escHtml(a.check)}</b>
+        <span class="mono muted" style="flex:1 1 160px;min-width:0;font-size:12px;word-break:break-word">${escHtml(a.changes || "")}</span>
+        <span class="muted" style="flex:0 0 auto;font-size:12px">${escHtml(a.at || "")}</span>
+        ${isOwner()
+          ? `<button class="btn sm" data-act="hostOptRevertFix" data-args='${escJson([a.key])}'>${escHtml(a.revert_label || "回退")}</button>`
+          : ""}
+      </div>`).join("");
+}
+
+async function hostOptFix(key) {
+  const a = hoFixOf(HO_REPORT, key);
+  if (!a) { toast("找不到该项的修复动作，请先重新检测", "err"); return; }
+  if (!await ask("修复：" + a.check,
+    (a.note || "") + "\n\n修复前会先记录原值，写完回读复检，不符自动恢复；之后可随时回退。确定继续？")) return;
+  try {
+    await req("/api/host-opt/fix", { method:"POST", body:{ confirm: HO_FIX_CONFIRM, key } });
+    toast("已执行修复：" + a.label);
+    await loadHostOpt();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function hostOptRevertFix(key) {
+  const a = hoFixOf(HO_REPORT, key);
+  const what = a ? `${a.check}${a.changes ? "（" + a.changes + "）" : ""}` : key;
+  if (!await ask("回退修复", `将把「${what}」恢复到修复前的状态：删除面板写入的配置、恢复原值。确定继续？`)) return;
+  try {
+    await req("/api/host-opt/fix/revert", { method:"POST", body:{ confirm: HO_FIX_REVERT_CONFIRM, key } });
+    toast("已回退该项修复");
+    await loadHostOpt();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 async function hostOptApply() {
@@ -7472,7 +7593,7 @@ async function loadComponents() {
     compData = await req("/api/components");
     const rows = [];
     const p = compData.panel;
-    rows.push(`<tr><td><b>panel</b>（本面板）</td><td class="mono">${p.version}</td><td><span class="badge b-ok">运行中</span></td>
+    rows.push(`<tr><td><b>panel</b>（本面板）</td><td class="mono upd-ver" title="${escHtml(p.version)}">${escHtml(p.version)}</td><td><span class="badge b-ok">运行中</span></td>
       <td class="ta-r"><button class="btn sm" data-act="fetchVersions" data-args='["panel"]'>版本列表</button>
       <button class="btn sm" data-act="panelRollbackDlg">回滚</button></td></tr>`);
     for (const c of compData.cores) {
@@ -7485,8 +7606,8 @@ async function loadComponents() {
              ${channelOptions(c.component)}</select>
            <button class="btn sm primary" data-act="fetchVersions" data-args="${escJson([c.component,true])}">一键安装</button>`;
       rows.push(`<tr>
-        <td><b>${c.component}</b><div class="muted mono" style="font-size:11.5px">${c.bin || "未配置路径"}</div></td>
-        <td class="mono">${c.version || '<span class="muted">未知</span>'}</td>
+        <td><b>${c.component}</b><div class="muted mono upd-bin" title="${escHtml(c.bin || "")}" style="font-size:11.5px">${escHtml(c.bin || "未配置路径")}</div></td>
+        <td class="mono upd-ver" title="${escHtml(c.version || "")}">${c.version ? escHtml(c.version) : '<span class="muted">未知</span>'}</td>
         <td>${st}</td>
         <td class="ta-r">${primary}
           ${c.backups && c.backups.length ? `<button class="btn sm" data-act="coreRollbackDlg" data-args="${escJson([c.component])}">回滚(${c.backups.length})</button>` : ""}</td></tr>`);

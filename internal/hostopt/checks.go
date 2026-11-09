@@ -138,10 +138,13 @@ func checkClock() Check {
 		}
 		ok := strings.EqualFold(strings.TrimSpace(sync), "yes")
 		detail := fmt.Sprintf("时区 %s，NTPSynchronized=%s", valueOr(tz, "未知"), valueOr(sync, "未知"))
-		if !ok {
-			detail += "；未同步会让 REALITY 握手与证书校验随缘失败，建议启用 systemd-timesyncd 或 chrony"
+		c := Check{Name: name, OK: ok, Detail: detail}
+		if ok {
+			return c
 		}
-		return Check{Name: name, OK: ok, Detail: detail}
+		c.Detail = detail + "；未同步会让 REALITY 握手与证书校验随缘失败，建议启用 systemd-timesyncd 或 chrony"
+		c.Fix = fixKeyClock
+		return c
 	}
 	if p, err := lookPath("chronyc"); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -192,13 +195,14 @@ func checkFDLimit() Check {
 	detail := strings.Join(parts, "，")
 
 	// 系统级已用超过 80% 也是真问题：再开连接就会 ENFILE。
+	// 这一支不走 rlimit 修复（提高进程上限不会让系统表变大），只给排查方向。
 	if okNr && okMax && fmax > 0 && alloc*100/fmax > 80 {
-		return Check{Name: name, OK: false, Detail: detail + "；已用超过 80%，可能出现 too many open files"}
+		return Check{Name: name, OK: false, Detail: detail + "；已用超过 80%，可能出现 too many open files（需要调大 fs.file-max 或排查 fd 泄漏）"}
 	}
 	if okLimits && soft > 0 && soft < fdWarnThreshold {
 		return Check{
-			Name: name, OK: false,
-			Detail: detail + fmt.Sprintf("；soft 上限低于建议值 %d，高并发时会拒新连接（systemd 服务可设 LimitNOFILE=%d）", fdWarnThreshold, fdWarnThreshold),
+			Name: name, OK: false, Fix: fixKeyFD,
+			Detail: detail + fmt.Sprintf("；soft 上限低于建议值 %d，高并发时会拒新连接（可直接点「修复」，或给 systemd 服务设 LimitNOFILE=%d）", fdWarnThreshold, fdWarnThreshold),
 		}
 	}
 	return Check{Name: name, OK: true, Detail: detail}
@@ -223,7 +227,10 @@ func checkConntrack() Check {
 		detail += fmt.Sprintf("，当前 %d（%.1f%%）", cnt, pct(cnt, max))
 	}
 	if okCnt && max > 0 && cnt*100/max > 80 {
-		return Check{Name: name, OK: false, Detail: detail + "；接近满表，内核会丢包，建议调大 nf_conntrack_max"}
+		return Check{
+			Name: name, OK: false, Fix: fixKeyConntrack,
+			Detail: detail + "；接近满表，内核会丢包，建议调大 nf_conntrack_max（可直接点「修复」，面板会翻倍并留回退记录）",
+		}
 	}
 	return Check{Name: name, OK: true, Detail: detail}
 }

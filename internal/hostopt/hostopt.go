@@ -46,11 +46,16 @@ var (
 )
 
 // Check 是体检报告里的一项。Warn 表示「无法确认 / 不适用」，不算失败。
+//
+// Fix 只在「这一项失败、且面板确实能安全代劳」时才填：它是 fix.go 里修复动作的
+// 标识，前端据此在行内挂一个修复按钮。没有对应动作的项一律留空——挂一个点了
+// 不管用的按钮，比不挂更让人困惑。
 type Check struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
 	Warn   bool   `json:"warn"`
 	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
 }
 
 // Report 是一次完整体检的结果，直接序列化给前端。
@@ -77,6 +82,10 @@ type Report struct {
 	Options  TuneOptions    `json:"options"`
 	System   SystemOverview `json:"system"`
 	Expected *Tune          `json:"expected,omitempty"` // 面板上次写入的期望值
+
+	// Fixes 是可执行的修复动作及其现状（是否可执行 / 是否已修复过）。
+	// 体检只报状态时用户还得自己查「该改哪个键」，这里给出能安全代劳的那几项。
+	Fixes []FixAction `json:"fixes"`
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +177,8 @@ func Detect(dataDir string) Report {
 	r.Options = tuneOptions(r.AvailableCC)
 	if !platformUnsupported() {
 		r.System = systemOverview(dataDir)
+		// 修复动作只读汇总（是否可执行、是否已修复过），Detect 依旧不落盘。
+		r.Fixes = listFixActions(dataDir)
 	}
 	r.Expected = readExpected(dataDir)
 	if r.Expected != nil {

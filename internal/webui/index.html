@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.7.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.8.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -735,12 +735,59 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
 th{color:var(--muted);font-weight:600;font-size:12px;background:var(--hover);position:sticky;top:0;z-index:1}
-th:first-child{border-radius:8px 0 0 8px} th:last-child{border-radius:0 8px 8px 0}
+/* 表头只圆上面两个角：原来四角全圆（left 给 8px 0 0 8px、right 给 0 8px 8px 0），
+   而下方的数据行是直角，两者接缝处会多出两块缺口，看着像两张不同形状的表格拼在一起。 */
+th:first-child{border-radius:8px 0 0 0} th:last-child{border-radius:0 8px 0 0}
 tbody tr{transition:background var(--t-fast)}
 tbody tr:hover{background:var(--hover)}
 tbody tr:last-child td{border-bottom:none}
 td.ta-r,th.ta-r{text-align:right}
 td.num{font-variant-numeric:tabular-nums}
+
+/* 组件更新表：内核 `-v` 的第一行可能很长（mihomo 是
+   「Mihomo Meta v1.19.1 linux amd64 with go1.24.1 Sat Jun 21 2025」），
+   而 td 默认 nowrap，整张表会被这一格撑宽，「操作」列被推出卡片右侧——
+   看起来就像按钮被版本号遮住了。这里只对这一张表放开换行，
+   并把操作列钉成「按内容收缩」，按钮就不会再被挤出去。 */
+.upd-tbl th:nth-child(2){width:284px}
+.upd-tbl th:nth-child(3){width:84px}
+.upd-tbl th:nth-child(4){width:1%}
+.upd-tbl td:nth-child(1){max-width:264px}
+.upd-tbl td:nth-child(1) .mono{white-space:normal;overflow-wrap:anywhere}
+.upd-tbl td:nth-child(2){white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:12.5px}
+@media (max-width:760px){
+  /* 窄屏没有「版本列定宽」的余地：交还自动布局，允许按钮折行，宁可横向滑动也不压住按钮。 */
+  .upd-tbl th:nth-child(2){width:auto}
+  .upd-tbl td:nth-child(1){max-width:150px}
+  .upd-tbl td:nth-child(4){white-space:normal}
+}
+@media (max-width:560px){
+  /* 手机宽度下四列只有约 300px 可用：整体收一档，让「操作」留在视口里，
+     而不是靠横向滑动才能点到（那和「被遮挡」在体感上没有区别）。 */
+  .upd-tbl th,.upd-tbl td{padding:9px 6px}
+  .upd-tbl td:nth-child(1){max-width:88px}
+  .upd-tbl .btn.sm{padding:3px 7px;font-size:11.5px}
+  .upd-tbl .badge{font-size:10.5px;padding:1px 6px}
+  .upd-tbl .sel-sm{max-width:78px;padding:3px 16px 3px 6px;font-size:11.5px}
+  /* overflow-wrap:anywhere 在表格里不总能压住 min-content，窄屏再加一道 break-all：
+     版本串本来就该按字符断，宁可断得难看，也不能把「操作」顶出去。 */
+  .upd-tbl td:nth-child(2){word-break:break-all}
+}
+@media (max-width:360px){
+  /* 320px 的老机型四列怎么压都差三四十像素，与其让它横向滑动、
+     把「操作」推到视口外，不如改成两行式：组件 + 状态一行，版本与按钮各占一行。
+     只在这一张表上生效，其它表格维持原样的紧凑排版。 */
+  .upd-tbl thead{display:none}
+  .upd-tbl tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;
+    padding:10px 4px;border-bottom:1px solid var(--line)}
+  .upd-tbl tr:last-child{border-bottom:none}
+  .upd-tbl td{border:none;padding:0;white-space:normal}
+  .upd-tbl td:nth-child(1){grid-column:1;max-width:none}
+  .upd-tbl td:nth-child(2){grid-column:1/-1;color:var(--muted)}
+  .upd-tbl td:nth-child(3){grid-column:2;text-align:right}
+  .upd-tbl td:nth-child(4){grid-column:1/-1;text-align:left;margin-top:4px}
+  .upd-tbl .upd-bin{display:none}
+}
 .empty{padding:34px;text-align:center;color:var(--muted);font-size:13px}
 .progress{width:110px;height:7px;background:var(--line);border-radius:99px;display:inline-block;vertical-align:middle;overflow:hidden}
 .progress i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width var(--t-slow)}
@@ -2014,7 +2061,7 @@ canvas{display:block;width:100%}
       <div class="card" id="set_card_update" data-sect="maintain">
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
-        <div class="tbl-wrap"><table>
+        <div class="tbl-wrap"><table class="upd-tbl">
           <thead><tr><th>组件</th><th>当前版本</th><th>状态</th><th class="ta-r">操作</th></tr></thead>
           <tbody id="updtbody"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
         </table></div>
@@ -2170,13 +2217,20 @@ canvas{display:block;width:100%}
       </div>
 
       <div class="card">
-        <h3>主机网络体检</h3>
+        <h3>主机网络体检<span class="spacer"></span>
+          <button class="btn sm" data-act="loadHostOpt">重新检测</button>
+        </h3>
         <p class="muted" style="margin-bottom:12px">
-          这里只做<b>只读检测</b>：不创建文件、不改 sysctl、不重启任何服务。
+          检测本身<b>只读</b>：不创建文件、不改 sysctl、不重启任何服务。
           检测覆盖 BBR 支持、时钟同步、文件描述符、conntrack 水位与 sysctl 覆盖。
+          能由面板安全代劳的项会带一个<b>修复</b>按钮——修复前先记原值，写完回读复检，
+          不符自动恢复原状，之后随时可以<b>回退</b>。
         </p>
         <div id="ho_meta" style="margin-bottom:12px"></div>
         <div id="ho_checks"></div>
+        <!-- 已修复记录：修复后体检项会转成 OK，修复按钮随之消失，
+             所以回退入口必须单独驻留在这里，而不是挂在体检行上。 -->
+        <div id="ho_fixes" style="margin-top:14px"></div>
       </div>
 
       <div class="card">

@@ -89,3 +89,46 @@ func TestNoTemplateLiteralLeakInHTML(t *testing.T) {
 		}
 	}
 }
+
+// TestHostOptFixUIWiring 体检项的「修复 / 回退」是纯按钮链路：任何一个环节没接上，
+// 点击都会静默无反应——Go 侧看不出，界面上只是「按钮点了没动静」。四条一起钉：
+//  1. 体检卡片里必须有 #ho_fixes 容器：修复成功后体检行转 OK、行内按钮消失，
+//     回退入口只能驻留在这一块，否则用户再也找不到「怎么还原」；
+//  2. 两个按钮都要挂 data-act，且禁用态也要保留 data-act（原因挂在同一个控件上）；
+//  3. 后端端点与确认字面量必须成对（APPLY FIX / REVERT FIX，不能借用 APPLY NET）；
+//  4. 只有后端给了 fix 标识的体检项才渲染按钮。
+func TestHostOptFixUIWiring(t *testing.T) {
+	html := string(indexHTML)
+	if !strings.Contains(html, `id="ho_fixes"`) {
+		t.Error("index.html 缺少 #ho_fixes：已修复项将没有回退入口")
+	}
+	if !strings.Contains(html, `id="ho_checks"`) {
+		t.Error("index.html 缺少 #ho_checks")
+	}
+
+	js, _, err := AssetFile("app.js")
+	if err != nil {
+		t.Fatalf("读 app.js 失败: %v", err)
+	}
+	src := string(js)
+	for _, need := range []struct{ frag, why string }{
+		{`const HO_FIX_CONFIRM = "APPLY FIX"`, "修复的确认串必须与后端 hostopt.FixConfirm 一致"},
+		{`const HO_FIX_REVERT_CONFIRM = "REVERT FIX"`, "回退的确认串必须与后端 hostopt.FixRevertConfirm 一致"},
+		{`"/api/host-opt/fix"`, "修复请求没打到 /api/host-opt/fix"},
+		{`"/api/host-opt/fix/revert"`, "回退请求没打到 /api/host-opt/fix/revert"},
+		{`data-act="hostOptFix"`, "体检行的修复按钮没挂 data-act，点击无反应"},
+		{`data-act="hostOptRevertFix"`, "已修复区的回退按钮没挂 data-act，点击无反应"},
+		{`const a = c.fix ? hoFixOf(j, c.fix) : null;`, "只有带 fix 标识的体检项才该渲染修复按钮"},
+	} {
+		if !strings.Contains(src, need.frag) {
+			t.Errorf("app.js 缺 %q：%s", need.frag, need.why)
+		}
+	}
+	// 禁用态那条分支也必须带 data-act：否则「按钮在、但连原因都测不到」。
+	if !strings.Contains(src, `disabled data-act="hostOptFix"`) {
+		t.Error("不可修复项的禁用按钮丢了 data-act：原因文案会跟控件脱节，e2e 也测不到")
+	}
+	if !strings.Contains(src, `function hostOptRevertFix(`) {
+		t.Error("app.js 里没有 hostOptRevertFix()")
+	}
+}
