@@ -212,7 +212,19 @@ def tokens(s, mode):
                      ",0 10px 26px -14px " + sh + (".55)" if dark else ".20)")),
         "--elev-2": ("0 2px 5px " + sh + (".45)" if dark else ".07)") +
                      ",0 20px 42px -20px rgba(%d,%d,%d,.30)" % (ar, ag, ab)),
-        "--glass": alpha(s["bg"], .72) if dark else "rgba(255,255,255,.74)",
+        # 亮色：白玻璃压在彩色环境底纹上；暗色：半透明白层让面板比背景亮一档，
+        # 否则 --glass 取 bg 自身的半透明，等于和背景同色，磨砂完全看不出来。
+        "--glass": "rgba(255,255,255,.10)" if dark else "rgba(255,255,255,.82)",
+        # 悬浮玻璃面板专用：描边 / 顶部高光 / 带主色晕的浮起阴影。
+        # 亮色用 .82 白玻璃：面板里有 11px 分组标题和 12.5px 状态文字，
+        # 再透一点就会掉到 WCAG AA 以下。暗色反过来用 .10 白层把面板提亮，
+        # 取 bg 自身的半透明会跟背景同色，磨砂等于没做。
+        "--glass-edge": alpha(s["text"], .12) if dark else alpha(s["text"], .10),
+        "--glass-hi": "rgba(255,255,255,.11)" if dark else "rgba(255,255,255,.85)",
+        "--float-shadow": ("0 1px 2px " + sh + (".45)" if dark else ".07)") +
+                          ",0 12px 26px -8px " + sh + (".62)" if dark else ".16)") +
+                          ",0 30px 60px -26px " + sh + (".72)" if dark else ".26)") +
+                          ",0 48px 110px -58px rgba(%d,%d,%d,.45)" % (ar, ag, ab)),
         "--mask": "rgba(0,0,0,.58)" if dark else "rgba(15,20,28,.44)",
         "--glow": "0 10px 24px -10px rgba(%d,%d,%d,.55)" % (ar, ag, ab),
         "--tint": "rgba(%d,%d,%d,.08)" % (ar, ag, ab),

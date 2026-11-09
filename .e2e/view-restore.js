@@ -106,6 +106,61 @@ const ck = (n, want, got) => {
   ck("未登录时首帧登录页可见", "flex", r.first.login);
   ck("未登录时首帧主界面隐藏", "none", r.first.app);
 
+  // ---- 4b. 登录页两栏布局（与最终效果设计图同源）----
+  // demo 启动会直接进主界面，showLogin() 是产品自己的入口，切回来量真实布局。
+  const lg = await page.evaluate(() => {
+    window.showLogin();
+    const rect = s => {
+      const e = document.querySelector(s);
+      if (!e) return { x: 0, y: 0, w: 0, h: 0 };
+      const b = e.getBoundingClientRect();
+      return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) };
+    };
+    return {
+      display: getComputedStyle(document.getElementById("login")).display,
+      card: rect(".login-card"), aside: rect(".login-aside"), orbit: rect(".la-orbit"),
+      cardBlur: getComputedStyle(document.querySelector(".login-card")).backdropFilter,
+      asideBlur: getComputedStyle(document.querySelector(".login-aside")).backdropFilter,
+      features: document.querySelectorAll(".la-feature").length,
+      formWide: ["lu", "lp"].every(id => document.getElementById(id).getBoundingClientRect().width > 100),
+      overX: document.documentElement.scrollWidth - innerWidth,
+      overY: document.documentElement.scrollHeight - innerHeight
+    };
+  });
+  ck("登录页仍是 flex 两栏", "flex", lg.display);
+  ck("登录卡片在左半区", true, lg.card.x + lg.card.w / 2 < 720);
+  ck("登录卡片垂直居中", true, Math.abs(lg.card.y + lg.card.h / 2 - 450) < 20);
+  ck("右侧品牌面板比卡片宽且填满高度", true, lg.aside.w > lg.card.w && lg.aside.h > 800);
+  ck("左右两块不重叠", true, lg.aside.x >= lg.card.x + lg.card.w);
+  ck("右侧三条特性都渲染", 3, lg.features);
+  ck("右侧几何图占据剩余高度", true, lg.orbit.h > 150);
+  ck("登录卡片与品牌面板都是磨砂玻璃", true,
+    lg.cardBlur.includes("blur") && lg.asideBlur.includes("blur"));
+  ck("登录表单完整可见", true, lg.formWide);
+  ck("登录页无横向/纵向溢出", true, lg.overX <= 1 && lg.overY <= 1);
+
+  // 手机端：品牌页头在上、表单在下，几何图与磨砂都收起
+  const mp = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  mp.on("pageerror", e => errors.push(e.message));
+  await mp.goto(URL);
+  await mp.waitForTimeout(600);
+  const lm = await mp.evaluate(() => {
+    window.showLogin();
+    const card = document.querySelector(".login-card").getBoundingClientRect();
+    const aside = document.querySelector(".login-aside").getBoundingClientRect();
+    return {
+      asideTop: Math.round(aside.top), cardTop: Math.round(card.top),
+      orbit: getComputedStyle(document.querySelector(".la-orbit")).display,
+      blur: getComputedStyle(document.querySelector(".login-card")).backdropFilter,
+      overX: document.documentElement.scrollWidth - innerWidth
+    };
+  });
+  ck("手机端品牌页头在登录卡片上方", true, lm.asideTop < lm.cardTop);
+  ck("手机端收起几何图", "none", lm.orbit);
+  ck("手机端不上磨砂", "none", lm.blur);
+  ck("手机端登录页无横向溢出", true, lm.overX <= 1);
+  await mp.close();
+
   // ---- 5. 真实点击切页，偏好要落盘（刷新保留的前提） ----
   await reloadWith("demo-token", "overview");
   await page.evaluate(() => {

@@ -134,6 +134,124 @@ func TestNoInsetShorthand(t *testing.T) {
 	}
 }
 
+// TestFrostedChromeIsGuarded 把「悬浮玻璃」这套最终效果的关键参数钉在测试里。
+// 效果好不好看 Go 单测量不出来，但参数被谁顺手改掉、或把半透明底色直接写进
+// 基础规则（X5 上会透出滚动内容）必须立刻报红——设计图与实现不能各走各的。
+func TestFrostedChromeIsGuarded(t *testing.T) {
+	css := string(indexHTML)
+	for _, frag := range []string{
+		"--float-gap:14px",                    // 侧栏与命令条共用同一离屏距离
+		"margin:var(--float-gap) 0 var(--float-gap) var(--float-gap)", // 四边离屏
+		"border-radius:var(--r-xl)",           // 侧栏是圆角卡片，不是贴边的墙
+		"var(--float-shadow)",                 // 浮起阴影带主色晕
+		"@media (min-width:961px){",           // 窄屏不上磨砂（Android 滚动闪白）
+		"@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){",
+		"backdrop-filter:blur(24px) saturate(170%)",
+		"background:var(--glass)",             // 磨砂层用高不透明度玻璃
+	} {
+		if !strings.Contains(css, frag) {
+			t.Errorf("悬浮玻璃设计缺 %q：实现与最终效果图不一致", frag)
+		}
+	}
+	// 基础 .cmdbar 必须留不透明兜底，且玻璃覆盖层不能早于它出现。
+	base := strings.Index(css, ".cmdbar{")
+	glass := strings.Index(css, "background:var(--glass)")
+	if base < 0 || glass < 0 || glass < base {
+		t.Error(".cmdbar 的不透明底色必须在玻璃覆盖层之前：老内核会先拿到半透明顶栏")
+	}
+}
+
+// TestLoginSplitLayoutIsGuarded 把登录页「左侧中间登录 + 右侧同材质品牌面板」
+// 的最终效果参数钉住。三条最容易在后续改样式时被顺手破坏的约束：
+//  1. #login 必须是 flex —— boot.js 首帧显隐、view-restore / first-paint-server
+//     的 e2e 都按 computedStyle(#login).display === "flex" 判，改 grid 会假红；
+//  2. 玻璃只叠在文末守卫块里，基础规则必须是不透明实底（X5 兜底）；登录卡片
+//     和背景模糊圆都不能带入场动画 / filter 离屏层——2x DPR 下它们会和
+//     backdrop-filter 抢合成层，把卡片下半截的表单整个吞掉（实测）；
+//  3. 登录表单的 id / data-act 一个都不能少。右侧面板是纯展示，重排 DOM 时
+//     漏掉任何一个都会让登录直接失效，而不是报个错让人看见。
+func TestLoginSplitLayoutIsGuarded(t *testing.T) {
+	html := string(indexHTML)
+	css := stripCSSComments(html)
+
+	// 1. 两栏：左栏固定 44% 且内部居中，右栏吃掉剩余宽度并填到整屏高度
+	wrap := cssRule(t, css, ".login-wrap")
+	for _, frag := range []string{
+		"display:flex", "align-items:stretch",
+		"gap:var(--float-gap)", "padding:var(--float-gap)",
+		"background-color:transparent", // 露出 body 点阵，玻璃才有东西可糊
+		"radial-gradient(circle at 1px 1px,var(--grid) 1px",
+	} {
+		if !strings.Contains(wrap, frag) {
+			t.Errorf("登录页两栏布局缺 %q：悬浮玻璃与最终效果图不一致", frag)
+		}
+	}
+	left := cssRule(t, css, ".login-left")
+	for _, frag := range []string{"flex:0 0 44%", "align-items:center", "justify-content:center"} {
+		if !strings.Contains(left, frag) {
+			t.Errorf("登录卡片没落在左侧中间（.login-left 缺 %q）", frag)
+		}
+	}
+	aside := cssRule(t, css, ".login-aside")
+	for _, frag := range []string{"flex:1 1 0", "var(--float-shadow)", "var(--r-xl)",
+		"flex-direction:column", "overflow:hidden"} {
+		if !strings.Contains(aside, frag) {
+			t.Errorf("右侧品牌面板缺 %q：右半屏会显得空 / 浮不起来", frag)
+		}
+	}
+	if !strings.Contains(cssRule(t, css, ".login-card"), "var(--float-shadow)") {
+		t.Error("登录卡片没用 --float-shadow：与主界面的玻璃卡片不同材质")
+	}
+
+	// 2. 玻璃是「增强」：基础实底 + 文末守卫块叠加，且只能在那里叠加
+	cardBase := cssRule(t, css, ".login-card")
+	asideBase := cssRule(t, css, ".login-aside")
+	if strings.Contains(cardBase, "var(--glass)") || strings.Contains(asideBase, "var(--glass)") {
+		t.Error("登录页基础规则直接写了 var(--glass)：X5 没有 backdrop-filter，表单会透出背景")
+	}
+	if !strings.Contains(css, ".set-tabs,.login-card,.login-aside{") {
+		t.Error("玻璃守卫块没带上登录卡片与品牌面板：登录页会退回两块实色板")
+	}
+	// 3. 合成层防线：入场动画 / filter 模糊圆都必须不存在
+	for _, bad := range []string{"animation:float", "animation:pop", "@keyframes float"} {
+		if strings.Contains(css, bad) {
+			t.Errorf("登录页又引入了 %q：2x DPR 下会与 backdrop-filter 抢合成层，表单下半截会消失", bad)
+		}
+	}
+	// 4. 窄屏与矮窗口
+	block := cssBlock(t, css, "@media (max-width:960px){")
+	for _, frag := range []string{
+		".login-wrap{flex-direction:column", ".login-aside{order:-1",
+		".la-features,.la-orbit,.la-safe{display:none}",
+	} {
+		if !strings.Contains(block, frag) {
+			t.Errorf("窄屏登录页缺 %q：手机上会把表单挤到要滚两屏", frag)
+		}
+	}
+	if !strings.Contains(css, "@media (max-height:760px){") {
+		t.Error("缺矮窗口收紧规则：笔记本半屏时登录页会被说明文字撑出整页滚动条")
+	}
+	// 5. 右侧必须有实质内容，且登录表单的挂钩一个都不能丢
+	if n := strings.Count(html, `class="la-feature"`); n != 3 {
+		t.Errorf("右侧特性条有 %d 条（应为 3）：右半屏会显得空", n)
+	}
+	for _, frag := range []string{
+		`class="la-orbit"`, `class="la-foot"`, `class="login-aside"`,
+		`id="lu"`, `id="lp"`, `id="lcode"`, `id="l2fa_row"`, `id="l2fa_resend"`,
+		`id="forgot_hint"`, `id="demoTag"`, `id="login_ver"`, `id="login_last"`,
+		`data-act="login"`, `data-enter="login"`, `data-act="loginResend"`,
+	} {
+		if !strings.Contains(html, frag) {
+			t.Errorf("登录页重排后丢了 %q：登录流程会失效", frag)
+		}
+	}
+	// 说明文字必须单独认 class：图标本身也是 span，写 .la-feature span 会把它
+	// 一起 margin-left:auto 推到中间（浅色截图里三行图标全歪了）。
+	if !strings.Contains(css, ".la-feature .la-note{") {
+		t.Error("特性条说明没用 .la-note：图标会被 margin-left:auto 推到中间")
+	}
+}
+
 func mustReadAsset(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := scriptAssets.ReadFile(name)

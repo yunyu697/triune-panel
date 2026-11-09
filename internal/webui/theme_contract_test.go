@@ -119,7 +119,7 @@ func TestThemeTokenSetsIdentical(t *testing.T) {
 		"--ok", "--ok-soft", "--err", "--err-soft", "--warn", "--warn-soft",
 		"--chart-up", "--chart-down", "--chart-3", "--chart-4", "--chart-5", "--grid",
 		"--shadow-sm", "--shadow", "--shadow-lg", "--elev-0", "--elev-1", "--elev-2",
-		"--glass", "--mask", "--glow", "--tint", "--focus", "--code-bg", "--zebra",
+		"--glass", "--glass-edge", "--glass-hi", "--float-shadow", "--mask", "--glow", "--tint", "--focus", "--code-bg", "--zebra",
 	}
 	sort.Strings(need)
 	for _, n := range need {

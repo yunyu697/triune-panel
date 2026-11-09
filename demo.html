@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.6.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.7.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -136,44 +136,45 @@ var BOOT_RADII = ["sharp", "normal", "soft"];
   --r-xl:20px; --r-lg:14px; --r:10px; --r-sm:7px;
   --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-  /* 侧栏宽度按方案 B 设计稿：72px 窄栏，只放短标签，正文全部让给内容区。 */
   --side-w:216px;
+  /* 悬浮层离屏幕四边的距离：侧栏与命令条共用，改一处就一起对齐。 */
+  --float-gap:14px;
   --t-fast:.16s ease; --t:.24s cubic-bezier(.4,0,.2,1); --t-slow:.5s cubic-bezier(.16,1,.3,1);
 }
 /* THEME:BEGIN 由 deploy/build-theme.py 生成，勿手改 */
 
 /* 四层令牌：表面 / 品牌 / 语义 / 图表与景深。每个组合都由
    tokens() 展开同一组变量，集合完全一致（Go 守卫逐项比）。 */
-[data-mode="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
-[data-mode="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(13,16,22,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
+[data-mode="light"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(20,26,34,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(59,130,246,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
+[data-mode="dark"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(230,234,240,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(91,156,248,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
 
 /* --- azure 蔚蓝 --- */
-[data-mode="light"][data-scheme="azure"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
-[data-mode="dark"][data-scheme="azure"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(13,16,22,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
+[data-mode="light"][data-scheme="azure"]{--bg:#f4f6fa;--side:#ffffff;--card:#ffffff;--text:#141a22;--muted:#656e7b;--line:#e5eaf1;--hover:#f1f4f9;--acc:#3b82f6;--acc2:#8b5cf6;--acc-soft:#e0e9fa;--acc-text:#2563eb;--on-acc:#ffffff;--acc-btn:#336ed1;--acc2-btn:#8054e3;--ok:#15803d;--ok-soft:#dbe9e5;--err:#dc2626;--err-soft:#f1dfe3;--warn:#b45309;--warn-soft:#ede4df;--chart-up:#3b82f6;--chart-down:#22c55e;--chart-3:#8b5cf6;--chart-4:#f59e0b;--chart-5:#15803d;--grid:rgba(20,26,34,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(59,130,246,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(20,26,34,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(59,130,246,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(59,130,246,.55);--tint:rgba(59,130,246,.08);--focus:rgba(59,130,246,.45);--code-bg:#f2f5f9;--zebra:#f7f9fc;}
+[data-mode="dark"][data-scheme="azure"]{--bg:#0d1016;--side:#11151c;--card:#151a22;--text:#e6eaf0;--muted:#8b94a3;--line:#232a34;--hover:#1b222c;--acc:#5b9cf8;--acc2:#a78bfa;--acc-soft:#19263a;--acc-text:#7cabf9;--on-acc:#0b1017;--acc-btn:#5b9cf8;--acc2-btn:#a78bfa;--ok:#2fca7f;--ok-soft:#133028;--err:#f06a6a;--err-soft:#341f24;--warn:#eab308;--warn-soft:#332c14;--chart-up:#5b9cf8;--chart-down:#2fca7f;--chart-3:#a78bfa;--chart-4:#fbbf24;--chart-5:#2fca7f;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(91,156,248,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(230,234,240,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(91,156,248,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(91,156,248,.55);--tint:rgba(91,156,248,.08);--focus:rgba(91,156,248,.45);--code-bg:#171d25;--zebra:#181e28;}
 
 /* --- indigo 靛夜 --- */
-[data-mode="light"][data-scheme="indigo"]{--bg:#f5f6fd;--side:#ffffff;--card:#ffffff;--text:#191c2e;--muted:#686e90;--line:#e4e7f5;--hover:#eef0fb;--acc:#6366f1;--acc2:#0891b2;--acc-soft:#e5e6fc;--acc-text:#4f46e5;--on-acc:#ffffff;--acc-btn:#5f62e7;--acc2-btn:#087b97;--ok:#0f8f63;--ok-soft:#dcebec;--err:#d63d63;--err-soft:#f2e2ec;--warn:#b45309;--warn-soft:#eee4e2;--chart-up:#6366f1;--chart-down:#10b981;--chart-3:#0891b2;--chart-4:#f59e0b;--chart-5:#0f8f63;--grid:rgba(25,28,46,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(99,102,241,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(99,102,241,.55);--tint:rgba(99,102,241,.08);--focus:rgba(99,102,241,.45);--code-bg:#f0f2fc;--zebra:#f6f7fd;}
-[data-mode="dark"][data-scheme="indigo"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;--acc:#818cf8;--acc2:#22d3ee;--acc-soft:#1b213e;--acc-text:#a5b0fb;--on-acc:#080d1a;--acc-btn:#818cf8;--acc2-btn:#22d3ee;--ok:#34d399;--ok-soft:#0f2f30;--err:#f472b6;--err-soft:#301e35;--warn:#fbbf24;--warn-soft:#312b1c;--chart-up:#818cf8;--chart-down:#4ade80;--chart-3:#22d3ee;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(129,140,248,.30);--glass:rgba(8,13,26,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(129,140,248,.55);--tint:rgba(129,140,248,.08);--focus:rgba(129,140,248,.45);--code-bg:#111a2f;--zebra:#121c31;}
+[data-mode="light"][data-scheme="indigo"]{--bg:#f5f6fd;--side:#ffffff;--card:#ffffff;--text:#191c2e;--muted:#686e90;--line:#e4e7f5;--hover:#eef0fb;--acc:#6366f1;--acc2:#0891b2;--acc-soft:#e5e6fc;--acc-text:#4f46e5;--on-acc:#ffffff;--acc-btn:#5f62e7;--acc2-btn:#087b97;--ok:#0f8f63;--ok-soft:#dcebec;--err:#d63d63;--err-soft:#f2e2ec;--warn:#b45309;--warn-soft:#eee4e2;--chart-up:#6366f1;--chart-down:#10b981;--chart-3:#0891b2;--chart-4:#f59e0b;--chart-5:#0f8f63;--grid:rgba(25,28,46,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(99,102,241,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(25,28,46,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(99,102,241,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(99,102,241,.55);--tint:rgba(99,102,241,.08);--focus:rgba(99,102,241,.45);--code-bg:#f0f2fc;--zebra:#f6f7fd;}
+[data-mode="dark"][data-scheme="indigo"]{--bg:#080d1a;--side:#0c1324;--card:#0f1729;--text:#e0e7f5;--muted:#7e8cab;--line:#1c2740;--hover:#152038;--acc:#818cf8;--acc2:#22d3ee;--acc-soft:#1b213e;--acc-text:#a5b0fb;--on-acc:#080d1a;--acc-btn:#818cf8;--acc2-btn:#22d3ee;--ok:#34d399;--ok-soft:#0f2f30;--err:#f472b6;--err-soft:#301e35;--warn:#fbbf24;--warn-soft:#312b1c;--chart-up:#818cf8;--chart-down:#4ade80;--chart-3:#22d3ee;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(129,140,248,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(224,231,245,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(129,140,248,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(129,140,248,.55);--tint:rgba(129,140,248,.08);--focus:rgba(129,140,248,.45);--code-bg:#111a2f;--zebra:#121c31;}
 
 /* --- forest 森野 --- */
-[data-mode="light"][data-scheme="forest"]{--bg:#f3f8f5;--side:#ffffff;--card:#ffffff;--text:#14251b;--muted:#597665;--line:#dcebe2;--hover:#e9f4ee;--acc:#16a34a;--acc2:#65a30d;--acc-soft:#dbefe2;--acc-text:#15803d;--on-acc:#ffffff;--acc-btn:#11843c;--acc2-btn:#4f7f0c;--ok:#15803d;--ok-soft:#dbebe1;--err:#c2410c;--err-soft:#eee4db;--warn:#a16207;--warn-soft:#eae8db;--chart-up:#16a34a;--chart-down:#65a30d;--chart-3:#65a30d;--chart-4:#d97706;--chart-5:#15803d;--grid:rgba(20,37,27,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(22,163,74,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(22,163,74,.55);--tint:rgba(22,163,74,.08);--focus:rgba(22,163,74,.45);--code-bg:#ecf5f0;--zebra:#f3f9f6;}
-[data-mode="dark"][data-scheme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;--acc:#34d399;--acc2:#a3e635;--acc-soft:#113124;--acc-text:#5fe0b0;--on-acc:#0a120e;--acc-btn:#34d399;--acc2-btn:#a3e635;--ok:#34d399;--ok-soft:#113326;--err:#fb7185;--err-soft:#332222;--warn:#facc15;--warn-soft:#33320f;--chart-up:#34d399;--chart-down:#a3e635;--chart-3:#a3e635;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(52,211,153,.30);--glass:rgba(10,18,14,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(52,211,153,.55);--tint:rgba(52,211,153,.08);--focus:rgba(52,211,153,.45);--code-bg:#132119;--zebra:#14231b;}
+[data-mode="light"][data-scheme="forest"]{--bg:#f3f8f5;--side:#ffffff;--card:#ffffff;--text:#14251b;--muted:#597665;--line:#dcebe2;--hover:#e9f4ee;--acc:#16a34a;--acc2:#65a30d;--acc-soft:#dbefe2;--acc-text:#15803d;--on-acc:#ffffff;--acc-btn:#11843c;--acc2-btn:#4f7f0c;--ok:#15803d;--ok-soft:#dbebe1;--err:#c2410c;--err-soft:#eee4db;--warn:#a16207;--warn-soft:#eae8db;--chart-up:#16a34a;--chart-down:#65a30d;--chart-3:#65a30d;--chart-4:#d97706;--chart-5:#15803d;--grid:rgba(20,37,27,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(22,163,74,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(20,37,27,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(22,163,74,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(22,163,74,.55);--tint:rgba(22,163,74,.08);--focus:rgba(22,163,74,.45);--code-bg:#ecf5f0;--zebra:#f3f9f6;}
+[data-mode="dark"][data-scheme="forest"]{--bg:#0a120e;--side:#0f1a14;--card:#111e17;--text:#e3ece5;--muted:#83a08d;--line:#1e3228;--hover:#17271e;--acc:#34d399;--acc2:#a3e635;--acc-soft:#113124;--acc-text:#5fe0b0;--on-acc:#0a120e;--acc-btn:#34d399;--acc2-btn:#a3e635;--ok:#34d399;--ok-soft:#113326;--err:#fb7185;--err-soft:#332222;--warn:#facc15;--warn-soft:#33320f;--chart-up:#34d399;--chart-down:#a3e635;--chart-3:#a3e635;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(52,211,153,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(227,236,229,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(52,211,153,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(52,211,153,.55);--tint:rgba(52,211,153,.08);--focus:rgba(52,211,153,.45);--code-bg:#132119;--zebra:#14231b;}
 
 /* --- rose 玫瑰 --- */
-[data-mode="light"][data-scheme="rose"]{--bg:#fdf5f7;--side:#ffffff;--card:#ffffff;--text:#2b1620;--muted:#866773;--line:#f2dfe5;--hover:#fbebef;--acc:#e11d48;--acc2:#a855f7;--acc-soft:#fadde4;--acc-text:#be123c;--on-acc:#ffffff;--acc-btn:#e11d48;--acc2-btn:#954cdb;--ok:#0f766e;--ok-soft:#e3e7e8;--err:#be123c;--err-soft:#f6dce2;--warn:#b45309;--warn-soft:#f5e3dd;--chart-up:#e11d48;--chart-down:#0d9488;--chart-3:#a855f7;--chart-4:#f59e0b;--chart-5:#0f766e;--grid:rgba(43,22,32,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(225,29,72,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(225,29,72,.55);--tint:rgba(225,29,72,.08);--focus:rgba(225,29,72,.45);--code-bg:#fceef1;--zebra:#fdf4f6;}
-[data-mode="dark"][data-scheme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;--acc:#fb7185;--acc2:#c084fc;--acc-soft:#371e25;--acc-text:#fc93a2;--on-acc:#120e13;--acc-btn:#fb7185;--acc2-btn:#c084fc;--ok:#4ade80;--ok-soft:#1c3126;--err:#fda4af;--err-soft:#3a282e;--warn:#fbbf24;--warn-soft:#3a2c16;--chart-up:#fb7185;--chart-down:#2dd4bf;--chart-3:#c084fc;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(251,113,133,.30);--glass:rgba(18,14,19,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(251,113,133,.55);--tint:rgba(251,113,133,.08);--focus:rgba(251,113,133,.45);--code-bg:#20171e;--zebra:#221820;}
+[data-mode="light"][data-scheme="rose"]{--bg:#fdf5f7;--side:#ffffff;--card:#ffffff;--text:#2b1620;--muted:#866773;--line:#f2dfe5;--hover:#fbebef;--acc:#e11d48;--acc2:#a855f7;--acc-soft:#fadde4;--acc-text:#be123c;--on-acc:#ffffff;--acc-btn:#e11d48;--acc2-btn:#954cdb;--ok:#0f766e;--ok-soft:#e3e7e8;--err:#be123c;--err-soft:#f6dce2;--warn:#b45309;--warn-soft:#f5e3dd;--chart-up:#e11d48;--chart-down:#0d9488;--chart-3:#a855f7;--chart-4:#f59e0b;--chart-5:#0f766e;--grid:rgba(43,22,32,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(225,29,72,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(43,22,32,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(225,29,72,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(225,29,72,.55);--tint:rgba(225,29,72,.08);--focus:rgba(225,29,72,.45);--code-bg:#fceef1;--zebra:#fdf4f6;}
+[data-mode="dark"][data-scheme="rose"]{--bg:#120e13;--side:#181219;--card:#1d151c;--text:#efe4e9;--muted:#a58a96;--line:#2c212a;--hover:#261b23;--acc:#fb7185;--acc2:#c084fc;--acc-soft:#371e25;--acc-text:#fc93a2;--on-acc:#120e13;--acc-btn:#fb7185;--acc2-btn:#c084fc;--ok:#4ade80;--ok-soft:#1c3126;--err:#fda4af;--err-soft:#3a282e;--warn:#fbbf24;--warn-soft:#3a2c16;--chart-up:#fb7185;--chart-down:#2dd4bf;--chart-3:#c084fc;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(251,113,133,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(239,228,233,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(251,113,133,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(251,113,133,.55);--tint:rgba(251,113,133,.08);--focus:rgba(251,113,133,.45);--code-bg:#20171e;--zebra:#221820;}
 
 /* --- solar 暖阳 --- */
-[data-mode="light"][data-scheme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--text:#3b3026;--muted:#796b5b;--line:#e9dfcd;--hover:#f3ebdb;--acc:#e08a2e;--acc2:#c2410c;--acc-soft:#f4e7d4;--acc-text:#bf6f1c;--on-acc:#ffffff;--acc-btn:#a16421;--acc2-btn:#c2410c;--ok:#4d7c0f;--ok-soft:#e4e5d1;--err:#b91c1c;--err-soft:#f0dad2;--warn:#a16207;--warn-soft:#eee2d0;--chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--chart-5:#4d7c0f;--grid:rgba(59,48,38,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(224,138,46,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(224,138,46,.55);--tint:rgba(224,138,46,.08);--focus:rgba(224,138,46,.45);--code-bg:#f4eddf;--zebra:#f8f3e8;}
-[data-mode="dark"][data-scheme="solar"]{--bg:#17110a;--side:#1e1610;--card:#251b12;--text:#f0e6d8;--muted:#a3907a;--line:#3a2c1e;--hover:#2c2116;--acc:#e8a04a;--acc2:#f97316;--acc-soft:#382814;--acc-text:#f0b76a;--on-acc:#17110a;--acc-btn:#e8a04a;--acc2-btn:#f97316;--ok:#4ade80;--ok-soft:#20341e;--err:#f87171;--err-soft:#3d211c;--warn:#fbbf24;--warn-soft:#3e2f0e;--chart-up:#e8a04a;--chart-down:#86efac;--chart-3:#f97316;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(232,160,74,.30);--glass:rgba(23,17,10,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(232,160,74,.55);--tint:rgba(232,160,74,.08);--focus:rgba(232,160,74,.45);--code-bg:#261c12;--zebra:#291e14;}
+[data-mode="light"][data-scheme="solar"]{--bg:#f7f2e9;--side:#fffdf8;--card:#fffdf8;--text:#3b3026;--muted:#796b5b;--line:#e9dfcd;--hover:#f3ebdb;--acc:#e08a2e;--acc2:#c2410c;--acc-soft:#f4e7d4;--acc-text:#bf6f1c;--on-acc:#ffffff;--acc-btn:#a16421;--acc2-btn:#c2410c;--ok:#4d7c0f;--ok-soft:#e4e5d1;--err:#b91c1c;--err-soft:#f0dad2;--warn:#a16207;--warn-soft:#eee2d0;--chart-up:#e08a2e;--chart-down:#5a9d3f;--chart-3:#c2410c;--chart-4:#b45309;--chart-5:#4d7c0f;--grid:rgba(59,48,38,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(224,138,46,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(59,48,38,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(224,138,46,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(224,138,46,.55);--tint:rgba(224,138,46,.08);--focus:rgba(224,138,46,.45);--code-bg:#f4eddf;--zebra:#f8f3e8;}
+[data-mode="dark"][data-scheme="solar"]{--bg:#17110a;--side:#1e1610;--card:#251b12;--text:#f0e6d8;--muted:#a3907a;--line:#3a2c1e;--hover:#2c2116;--acc:#e8a04a;--acc2:#f97316;--acc-soft:#382814;--acc-text:#f0b76a;--on-acc:#17110a;--acc-btn:#e8a04a;--acc2-btn:#f97316;--ok:#4ade80;--ok-soft:#20341e;--err:#f87171;--err-soft:#3d211c;--warn:#fbbf24;--warn-soft:#3e2f0e;--chart-up:#e8a04a;--chart-down:#86efac;--chart-3:#f97316;--chart-4:#fbbf24;--chart-5:#4ade80;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(232,160,74,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(240,230,216,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(232,160,74,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(232,160,74,.55);--tint:rgba(232,160,74,.08);--focus:rgba(232,160,74,.45);--code-bg:#261c12;--zebra:#291e14;}
 
 /* --- steel 雾蓝 --- */
-[data-mode="light"][data-scheme="steel"]{--bg:#eceff4;--side:#ffffff;--card:#ffffff;--text:#1f2732;--muted:#606c80;--line:#dbe2ea;--hover:#e8edf4;--acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#dbe1ec;--acc-text:#415c8c;--on-acc:#ffffff;--acc-btn:#5470a8;--acc2-btn:#3c7a9a;--ok:#1b7f5a;--ok-soft:#d5e3e3;--err:#c24545;--err-soft:#e7dce1;--warn:#9a6b0b;--warn-soft:#e3e0da;--chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--chart-5:#1b7f5a;--grid:rgba(31,39,50,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(84,112,168,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(84,112,168,.55);--tint:rgba(84,112,168,.08);--focus:rgba(84,112,168,.45);--code-bg:#e9eef4;--zebra:#f2f5f9;}
-[data-mode="dark"][data-scheme="steel"]{--bg:#0e1319;--side:#131a22;--card:#18202a;--text:#dfe6ef;--muted:#8593a5;--line:#26313d;--hover:#1e2833;--acc:#7f9bd1;--acc2:#5fa8c9;--acc-soft:#202936;--acc-text:#9db4e0;--on-acc:#0e1319;--acc-btn:#7f9bd1;--acc2-btn:#5fa8c9;--ok:#34d399;--ok-soft:#14342f;--err:#f87171;--err-soft:#362328;--warn:#eab308;--warn-soft:#332e16;--chart-up:#7f9bd1;--chart-down:#5eead4;--chart-3:#5fa8c9;--chart-4:#eab308;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(127,155,209,.30);--glass:rgba(14,19,25,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(127,155,209,.55);--tint:rgba(127,155,209,.08);--focus:rgba(127,155,209,.45);--code-bg:#19222b;--zebra:#1b242f;}
+[data-mode="light"][data-scheme="steel"]{--bg:#eceff4;--side:#ffffff;--card:#ffffff;--text:#1f2732;--muted:#606c80;--line:#dbe2ea;--hover:#e8edf4;--acc:#5470a8;--acc2:#3f7fa0;--acc-soft:#dbe1ec;--acc-text:#415c8c;--on-acc:#ffffff;--acc-btn:#5470a8;--acc2-btn:#3c7a9a;--ok:#1b7f5a;--ok-soft:#d5e3e3;--err:#c24545;--err-soft:#e7dce1;--warn:#9a6b0b;--warn-soft:#e3e0da;--chart-up:#5470a8;--chart-down:#2e8f5e;--chart-3:#3f7fa0;--chart-4:#b07d1a;--chart-5:#1b7f5a;--grid:rgba(31,39,50,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(84,112,168,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(31,39,50,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(84,112,168,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(84,112,168,.55);--tint:rgba(84,112,168,.08);--focus:rgba(84,112,168,.45);--code-bg:#e9eef4;--zebra:#f2f5f9;}
+[data-mode="dark"][data-scheme="steel"]{--bg:#0e1319;--side:#131a22;--card:#18202a;--text:#dfe6ef;--muted:#8593a5;--line:#26313d;--hover:#1e2833;--acc:#7f9bd1;--acc2:#5fa8c9;--acc-soft:#202936;--acc-text:#9db4e0;--on-acc:#0e1319;--acc-btn:#7f9bd1;--acc2-btn:#5fa8c9;--ok:#34d399;--ok-soft:#14342f;--err:#f87171;--err-soft:#362328;--warn:#eab308;--warn-soft:#332e16;--chart-up:#7f9bd1;--chart-down:#5eead4;--chart-3:#5fa8c9;--chart-4:#eab308;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(127,155,209,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(223,230,239,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(127,155,209,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(127,155,209,.55);--tint:rgba(127,155,209,.08);--focus:rgba(127,155,209,.45);--code-bg:#19222b;--zebra:#1b242f;}
 
 /* --- ocean 海盐 --- */
-[data-mode="light"][data-scheme="ocean"]{--bg:#eef6f7;--side:#ffffff;--card:#ffffff;--text:#12303a;--muted:#4f737e;--line:#d7e6ea;--hover:#e5f0f3;--acc:#0f9db8;--acc2:#0d9488;--acc-soft:#d5ecf0;--acc-text:#0a7f97;--on-acc:#ffffff;--acc-btn:#0c8096;--acc2-btn:#0c8379;--ok:#0f766e;--ok-soft:#d5e8e8;--err:#be3b4a;--err-soft:#e9e1e4;--warn:#a16207;--warn-soft:#e6e6dd;--chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--chart-5:#0f766e;--grid:rgba(18,48,58,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(15,157,184,.30);--glass:rgba(255,255,255,.74);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(15,157,184,.55);--tint:rgba(15,157,184,.08);--focus:rgba(15,157,184,.45);--code-bg:#e8f2f4;--zebra:#f1f7f8;}
-[data-mode="dark"][data-scheme="ocean"]{--bg:#061417;--side:#0a1c20;--card:#0d2429;--text:#d9eef2;--muted:#7fa3ab;--line:#17363d;--hover:#103038;--acc:#22b8d4;--acc2:#2dd4bf;--acc-soft:#0a2e35;--acc-text:#4ecfe6;--on-acc:#061417;--acc-btn:#22b8d4;--acc2-btn:#2dd4bf;--ok:#34d399;--ok-soft:#0e342d;--err:#fb7185;--err-soft:#30242a;--warn:#fbbf24;--warn-soft:#303119;--chart-up:#22b8d4;--chart-down:#67e8f9;--chart-3:#2dd4bf;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(34,184,212,.30);--glass:rgba(6,20,23,0.72);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(34,184,212,.55);--tint:rgba(34,184,212,.08);--focus:rgba(34,184,212,.45);--code-bg:#0d282e;--zebra:#0f2b31;}
+[data-mode="light"][data-scheme="ocean"]{--bg:#eef6f7;--side:#ffffff;--card:#ffffff;--text:#12303a;--muted:#4f737e;--line:#d7e6ea;--hover:#e5f0f3;--acc:#0f9db8;--acc2:#0d9488;--acc-soft:#d5ecf0;--acc-text:#0a7f97;--on-acc:#ffffff;--acc-btn:#0c8096;--acc2-btn:#0c8379;--ok:#0f766e;--ok-soft:#d5e8e8;--err:#be3b4a;--err-soft:#e9e1e4;--warn:#a16207;--warn-soft:#e6e6dd;--chart-up:#0f9db8;--chart-down:#1f9d61;--chart-3:#0d9488;--chart-4:#d98b1f;--chart-5:#0f766e;--grid:rgba(18,48,58,0.075);--shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow:0 1px 2px rgba(16,24,40,.04),0 12px 30px -16px rgba(16,24,40,.20);--shadow-lg:0 30px 70px -28px rgba(16,24,40,.34);--elev-0:0 1px 2px rgba(16,24,40,.05);--elev-1:0 1px 2px rgba(16,24,40,.04),0 10px 26px -14px rgba(16,24,40,.20);--elev-2:0 2px 5px rgba(16,24,40,.07),0 20px 42px -20px rgba(15,157,184,.30);--glass:rgba(255,255,255,.82);--glass-edge:rgba(18,48,58,0.1);--glass-hi:rgba(255,255,255,.85);--float-shadow:0 1px 2px rgba(16,24,40,.07),0 12px 26px -8px rgba(16,24,40,.16),0 30px 60px -26px rgba(16,24,40,.26),0 48px 110px -58px rgba(15,157,184,.45);--mask:rgba(15,20,28,.44);--glow:0 10px 24px -10px rgba(15,157,184,.55);--tint:rgba(15,157,184,.08);--focus:rgba(15,157,184,.45);--code-bg:#e8f2f4;--zebra:#f1f7f8;}
+[data-mode="dark"][data-scheme="ocean"]{--bg:#061417;--side:#0a1c20;--card:#0d2429;--text:#d9eef2;--muted:#7fa3ab;--line:#17363d;--hover:#103038;--acc:#22b8d4;--acc2:#2dd4bf;--acc-soft:#0a2e35;--acc-text:#4ecfe6;--on-acc:#061417;--acc-btn:#22b8d4;--acc2-btn:#2dd4bf;--ok:#34d399;--ok-soft:#0e342d;--err:#fb7185;--err-soft:#30242a;--warn:#fbbf24;--warn-soft:#303119;--chart-up:#22b8d4;--chart-down:#67e8f9;--chart-3:#2dd4bf;--chart-4:#fbbf24;--chart-5:#34d399;--grid:rgba(255,255,255,.07);--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 1px 2px rgba(0,0,0,.35),0 12px 30px -16px rgba(0,0,0,.7);--shadow-lg:0 30px 70px -28px rgba(0,0,0,.85);--elev-0:0 1px 2px rgba(0,0,0,.4);--elev-1:0 1px 2px rgba(0,0,0,.35),0 10px 26px -14px rgba(0,0,0,.55);--elev-2:0 2px 5px rgba(0,0,0,.45),0 20px 42px -20px rgba(34,184,212,.30);--glass:rgba(255,255,255,.10);--glass-edge:rgba(217,238,242,0.12);--glass-hi:rgba(255,255,255,.11);--float-shadow:0 1px 2px rgba(0,0,0,.45),0 12px 26px -8px rgba(0,0,0,.62),0 30px 60px -26px rgba(0,0,0,.72),0 48px 110px -58px rgba(34,184,212,.45);--mask:rgba(0,0,0,.58);--glow:0 10px 24px -10px rgba(34,184,212,.55);--tint:rgba(34,184,212,.08);--focus:rgba(34,184,212,.45);--code-bg:#0d282e;--zebra:#0f2b31;}
 
 /* 密度与圆角是独立于明暗与配色的第三、第四根轴；外观偏好只存本机。 */
 :root{--dens-pad:20px;--dens-gap:18px;--dens-font:14px;--r-xl:20px;--r-lg:14px;--r:10px;--r-sm:7px}
@@ -196,7 +197,19 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
    - color-mix（111+）只用于装饰，失效时不能影响布局和可读性
    - backdrop-filter 要有不透明底色兜底
    新增属性前先确认 X5 认不认。 */
-body{font:14px/1.6 var(--font);background:var(--bg);color:var(--text);transition:background var(--t),color var(--t);
+body{font:14px/1.6 var(--font);color:var(--text);background-color:var(--bg);
+  /* 磨砂玻璃必须有「可糊」的底：三团极淡的品牌光晕 + 22px 点阵。
+     点阵在面板外是清晰的，透过玻璃被 24px 模糊成一层柔雾——这是悬浮感的来源，
+     纯色背景上再大的 blur 也看不出来。--tint 只有 .08，正文对比度不受影响。 */
+  background-image:
+    radial-gradient(circle at 1px 1px,var(--grid) 1px,transparent 1.5px),
+    radial-gradient(760px 620px at 3% 20%,var(--acc-soft),transparent 74%),
+    radial-gradient(780px 620px at 96% 88%,var(--acc-soft),transparent 76%),
+    radial-gradient(900px 620px at 2% -8%,var(--tint),transparent 68%),
+    radial-gradient(820px 540px at 98% 2%,var(--tint),transparent 70%),
+    radial-gradient(980px 720px at 58% 112%,var(--tint),transparent 72%);
+  background-size:22px 22px,auto,auto,auto,auto,auto;
+  transition:background-color var(--t),color var(--t);
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 /* 切主题的一瞬间压掉所有过渡/动画（配合 app.js 的 data-theme-switch）。
    applyTheme() 改的是 <html> 上的 data-mode/data-scheme，CSS 变量是瞬变的，
@@ -270,23 +283,86 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 ::-webkit-scrollbar-track{background:transparent}
 
 /* ============ 登录页 ============ */
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden;
-  background:var(--bg)}
-.login-wrap::before{content:"";position:absolute;width:820px;height:820px;border-radius:50%;
-  background:radial-gradient(circle,color-mix(in srgb,var(--acc) 26%,transparent),transparent 62%);
-  filter:blur(20px);top:-260px;left:-180px;animation:float 14s ease-in-out infinite}
-.login-wrap::after{content:"";position:absolute;width:640px;height:640px;border-radius:50%;
-  background:radial-gradient(circle,color-mix(in srgb,var(--acc2) 24%,transparent),transparent 62%);
-  filter:blur(24px);bottom:-240px;right:-160px;animation:float 18s ease-in-out infinite reverse}
-@keyframes float{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(40px,30px,0)}}
-.login-card{width:382px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);
-  box-shadow:var(--shadow-lg);padding:34px 30px;animation:pop .4s cubic-bezier(.34,1.4,.5,1);position:relative;z-index:1}
+/* 与主界面同一套悬浮玻璃：登录卡片待在左半区正中，右侧是一整块同材质的
+   品牌面板，把「右半屏空白」直接填满。两块都四边离屏 --float-gap、
+   圆角、共用 --float-shadow。
+   #login 必须保持 display:flex：boot.js 的首帧显隐、view-restore 与
+   first-paint-server 的 e2e 都按它判，换成 grid 会连带着假红。 */
+.login-wrap{min-height:100vh;display:flex;align-items:stretch;gap:var(--float-gap);
+  padding:var(--float-gap);position:relative;overflow:hidden;background-color:transparent;
+  /* 静态底纹：点阵 + 两团品牌柔光，全是 CSS 渐变，不铺实色，玻璃才有东西可糊。
+     不用 filter:blur 的大圆，也不做 translate3d 动画——那种持续重绘的离屏层
+     既是低端 Android 登录页闪白的老来源，在 2x DPR 下还会和 backdrop-filter
+     抢合成层，把登录卡片下半截的表单吞掉（暗色 + 高 DPR 实测）。 */
+  background-image:
+    radial-gradient(circle at 1px 1px,var(--grid) 1px,transparent 1.5px),
+    radial-gradient(700px 540px at 6% 10%,var(--acc-soft),transparent 72%),
+    radial-gradient(760px 560px at 94% 90%,var(--acc-soft),transparent 74%);
+  background-size:22px 22px,auto,auto}
+.login-left{flex:0 0 44%;min-width:0;display:flex;align-items:center;justify-content:center;
+  padding:24px;position:relative;z-index:1}
+/* 基础规则仍是不透明实底：X5 没有 backdrop-filter，玻璃只在文末守卫块里叠加。
+   不加入场动画：它会给带 backdrop-filter 的元素再建一个合成层，上面那两个
+   离屏层已经够多了——登录页一次成型、不闪，比淡入一下更重要。 */
+.login-card{width:382px;max-width:100%;background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--float-shadow),inset 0 1px 0 var(--glass-hi);padding:34px 30px;position:relative}
 .login-logo{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
 .login-logo .mark{width:42px;height:42px;border-radius:13px;color:#fff;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
 .login-logo b{font-size:19px;letter-spacing:.3px}
 .login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px}
 .demo-tag{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:99px;padding:1px 10px;font-size:12px;margin-left:6px}
+
+/* 右侧品牌面板：一整块玻璃，内容从上到下分四段，最后一段是版本与安全提示。
+   它是 flex 容器，.la-orbit 吃掉剩余高度，所以任何窗口高度下右侧都不空。 */
+.login-aside{flex:1 1 0;min-width:0;position:relative;z-index:1;overflow:hidden;
+  display:flex;flex-direction:column;padding:38px 42px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--float-shadow),inset 0 1px 0 var(--glass-hi)}
+.login-aside::before{content:"";position:absolute;width:560px;height:560px;border-radius:50%;
+  background:radial-gradient(circle,var(--acc-soft),transparent 68%);
+  top:-200px;right:-160px;pointer-events:none}
+.la-brand{display:flex;align-items:center;gap:12px;position:relative}
+.la-brand .mark{width:44px;height:44px;border-radius:14px;color:#fff;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--acc-btn),var(--acc2-btn));box-shadow:var(--glow)}
+.la-eyebrow{font-size:11.5px;letter-spacing:.18em;font-weight:600;color:var(--muted)}
+.la-title{font-size:clamp(27px,2.5vw,38px);line-height:1.28;font-weight:650;letter-spacing:-.01em;
+  margin:34px 0 12px;position:relative}
+.la-desc{font-size:14px;line-height:1.85;color:var(--muted);max-width:480px;position:relative}
+.la-features{display:flex;flex-direction:column;gap:10px;margin:28px 0 0;position:relative}
+.la-feature{display:flex;align-items:center;gap:14px;padding:11px 16px;
+  background:var(--acc-soft);border:1px solid var(--line);border-radius:var(--r-md)}
+.la-feature .la-ico{width:30px;height:30px;flex:none;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  color:var(--acc-text);background:var(--card);border:1px solid var(--line)}
+.la-feature b{font-size:13.5px;font-weight:600}
+/* 只认说明文字：不能写 .la-feature span，图标本身也是 span，会被一起推到中间。 */
+.la-feature .la-note{font-size:12px;color:var(--muted);margin-left:auto;text-align:right}
+/* 三位一体的几何图：只是品牌装饰，不承载任何运行时数据。flex:1 吃掉剩余高度，
+   所以右侧在 1440×900 与矮窗口下都填得满，不会下半屏发空。 */
+.la-orbit{flex:1 1 auto;min-height:150px;display:flex;align-items:center;justify-content:center;
+  position:relative;margin:14px 0}
+.la-orbit svg{width:100%;max-width:420px;height:auto;max-height:100%;color:var(--acc)}
+.la-orbit .la-track{stroke:currentColor}
+.la-orbit .la-node{fill:var(--card);stroke:currentColor}
+.la-orbit .la-hub{fill:var(--acc-soft);stroke:currentColor}
+.la-orbit .la-hub-mark{stroke:currentColor}
+.la-orbit .la-label{fill:var(--muted);font:600 12px var(--font)}
+.la-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:relative;
+  border-top:1px solid var(--line);padding-top:16px;font-size:12px;color:var(--muted)}
+.la-safe{margin-left:auto;display:flex;gap:14px;flex-wrap:wrap}
+/* 矮窗口（笔记本半屏、控制台占掉下半屏）：右侧内容整体收紧，先缩弹性图形区。
+   登录页应该一屏看完，不该被这些说明文字撑出整页滚动条。 */
+@media (max-height:760px){
+  .login-aside{padding:22px 30px}
+  .la-title{font-size:clamp(24px,2.2vw,30px);margin:18px 0 8px}
+  .la-desc{font-size:13px;line-height:1.65}
+  .la-features{margin-top:16px;gap:8px}
+  .la-feature{padding:8px 12px}
+  .la-orbit{min-height:0;margin:8px 0}
+  .la-orbit svg{max-height:130px}
+  .la-foot{padding-top:10px}
+  .login-card{padding:26px 26px}
+}
 
 /* ============ 布局 ============ */
 /* 100dvh：手机浏览器的 100vh 是「地址栏收起时」的高度，竖屏下比可视区高出一截，
@@ -300,16 +376,22 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
   .shell{height:var(--app-h,100vh)}
   .login-wrap{min-height:var(--app-h,100vh)}
 }
-.side{width:var(--side-w);flex:none;background:var(--side);border-right:1px solid var(--line);
+/* 侧栏是一张**浮在环境背景上的玻璃卡片**，不是贴着屏幕边缘的墙：四边离屏
+   14px、圆角、带主色晕的浮起阴影。底色先给不透明的 --side，磨砂只在
+   支持 backdrop-filter 的宽屏内核上叠加（见文末「悬浮玻璃层」）。 */
+.side{width:var(--side-w);flex:none;background:var(--side);
+  margin:var(--float-gap) 0 var(--float-gap) var(--float-gap);
+  border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--float-shadow),inset 0 1px 0 var(--glass-hi);
   display:flex;flex-direction:column;padding:14px 10px 10px;position:relative;z-index:30;min-height:0;
-  transition:background var(--t),border-color var(--t)}
+  transition:background var(--t),border-color var(--t),box-shadow var(--t)}
 /* 导航区自己滚。窗口高度不够时（笔记本半屏、横屏手机、浏览器控制台占了下半屏）
    11 个入口加起来比视口高，而 .shell 是 overflow:hidden——溢出的入口被裁掉又滑不到，
    表现就是「导航滚不动、下面几个页面进不去」。
    min-height:0 必须给：flex 子项的 min-height 默认是 auto，不归零它不会收缩，
    只会把 .side 撑破。 */
 #nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.side::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
+.side::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;border-radius:inherit;
   background:radial-gradient(420px 180px at 0% 0%,var(--tint),transparent 70%)}
 /* 品牌区：标识 + 名称 + 版本。 */
 .logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px;position:relative}
@@ -377,8 +459,12 @@ body[data-role="admin"] .need-owner{display:none!important}
   .side{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;
     width:100%;flex-direction:row;align-items:center;overflow-x:auto;
     padding:8px max(8px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
-    border-right:none;border-top:1px solid var(--line);
-    box-shadow:0 -12px 28px -22px rgba(0,0,0,.55)}
+    margin:0;border:0;border-top:1px solid var(--line);
+    border-radius:var(--r-xl) var(--r-xl) 0 0;
+    background:var(--side);box-shadow:var(--float-shadow)}
+  /* 窄屏不上磨砂：底栏常驻且整页在滚，blur 会让部分 Android GPU 整块重绘闪白。
+     环境底纹也一并去掉，只保留「圆角 + 浮起阴影」的悬浮形态和原字号。 */
+  body{background-image:none}
   .logo{padding:0 8px 0 4px}.logo .logo-v{display:none}
   .nav-sec{display:none}
   /* #nav 平时没有样式（块级，导航项竖着排）。窄屏把 .side 改成 row 之后，
@@ -403,10 +489,19 @@ body[data-role="admin"] .need-owner{display:none!important}
      毛玻璃也去掉：顶栏下面一直在滚，部分 Android GPU 要整块重绘，滚动时会闪。 */
   .topbar{padding:calc(12px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
     position:static;background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
-  /* 登录页那两个 820/640px 的模糊圆：动画会持续重绘，filter:blur 又会为整块
-     建一个离屏层，低端 Android 上这就是登录页闪烁/白屏的常见来源。手机上停掉
-     动画并去掉 blur——径向渐变本身边缘就是软的，视觉差别很小。 */
-  .login-wrap::before,.login-wrap::after{animation:none;filter:none}
+  /* 登录页手机端改单列：品牌面板上移成紧凑页头（只留标识、标题、一句描述和
+     版本），几何图与特性列表收起，别把登录表单挤到要滚两屏才看得见。
+     窄屏不上磨砂，静态点阵也一起去掉，body 的背景已经够了。 */
+  .login-wrap{flex-direction:column;gap:12px;padding:12px;overflow:visible;background-image:none}
+  /* 让卡片在页头下方垂直居中，省得小屏上底部空一大截。 */
+  .login-left{flex:1 1 auto;padding:8px 0 4px}
+  .login-card{width:100%;max-width:382px;padding:26px 22px}
+  .login-aside{order:-1;flex:none;padding:18px 20px}
+  .login-aside::before{display:none}
+  .la-title{font-size:20px;margin:12px 0 6px}
+  .la-desc{font-size:12.5px;line-height:1.6}
+  .la-features,.la-orbit,.la-safe{display:none}
+  .la-foot{border-top:none;padding-top:8px;font-size:11.5px}
 }
 
 /* ============ 卡片 ============ */
@@ -417,7 +512,6 @@ body[data-role="admin"] .need-owner{display:none!important}
 .view.active{display:block}
 .view.active.enter{animation:fadeUp .28s cubic-bezier(.16,1,.3,1)}
 @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-@keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
 /* 手机上不做整页入场动画：一个 view 动辄几千像素高，opacity + transform 会为
    整个页面建一个合成层，部分 Android GPU 上这层直接画不出来——切页后就是
    一片白，等它自己消失也未必恢复。 */
@@ -433,7 +527,7 @@ body[data-role="admin"] .need-owner{display:none!important}
    顶栏本身是 sticky 的，高度随字号/窄屏换行会变，所以 top 用 JS 量出来
    的 --topbar-h，别写死像素。背景用 --bg 与页面同色，滚过去的内容才被
    盖住而不留一条缝。 */
-.set-tabs{position:sticky;top:var(--topbar-h,74px);z-index:12;display:flex;align-items:center;gap:16px;
+.set-tabs{position:sticky;top:calc(var(--topbar-h,74px) + 8px);z-index:12;display:flex;align-items:center;gap:16px;
   flex-wrap:wrap;margin:0 0 18px;padding:12px 0 14px;background:var(--bg);
   box-shadow:0 14px 18px -20px rgba(0,0,0,.55)}
 /* 条底再垫一段渐隐：卡片正好滚到边缘时，不会被切出一道半截字 */
@@ -927,13 +1021,16 @@ canvas{display:block;width:100%}
 .kpi:hover,.quick:hover,.scn-card:hover{box-shadow:var(--elev-2)}
 
 /* ---- 命令条：所有页面常驻，也是页面上唯一的顶栏 ----
-   方案 B 之后它同时承担原 .topbar 的职责（页名 + 状态胶囊），
-   所以吸顶位置是 0；--topbar-h 由 app.js 量它自己的高度算出来。 */
+   方案 B 之后它同时承担原 .topbar 的职责（页名 + 状态胶囊）。
+   静止时靠 14px 上边距悬浮；滚动后吸到 0，避免在顶上留一条 14px 的缝
+   露出上一张卡片（悬浮顶栏最容易漏掉的一处）。--topbar-h 由 app.js 量它
+   自己的高度算出来。 */
 .cmdbar{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:9px;
-  flex-wrap:wrap;max-width:1240px;width:100%;margin:0 auto;
-  padding:10px 28px;background:var(--bg);border-bottom:1px solid var(--line)}
-.cmdbar::after{content:"";position:absolute;left:0;right:0;top:100%;height:14px;pointer-events:none;
-  background:linear-gradient(to bottom,var(--bg),transparent)}
+  flex-wrap:wrap;max-width:1240px;width:calc(100% - var(--float-gap) - var(--float-gap));
+  margin:var(--float-gap) auto 0;
+  padding:10px 16px;background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--float-shadow),inset 0 1px 0 var(--glass-hi)}
 .cmd-trigger{display:inline-flex;align-items:center;gap:8px;min-width:210px;height:34px;padding:0 10px;
   border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--muted);
   font:inherit;font-size:12.5px;cursor:pointer;transition:border-color var(--t-fast),box-shadow var(--t-fast),color var(--t-fast)}
@@ -1070,7 +1167,6 @@ canvas{display:block;width:100%}
 @media (max-width:960px){
   /* 手机上交还文档滚动，命令条不 sticky；瀑布流一律单列 */
   .cmdbar{position:static;padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left))}
-  .cmdbar::after{display:none}
   .cmd-trigger{min-width:0;flex:1 1 130px}
   .cmd-trigger .kbd{display:none}
   /* 窄屏只留页名与搜索，状态胶囊收进「更多」不用挤这一行 */
@@ -1109,44 +1205,105 @@ canvas{display:block;width:100%}
     transition-duration:.001ms!important;scroll-behavior:auto!important}
   .wb-card:hover:not(:focus-within),.kpi:hover,.quick:hover,.scheme:hover,.todo-row:hover{transform:none!important}
 }
+
+/* ==================================================================
+   悬浮玻璃层：毛玻璃是「增强」，不是替换掉不透明底色
+   - .side / .cmdbar 的基础规则仍是不透明的 --side / --bg：X5 与老内核没有
+     backdrop-filter，文字照样压在实底上，不会透出滚过去的内容
+   - 只有宽屏 + 内核真的支持 backdrop-filter 才切到 24px 磨砂；--glass
+     的不透明度是 .84/.86，比常见的 .7 高，保证 11px 分组标题与 12.5px
+     状态文字仍过 WCAG AA
+   - 窄屏保留圆角与浮起阴影，但不模糊（Android 滚动时整块重绘会闪白）
+   ================================================================== */
+@media (min-width:961px){
+  @supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+    .side,.cmdbar,.cmd-panel,.tpop,.set-tabs,.login-card,.login-aside{
+      background:var(--glass);background-image:linear-gradient(155deg,var(--glass-hi),transparent 46%);
+      border-color:var(--glass-edge);
+      -webkit-backdrop-filter:blur(24px) saturate(170%);
+      backdrop-filter:blur(24px) saturate(170%)}
+    .cmd-panel,.tpop{box-shadow:var(--float-shadow)}
+  }
+}
 </style>
 </head>
 <body>
 
-<!-- 登录 -->
+<!-- 登录：左半区正中是登录卡片，右半区是一整块同材质品牌面板 -->
 <div id="login" class="login-wrap">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
-      <b>Triune Panel</b><span id="demoTag" class="demo-tag hide">演示模式</span>
-    </div>
-    <div class="login-sub">mihomo · sing-box · xray 三位一体</div>
-    <label>用户名</label>
-    <input id="lu" class="input" value="admin" autocomplete="username">
-    <div style="height:10px"></div>
-    <label>密码</label>
-    <input id="lp" class="input" type="password" autocomplete="current-password"
-           data-enter="login">
-    <div id="l2fa_row" class="hide" style="margin-top:12px">
-      <label id="l2fa_label">二次验证</label>
-      <div style="display:flex;gap:8px">
-        <input id="lcode" class="input mono" inputmode="numeric" maxlength="6" placeholder="6 位验证码"
-               style="flex:1;text-align:center;letter-spacing:6px;font-size:16px"
-               data-enter="login">
-        <button class="btn sm hide" id="l2fa_resend" data-act="loginResend">重发</button>
+  <div class="login-left">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+        <b>Triune Panel</b><span id="demoTag" class="demo-tag hide">演示模式</span>
       </div>
-      <p class="muted" id="l2fa_hint" style="margin:6px 0 0;font-size:12px"></p>
+      <div class="login-sub">mihomo · sing-box · xray 三位一体</div>
+      <label>用户名</label>
+      <input id="lu" class="input" value="admin" autocomplete="username">
+      <div style="height:10px"></div>
+      <label>密码</label>
+      <input id="lp" class="input" type="password" autocomplete="current-password"
+             data-enter="login">
+      <div id="l2fa_row" class="hide" style="margin-top:12px">
+        <label id="l2fa_label">二次验证</label>
+        <div style="display:flex;gap:8px">
+          <input id="lcode" class="input mono" inputmode="numeric" maxlength="6" placeholder="6 位验证码"
+                 style="flex:1;text-align:center;letter-spacing:6px;font-size:16px"
+                 data-enter="login">
+          <button class="btn sm hide" id="l2fa_resend" data-act="loginResend">重发</button>
+        </div>
+        <p class="muted" id="l2fa_hint" style="margin:6px 0 0;font-size:12px"></p>
+      </div>
+      <div style="height:18px"></div>
+      <button class="btn primary" style="width:100%;justify-content:center;padding:9px" data-act="login">登 录</button>
+      <p class="muted" id="forgot_hint" style="margin:12px 0 0;font-size:12px;line-height:1.7">
+        忘记密码？在服务器上执行以下命令即可重置（无需登录面板）：<br>
+        <code style="font-size:11.5px;white-space:nowrap">sudo triune-panel reset-password</code>
+      </p>
     </div>
-    <div style="height:18px"></div>
-    <button class="btn primary" style="width:100%;justify-content:center;padding:9px" data-act="login">登 录</button>
-    <p class="muted" id="forgot_hint" style="margin:12px 0 0;font-size:12px;line-height:1.7">
-      忘记密码？在服务器上执行以下命令即可重置（无需登录面板）：<br>
-      <code style="font-size:11.5px;white-space:nowrap">sudo triune-panel reset-password</code>
-    </p>
-    <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">
-      <span id="login_ver">Triune Panel</span><span id="login_last" class="hide"></span>
-    </p>
   </div>
+
+  <aside class="login-aside">
+    <div class="la-brand">
+      <div class="mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <span class="la-eyebrow">TRIUNE PANEL</span>
+    </div>
+    <h1 class="la-title">一个面板，<br><span class="grad-text">管好三个内核</span>。</h1>
+    <p class="la-desc">mihomo、sing-box、xray 并存。配置只写一次，渲染、内核自检、原子替换与修订留痕都由面板完成。</p>
+    <div class="la-features">
+      <div class="la-feature">
+        <span class="la-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+        <b>意图存库</b><span class="la-note">三内核共用同一套渲染器</span>
+      </div>
+      <div class="la-feature">
+        <span class="la-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <b>应用前自检</b><span class="la-note">内核不通过就零改动</span>
+      </div>
+      <div class="la-feature">
+        <span class="la-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></span>
+        <b>每次变更留痕</b><span class="la-note">原子替换，可一键回滚</span>
+      </div>
+    </div>
+    <!-- 三位一体的品牌几何：纯装饰，不承载任何运行时数据，也不需要登录态 -->
+    <div class="la-orbit">
+      <svg viewBox="0 0 420 250" role="img" aria-label="mihomo、sing-box、xray 三个内核由同一面板管理">
+        <ellipse class="la-track" cx="210" cy="112" rx="196" ry="100" fill="none" stroke-width="1" stroke-dasharray="2 8" opacity=".24"/>
+        <path class="la-track" d="M210 112 92 62M210 112 328 62M210 112 210 194" fill="none" stroke-width="1.5" stroke-dasharray="4 6" opacity=".4"/>
+        <circle class="la-node" cx="92" cy="62" r="27" stroke-width="1.5"/>
+        <circle class="la-node" cx="328" cy="62" r="27" stroke-width="1.5"/>
+        <circle class="la-node" cx="210" cy="194" r="27" stroke-width="1.5"/>
+        <circle class="la-hub" cx="210" cy="112" r="40" stroke-width="2"/>
+        <path class="la-hub-mark" d="M210 92l14 6v14c0 10-7 16-14 19-7-3-14-9-14-19v-14z" fill="none" stroke-width="2"/>
+        <text class="la-label" x="92" y="112" text-anchor="middle">mihomo</text>
+        <text class="la-label" x="328" y="112" text-anchor="middle">sing-box</text>
+        <text class="la-label" x="210" y="242" text-anchor="middle">xray</text>
+      </svg>
+    </div>
+    <div class="la-foot">
+      <span id="login_ver">Triune Panel</span><span id="login_last" class="hide"></span>
+      <span class="la-safe"><span>审计留痕</span><span>失败零改动</span><span>一键回滚</span></span>
+    </div>
+  </aside>
 </div>
 
 <!-- 主界面 -->
