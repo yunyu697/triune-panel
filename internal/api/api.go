@@ -116,6 +116,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/components", a.auth(a.handleComponents))
 	mux.HandleFunc("GET /api/updates/versions", a.auth(a.handleUpdateVersions))
 	mux.HandleFunc("GET /api/certs", a.auth(a.handleCerts))
+	// DNS-01 的服务商清单（名字、需要哪些变量、去哪申请）。
+	// 放成独立端点而不是让前端硬编码：可选服务商是**编译进来**的，
+	// 硬编码两份必然漂移，而漂移的后果是用户照着填了一个不存在的键。
+	mux.HandleFunc("GET /api/certs/providers", a.auth(a.handleCertProviders))
 	mux.HandleFunc("GET /api/tools/uuid", a.auth(a.handleUUID))
 
 	// ---- 管理员（owner + admin）：会改状态，或响应里带凭据 ----

@@ -1019,7 +1019,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",server_ip:"203.0.113.10",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",server_ip:"203.0.113.10",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"1",acme_domain:"example.com,*.example.com",acme_email:"admin@example.com",acme_dns_provider:"cloudflare",acme_dns_env:"********",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
       backup_keep_count:"0",backup_max_mb:"0",backup_max_days:"0",backup_auto_prune:"0"},
     // 备份容量治理与主机体检的演示数据：让离线 demo 也能完整走一遍预览→清理、
     // 检测→应用→撤销，而不是点进去一片空白。
@@ -1444,14 +1444,31 @@ async function mockRoute(path, opts) {
     return it;
   }
   if (api === "external-nodes" && m === "DELETE") { MDB.external = MDB.external.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
+  // 演示：DNS-01 的服务商清单（真机同样来自 GET /api/certs/providers）。
+  // 必须放在 api === "certs" 之前，否则会被那条前缀匹配吃掉。
+  if (api === "certs" && rest === "/providers") return { providers: [
+    { id:"cloudflare", label:"Cloudflare（小黄云）", env:["CLOUDFLARE_DNS_API_TOKEN"],
+      hint:"Cloudflare 控制台 → API 令牌 → 用「编辑区域 DNS」模板，区域只选这一个域名。",
+      example:"CLOUDFLARE_DNS_API_TOKEN=你的令牌" },
+    { id:"alidns", label:"阿里云 DNS", env:["ALICLOUD_ACCESS_KEY","ALICLOUD_SECRET_KEY"],
+      hint:"RAM 子账号 + 只授云解析 DNS 的 AccessKey。",
+      example:"ALICLOUD_ACCESS_KEY=LTAI...\nALICLOUD_SECRET_KEY=..." },
+    { id:"dnspod", label:"DNSPod / 腾讯云", env:["DNSPOD_API_KEY"],
+      hint:"密钥管理里创建，值是「ID,Token」，逗号一起填。",
+      example:"DNSPOD_API_KEY=123456,xxxxxxxx" }
+  ]};
   if (api === "certs") {
-    // 演示两条：一条健康、一条仅剩 9 天，便于看到到期标红效果
+    // 演示两条：一条泛域名（DNS-01）健康、一条 http-01 仅剩 9 天，便于看到到期标红
     const day = n => new Date(Date.now() + n * 86400000).toISOString();
+    const paths = d => ({ file:"data/certs/"+d,
+      cert_path:"data/certs/"+d+"/fullchain.pem", key_path:"data/certs/"+d+"/privkey.pem" });
     return [
-      { domain:"panel.example.com", issuer:"R11", not_before:day(-30), not_after:day(62),
-        file:"data/certs/panel.example.com/fullchain.pem" },
-      { domain:"node.example.com", issuer:"R11", not_before:day(-81), not_after:day(9),
-        file:"data/certs/node.example.com/fullchain.pem" }
+      Object.assign({ domain:"example.com", domains:["example.com","*.example.com"],
+        challenge:"dns-01", provider:"cloudflare",
+        issuer:"R11", not_before:day(-30), not_after:day(62) }, paths("example.com")),
+      Object.assign({ domain:"node.example.com", domains:["node.example.com"],
+        challenge:"http-01", issuer:"R11", not_before:day(-81), not_after:day(9) },
+        paths("node.example.com"))
     ];
   }
   if (api === "certs/issue") return {ok:1, msg:"已触发签发检查（演示）"};
@@ -7348,7 +7365,8 @@ async function loadCerts() {
     el.classList.remove("hide");
     let worst = 0; // 0 正常 / 1 即将到期 / 2 需要处理
     el.innerHTML = j.map(c => {
-      const dom = escHtml(c.domain || "?");
+      const names = (c.domains && c.domains.length) ? c.domains.join(", ") : (c.domain || "?");
+      const dom = escHtml(names);
       if (c.error) {
         worst = 2;
         return `<span style="color:var(--err)">✕ ${dom}：签发 / 续期失败 — ${escHtml(c.error)}</span>`;
@@ -7371,7 +7389,12 @@ async function loadCerts() {
       } else {
         tail = `<span style="color:var(--ok)">剩余 ${d} 天</span>`;
       }
-      return `✓ ${dom}：有效期至 ${escHtml(until)} · ${tail} · ${escHtml(c.file || "")}`;
+      // 把「用哪种方式签的」和两个文件的完整路径一起写出来：用户下一步就是
+      // 把路径填进入站的 TLS 设置，让他自己拼 data/certs/<domain>/... 容易漏一层。
+      const via = c.challenge ? (c.provider ? `DNS-01 · ${c.provider}` : "HTTP-01") : "";
+      const cp = certPathsOf(c);
+      return `✓ ${dom}：有效期至 ${escHtml(until)} · ${tail}` + (via ? ` · ${escHtml(via)}` : "") +
+        (cp.cert ? `\n   证书 ${escHtml(cp.cert)}\n   私钥 ${escHtml(cp.key)}` : "");
     }).join("\n");
     badge.classList.remove("hide", "b-ok", "b-warn", "b-err", "b-idle");
     if (worst === 2) { badge.classList.add("b-err"); badge.textContent = "证书需要处理"; }
@@ -7379,11 +7402,57 @@ async function loadCerts() {
     else { badge.classList.add("b-ok"); badge.textContent = "证书正常"; }
   } catch(e){}
 }
+/* ---- ACME 验证方式（HTTP-01 / DNS-01）----
+   服务商清单从后端取，因为它是「编译进二进制的那几个 lego provider」：
+   前端硬编码一份必然漂移，而漂移的后果是用户照着填了一个根本不存在的变量名。 */
+let acmeProviders = null;
+async function loadAcmeProviders() {
+  if (!acmeProviders) {
+    try { const j = await req("/api/certs/providers"); acmeProviders = (j && j.providers) || []; }
+    catch (e) { acmeProviders = []; }
+    const sel = $("s_acme_dns_provider");
+    if (sel) sel.innerHTML = `<option value="">HTTP-01 · 不需要凭据（签发时占用 :80）</option>` +
+      acmeProviders.map(p => `<option value="${escHtml(p.id)}">DNS-01 · ${escHtml(p.label)}</option>`).join("");
+  }
+  return acmeProviders;
+}
+function acmeCurrentProvider() {
+  const id = $("s_acme_dns_provider").value;
+  return { id, p: (acmeProviders || []).find(x => x.id === id) };
+}
+function acmeSyncUI() {
+  const { id, p } = acmeCurrentProvider();
+  $("acme_dns_box").classList.toggle("hide", !id);
+  if (id && p) {
+    const ta = $("s_acme_dns_env");
+    if (!ta.value || ta.value === "********") ta.placeholder = p.example || "";
+    $("acme_dns_hint").innerHTML = escHtml(p.hint) + "<br>必须提供：" +
+      p.env.map(k => `<code>${escHtml(k)}</code>`).join(" ");
+    $("acme_mode_hint").textContent =
+      "DNS-01 不占用任何端口，域名也不必解析到本机，泛域名（*.example.com）只能用这一种。" +
+      "凭据存在面板数据库里，接口只返回占位符，要改就整段重填。";
+  } else {
+    $("acme_mode_hint").textContent =
+      "HTTP-01 在签发时临时占用 :80，域名必须此刻解析到本机；泛域名用不了这一种。" +
+      "要签 *.example.com 请在上面选一个 DNS 服务商。";
+  }
+}
+function acmeProviderChange() { acmeSyncUI(); }
+/* 证书文件名：用户要把它填进入站的 TLS 设置，自己拼容易漏一层目录。 */
+function certPathsOf(c) {
+  if (c.cert_path && c.key_path) return { cert: c.cert_path, key: c.key_path };
+  const dir = c.file || "";
+  return dir ? { cert: dir.replace(/\/+$/, "") + "/fullchain.pem",
+                 key: dir.replace(/\/+$/, "") + "/privkey.pem" } : { cert: "", key: "" };
+}
 async function issueCert() {
   try {
     const j = await req("/api/certs/issue", { method:"POST" });
     $("certmsg").textContent = j.msg || "已触发";
-    toast("已触发签发检查（HTTP-01 需域名解析到本机且 :80 可用）", "info");
+    const via = acmeCurrentProvider().id
+      ? "DNS-01 取决于 DNS 记录传播速度，通常几十秒到两分钟"
+      : "HTTP-01 需域名解析到本机且 :80 可用";
+    toast("已触发签发检查（" + via + "）", "info");
     setTimeout(loadCerts, 6000);
     setTimeout(loadCerts, 20000);
     setTimeout(() => { $("certmsg").textContent = ""; }, 10000);
@@ -7391,7 +7460,10 @@ async function issueCert() {
 }
 /* HTTPS 一键引导 */
 function openHttpsModal() {
-  $("hs_domain").value = $("s_acme_domain").value || $("s_host").value || "";
+  // 域名可能是一张证书里的多个名字（example.com, *.example.com），
+  // 这个弹窗只问「用哪个域名访问面板」，取第一个。
+  const first = String($("s_acme_domain").value || "").split(/[,;，\s]+/).filter(Boolean)[0] || "";
+  $("hs_domain").value = first || $("s_host").value || "";
   $("hs_email").value = $("s_acme_email").value || "";
   $("mHttps").classList.add("show");
   syncBodyLock();
@@ -7404,10 +7476,11 @@ async function submitHTTPS() {
   try {
     await req("/api/settings", { method:"PUT", body:{
       acme_enabled:"1", acme_domain:domain, acme_email:email } });
-    // 同步回设置卡片，避免状态不一致
-    $("s_acme").checked = true; $("s_acme_domain").value = domain; $("s_acme_email").value = email;
+    // 回读服务端而不是就地改输入框：服务端会归一化域名（补逗号、去尾点），
+    // 就地赋值会让卡片显示和库里不一致，用户下次「保存」时又把脏值写回去。
+    await loadSettings();
     closeModal("mHttps");
-    toast("已启用 HTTPS 并触发签发：HTTP-01 验证通常几秒到一分钟，稍后刷新证书卡片查看结果", "info");
+    toast("已启用 HTTPS 并触发签发：HTTP-01 通常几秒，DNS-01 取决于记录传播；稍后刷新证书卡片查看结果", "info");
     await issueCert();
     $("certmsg").textContent = "正在为 " + domain + " 签发证书…";
   } catch (e) { toast("启用失败：" + e.message, "err"); }
@@ -7560,6 +7633,12 @@ async function loadSettings() {
     $("s_autoswitch").checked = j.auto_switch_panel !== "0";
     $("s_trusted_proxies").value = j.trusted_proxies || "";
     $("s_acme").checked = j.acme_enabled === "1"; $("s_acme_domain").value = j.acme_domain || ""; $("s_acme_email").value = j.acme_email || "";
+    await loadAcmeProviders();
+    $("s_acme_dns_provider").value = j.acme_dns_provider || "";
+    // 凭据可能已被打码（"********"）：照原样填进去，保存时原样提交回去表示「没改」。
+    // 不填成空的话，用户只改邮箱就会把凭据整段清掉。
+    $("s_acme_dns_env").value = j.acme_dns_env || "";
+    acmeSyncUI();
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
     $("s_auth_email").value = j.auth_email || "";
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
@@ -8182,7 +8261,9 @@ async function saveSettings() {
     quota_warn_pct:String(+$("s_warn_pct").value || 80),
     fw_auto:$("s_fwauto").checked?"1":"0",
     trusted_proxies:$("s_trusted_proxies").value.trim(),
-    acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value };
+    acme_enabled:$("s_acme").checked?"1":"0", acme_domain:$("s_acme_domain").value, acme_email:$("s_acme_email").value,
+    // 凭据框里若还是打码占位符，后端会当成「没改过」跳过（见 putSettings）
+    acme_dns_provider:$("s_acme_dns_provider").value, acme_dns_env:$("s_acme_dns_env").value };
   try {
     await req("/api/settings", { method:"PUT", body });
     markDirty("set_card_basic", false);

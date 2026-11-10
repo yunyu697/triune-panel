@@ -88,6 +88,7 @@ var protectedRoutes = []struct{ method, path string }{
 	{"POST", "/api/host-opt/fix"},
 	{"POST", "/api/host-opt/fix/revert"},
 	{"GET", "/api/certs"},
+	{"GET", "/api/certs/providers"},
 	{"POST", "/api/certs/issue"},
 }
 

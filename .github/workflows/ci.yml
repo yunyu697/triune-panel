@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           for s in first-paint-flicker view-restore theme-switch-flicker theme-contrast \
                    section-restore bypass-server layout-check backups-hostopt workbench-command \
-                   inbound-addr; do
+                   inbound-addr acme-dns; do
             echo "→ ${s}"
             node ".e2e/${s}.js"
           done

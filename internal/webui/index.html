@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.9.3 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.10.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1970,13 +1970,23 @@ canvas{display:block;width:100%}
       </div>
 
       <div class="card" data-sect="maintain">
-        <h3>ACME 证书（Let's Encrypt · HTTP-01）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
+        <h3>ACME 证书（Let's Encrypt）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
         <div class="frm">
-          <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="panel.example.com"></div>
+          <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="example.com, *.example.com"></div>
           <div><label>邮箱</label><input id="s_acme_email" class="input"></div>
+          <div><label>验证方式</label>
+            <select id="s_acme_dns_provider" class="input" data-act="acmeProviderChange"></select></div>
         </div>
+        <div id="acme_dns_box" class="hide">
+          <div class="frm">
+            <div class="full"><label>凭据 <span class="muted" style="font-weight:400">（每行 KEY=VALUE）</span></label>
+              <textarea id="s_acme_dns_env" class="input mono" style="min-height:76px;font-size:12px" spellcheck="false"></textarea></div>
+          </div>
+          <p class="muted" id="acme_dns_hint" style="margin:-6px 0 14px;font-size:12.5px;line-height:1.6"></p>
+        </div>
+        <p class="muted" id="acme_mode_hint" style="margin:0 0 12px;font-size:12.5px;line-height:1.6"></p>
         <div class="radio-row" style="margin:0">
-          <label><input type="checkbox" id="s_acme"> 启用（签发期间临时占用 :80，需域名解析到本机）</label>
+          <label><input type="checkbox" id="s_acme"> 启用自动签发 / 续期</label>
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
           <button class="btn primary sm" data-act="openHttpsModal">一键启用 HTTPS</button>

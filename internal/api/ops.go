@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"triune/internal/certmgr"
 	"triune/internal/update"
 )
 
@@ -199,6 +200,14 @@ func (a *Server) handleCerts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a.CertMgr.Status())
 }
 
+// GET /api/certs/providers：可选的 DNS-01 服务商。
+//
+// 只包含**编译进二进制**的那几个（见 certmgr/dns.go 的说明）：lego 有近
+// 两百个 provider，全量引入会把体积翻一倍，而常见用法集中在这几家。
+func (a *Server) handleCertProviders(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"providers": certmgr.DNSProviders()})
+}
+
 // POST /api/certs/issue：手动触发一次 ACME 签发/续期检查（异步执行）。
 // HTTP-01 验证需域名解析到本机且面板可绑定 :80；完成后 GET /api/certs 可见结果。
 func (a *Server) handleCertsIssue(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +219,7 @@ func (a *Server) handleCertsIssue(w http.ResponseWriter, r *http.Request) {
 	a.auditOK(r, AuditCert, "", "手动触发证书签发 / 续期检查")
 	writeJSON(w, 200, map[string]string{
 		"ok":  "1",
-		"msg": "已触发签发检查；HTTP-01 验证通常几秒到一分钟完成，稍后刷新可查看状态",
+		"msg": "已触发签发检查；HTTP-01 通常几秒到一分钟，DNS-01 取决于 DNS 记录传播速度，稍后刷新可查看状态",
 	})
 }
 

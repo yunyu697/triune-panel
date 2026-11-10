@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"triune/internal/certmgr"
 	"triune/internal/model"
 	"triune/internal/store"
 )
@@ -147,7 +148,9 @@ func isSecretSetting(key string) bool {
 			return true
 		}
 	}
-	return false
+	// DNS-01 的凭据键名是 acme_dns_env，一个惯用词都不沾，但里面装的是
+	// 第三方账号的钥匙（能改域名解析）。变更通知/审计里必须打码。
+	return key == certmgr.SettingDNSEnv
 }
 
 // settingDiff 生成一条设置变更的 diff 行。

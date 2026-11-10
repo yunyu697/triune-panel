@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"triune/internal/authn"
+	"triune/internal/certmgr"
 	"triune/internal/core"
 	"triune/internal/model"
 )
@@ -57,6 +58,8 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 可信反向代理网段（登录来源识别用，默认空 = 不信任任何代理）
 		TrustedProxiesSetting,
 		"acme_enabled", "acme_domain", "acme_email",
+		// DNS-01：服务商 ID + 凭据（凭据不回显，见下面的打码）
+		certmgr.SettingDNSProvider, certmgr.SettingDNSEnv,
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
 		// 2FA 状态展示（totp_secret 不下发前端）
 		"auth_2fa_mode", "auth_email",
@@ -79,6 +82,13 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 命令工作台布局（见 workbench.go）：跨设备记住卡片顺序与折叠状态
 		SettingWorkbenchLayout} {
 		v, _ := a.Store.GetSetting(k)
+		// DNS 凭据是**第三方账号的钥匙**（一个 Cloudflare token 能改整个域名的
+		// 解析，再签一张证书冒充这个站），和面板自己的 stats_secret 不是一个
+		// 量级。所以这里破一次「设置项照常回显」的惯例：只回占位符，前端把
+		// 占位符原样提交回来表示「没改过」（见 putSettings）。
+		if k == certmgr.SettingDNSEnv && v != "" {
+			v = certmgr.MaskedSecret
+		}
 		out[k] = v
 	}
 	writeJSON(w, 200, out)
@@ -124,6 +134,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 可信反向代理网段：仅当直连对端落在这些网段内才采信转发头
 		TrustedProxiesSetting: true,
 		"acme_enabled":        true, "acme_domain": true, "acme_email": true,
+		// DNS-01 验证：服务商 ID（空 = 用 HTTP-01）与凭据
+		certmgr.SettingDNSProvider: true, certmgr.SettingDNSEnv: true,
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
@@ -201,6 +213,76 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err := validateWorkbenchLayout(m[SettingWorkbenchLayout]); err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	// ---- ACME / DNS-01 ----
+	//
+	// 这些校验全部前移到保存期。理由是签发是异步的、DNS-01 还要等记录传播，
+	// 用户在结果那一端能看到的只有日志里一句英文；能在这儿挡住的就说明白。
+	if v, ok := m[certmgr.SettingDNSEnv]; ok && strings.TrimSpace(v) == certmgr.MaskedSecret {
+		// 原样提交占位符 = 没改过。删掉这个键，别拿占位符覆盖真凭据。
+		delete(m, certmgr.SettingDNSEnv)
+	}
+	// 有效服务商：本次提交的优先，否则沿用库里已有的（本次只改了凭据时）。
+	effProvider := ""
+	if v, ok := m[certmgr.SettingDNSProvider]; ok {
+		effProvider = strings.TrimSpace(v)
+		m[certmgr.SettingDNSProvider] = effProvider
+		if effProvider != "" {
+			if _, found := certmgr.LookupDNSProvider(effProvider); !found {
+				fail(w, 400, "不支持的 DNS 服务商："+effProvider+
+					"（可选 "+strings.Join(certmgr.DNSProviderIDs(), " / ")+"）")
+				return
+			}
+		}
+	} else {
+		effProvider, _ = a.Store.GetSetting(certmgr.SettingDNSProvider)
+		effProvider = strings.TrimSpace(effProvider)
+	}
+	// 有效域名：同样「本次提交优先」——只切验证方式、不改域名时也要能判断
+	// 「泛域名 + HTTP-01」这个组不拢的组合，否则会存进一个必然失败的配置。
+	effDomains := []string(nil)
+	if v, ok := m["acme_domain"]; ok {
+		if strings.TrimSpace(v) == "" {
+			m["acme_domain"] = ""
+		} else if d, err := certmgr.ParseDomains(v); err != nil {
+			fail(w, 400, "证书域名有误："+err.Error())
+			return
+		} else {
+			m["acme_domain"] = strings.Join(d, ",")
+			effDomains = d
+		}
+	} else if raw, _ := a.Store.GetSetting("acme_domain"); strings.TrimSpace(raw) != "" {
+		if d, err := certmgr.ParseDomains(raw); err == nil {
+			effDomains = d
+		}
+	}
+	if effProvider == "" && certmgr.HasWildcard(effDomains) {
+		fail(w, 400, "泛域名证书只能用 DNS-01 签发（Let's Encrypt 的硬性规定）："+
+			"请先在「验证方式」里选一个 DNS 服务商并填上凭据")
+		return
+	}
+	if v, ok := m[certmgr.SettingDNSEnv]; ok && strings.TrimSpace(v) != "" {
+		if effProvider == "" {
+			fail(w, 400, "填了 DNS 凭据但没有选服务商：请在「验证方式」里选一个，或清空凭据")
+			return
+		}
+		info, _ := certmgr.LookupDNSProvider(effProvider)
+		if _, err := certmgr.ParseDNSEnv(v, info); err != nil {
+			fail(w, 400, info.Label+" 的凭据有误："+err.Error())
+			return
+		}
+		m[certmgr.SettingDNSEnv] = strings.TrimSpace(v)
+	}
+	if effProvider != "" {
+		// 选了服务商但两边都没有凭据：save 下来只会让下次检查报「没有填凭据」，
+		// 不如现在就说清楚。
+		stored, _ := a.Store.GetSetting(certmgr.SettingDNSEnv)
+		if strings.TrimSpace(stored) == "" && strings.TrimSpace(m[certmgr.SettingDNSEnv]) == "" {
+			info, _ := certmgr.LookupDNSProvider(effProvider)
+			fail(w, 400, info.Label+" 需要凭据：请填 "+strings.Join(info.Env, "、")+
+				"；若不想用 DNS-01，把「验证方式」改回 HTTP-01")
+			return
+		}
 	}
 	var changedKeys []string
 	var diff []string

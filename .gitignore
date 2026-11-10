@@ -21,6 +21,7 @@ design-preview/
 !.e2e/bypass-server.js
 !.e2e/first-paint-flicker.js
 !.e2e/inbound-addr.js
+!.e2e/acme-dns.js
 !.e2e/first-paint-server.js
 !.e2e/layout-check.js
 !.e2e/mutate-no-flicker.py
