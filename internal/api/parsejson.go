@@ -186,7 +186,10 @@ func fillClients(ib *importer.Inbound, settings map[string]any) []fillClient {
 	// 一个用户都没有：能建就建一个（端口转发 / 免认证代理本来就不需要用户）
 	if cred, kl := generateCredential(ib.Protocol, settings); cred != "" {
 		out = append(out, fillClient{
-			Name:       defaultUserName(ib),
+			// 与「直接新增入站」用同一套随机名（见 autouser.go）：以前叫
+			// `<入站名>-user1`，而导入的配置里 u1 / user1 满地都是，撞名之后
+			// 内核把它们当同一个人。名字短了反而更好抄进客户端。
+			Name:       randomUserName(),
 			Credential: cred,
 			Kind:       kl,
 			Auto:       true,
@@ -227,15 +230,6 @@ func generateCredential(protocol string, settings map[string]any) (string, strin
 		}
 	}
 	return "", ""
-}
-
-// defaultUserName 自动用户的默认名字：带上是哪条入站的，后面好认。
-func defaultUserName(ib *importer.Inbound) string {
-	base := strings.TrimSpace(ib.Name)
-	if base == "" {
-		base = fmt.Sprintf("%s-%d", ib.Protocol, ib.Port)
-	}
-	return base + "-user1"
 }
 
 // randSecret 生成 n 字节随机数的十六进制串（2n 个字符）。

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.9.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.9.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -831,6 +831,7 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .mirror-msg{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.55}
 .mirror-msg.ok{color:var(--ok)}
 .mirror-msg.err{color:var(--err)}
+.mirror-msg.warn{color:var(--warn)}
 .mirror-msg b{font-weight:600}
 
 /* ============ 表格 ============ */
@@ -2674,7 +2675,8 @@ canvas{display:block;width:100%}
       <div class="full"><label>分支（稳定版不含 alpha / beta / rc）</label>
         <div class="seg sm" id="vs_chan"></div></div>
       <div class="full"><label>可用版本（GitHub Releases，新 → 旧）</label>
-        <select id="vs_select" class="input" data-act="pickVersion"></select></div>
+        <select id="vs_select" class="input" data-act="pickVersion"></select>
+        <div class="mirror-msg warn" id="vs_compat" style="display:none"></div></div>
       <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
       <div class="full">
         <label>下载镜像<span class="muted" style="font-weight:400"> · 默认官方地址，连不上再换</span></label>
@@ -6206,6 +6208,14 @@ if (DEMO) {
     ]
   };
 }
+// demoAutoUserName 演示模式下的自动用户名：与后端同一套字母表（去掉 l/1/o/0），
+// 否则离线演示看到的名字和真机差别很大，截图对不上。
+function demoAutoUserName() {
+  const A = "abcdefghijkmnpqrstuvwxyz23456789";
+  let s = "";
+  for (let i = 0; i < 8; i++) s += A[Math.floor(Math.random() * A.length)];
+  return s;
+}
 async function mockRoute(path, opts) {
   await new Promise(r => setTimeout(r, 220));
   const m = opts.method || "GET";
@@ -6319,7 +6329,22 @@ async function mockRoute(path, opts) {
   // 演示模式：出站 / 路由 / DNS 的只读视图（真机由后端渲染当前配置得到）
   if (api === "outbounds" && m === "GET") return demoOutbounds(q.core || "xray");
   if (api === "inbounds" && m === "GET") return MDB.inbounds;
-  if (api === "inbounds" && m === "POST") { const b = Object.assign({}, opts.body); b.id = Math.max(0,...MDB.inbounds.map(x=>x.id))+1; b.enabled=false; b.draft=false; MDB.inbounds.push(b); return b; }
+  if (api === "inbounds" && m === "POST") {
+    const b = Object.assign({}, opts.body);
+    b.id = Math.max(0,...MDB.inbounds.map(x=>x.id))+1; b.enabled=false; b.draft=false;
+    // 与后端一致（见 api/autouser.go）：没带 clients 字段就自动建一个 8 位随机名
+    // 的用户；显式传空数组 = 这条入站不要用户（导入时取消勾选）。
+    let auto = "";
+    if (b.clients === undefined) {
+      auto = demoAutoUserName();
+      MDB.clients.push({client:{id:Math.max(0,...MDB.clients.map(x=>x.client.id))+1,
+        name:auto, credential:crypto.randomUUID(), sub_token:Math.random().toString(16).slice(2,14),
+        quota_gb:0, expires_at:null, enabled:true}, inbound_ids:[b.id]});
+    }
+    delete b.clients;
+    MDB.inbounds.push(b);
+    return Object.assign({}, b, auto ? {auto_client:auto, users:1} : {users:0});
+  }
   if (api === "inbounds" && m === "PUT") { const id=+rest.split("/")[1]; const i=MDB.inbounds.findIndex(x=>x.id===id); MDB.inbounds[i]=Object.assign({},MDB.inbounds[i],opts.body,{id}); return MDB.inbounds[i]; }
   if (api === "inbounds" && m === "DELETE") { MDB.inbounds = MDB.inbounds.filter(x=>x.id!==+rest.split("/")[1]); return {ok:1}; }
   if (api === "clients" && m === "GET") return MDB.clients;
@@ -6574,7 +6599,12 @@ async function mockRoute(path, opts) {
     const lists = {
       panel: [{tag:"v0.6.0",notes:"## 新版本\n- 演示数据：面板自身也有新版可升"},{tag:"v0.5.0"}],
       singbox: rich,
-      xray: [{tag:"v24.12.18"},{tag:"v24.11.30"}],
+      xray: [
+        // 26.7.11 起 REALITY 默认拒 mihomo 客户端（它把版本写死在 1.8.2）：
+        // 两条带标记，26.7.10 与 26.3.27 不带——边界在界面上一眼可见
+        {tag:"v26.10.31",mihomo_incompatible:true,notes:"## 常规更新\n- 传输层与 REALITY 若干修复"},
+        {tag:"v26.7.11",mihomo_incompatible:true,notes:"## 注意\n- REALITY 默认只接受 26.3.27 以上的客户端"},
+        {tag:"v26.7.10"},{tag:"v26.3.27"}],
       mihomo: [{tag:"v1.19.1"},{tag:"v1.19.0"}],
     };
     const releases = lists[comp] || rich;
@@ -11211,17 +11241,28 @@ async function saveInbound() {
       name: c.name, credential: c.credential,
       quota_gb: c.quota_gb || 0, expires_at: c.expires_at || null
     }));
+  } else if (!editing && __ibImpClients.length) {
+    // 解析出了用户但用户取消了勾选：明确传空数组 = 这条入站不要用户。
+    // 不传的话后端会当成「没人提过用户」而自动补一个随机用户，等于把用户
+    // 刚刚取消掉的勾选又替他点回去了。
+    body.clients = [];
   }
   try {
     if (editing) { await req("/api/inbounds/"+editing, { method:"PUT", body:Object.assign({},body,{id:+editing}) }); toast("入站已更新，如已启用请记得「应用配置」"); }
     else {
-      await req("/api/inbounds", { method:"POST", body });
-      toast(wantUsers
-        ? `入站已保存（未启用），同时提交 ${body.clients.length} 个用户`
-        : "入站已保存（未启用），确认无误后打开开关并应用");
+      const made = await req("/api/inbounds", { method:"POST", body });
+      // 后端在请求没带 clients 时会自动建一个用户（8 位随机名）。名字得说出来，
+      // 否则用户只知道「保存成功」，回头发现用户页多了一个不认识的人。
+      if (made && made.auto_client) {
+        toast(`入站已保存（未启用），已自动创建用户 ${made.auto_client}`, "ok");
+      } else {
+        toast(wantUsers
+          ? `入站已保存（未启用），同时提交 ${body.clients.length} 个用户`
+          : "入站已保存（未启用），确认无误后打开开关并应用");
+      }
+      if (wantUsers || (made && made.auto_client)) loadClients();
     }
     closeModal("mInbound");
-    if (wantUsers) loadClients();
     loadInbounds();
   } catch (e) { toast(e.message, "err"); }
 }
@@ -12791,7 +12832,14 @@ function updCellHTML(comp, cur) {
   const lat = verOf(u.tag), curv = verOf(cur);
   if (!lat || !curv) return `<span class="muted upd-none" title="当前版本无法比较">—</span>`;
   if (!verNewer(lat, curv)) return `<span class="muted upd-none">最新</span>`;
-  return `<span class="badge b-warn upd-new" title="可更新到 ${escHtml(u.tag)}（当前 ${escHtml(cur)}）">↑ ${escHtml(u.tag)}</span>`;
+  // 这个新版本与 mihomo 客户端不兼容（xray ≥ 26.7.11 的 REALITY 拒它）：
+  // 徽标上就要带出来。否则「↑ v26.x」看起来只是「有新版」，用户点进去之前
+  // 根本不会想到 REALITY 会因此连不上。
+  const ic = !!u.ic;
+  const title = `可更新到 ${u.tag}（当前 ${cur}）` +
+    (ic ? "；该版本的 REALITY 不接受 mihomo / Clash 客户端" : "");
+  return `<span class="badge b-warn upd-new" title="${escHtml(title)}">` +
+    `↑ ${escHtml(u.tag)}${ic ? " ⚠" : ""}</span>`;
 }
 function renderUpdCells() {
   if (!compData) return;
@@ -12815,7 +12863,9 @@ async function refreshComponentUpdates() {
     try {
       const j = await req("/api/updates/versions?component=" + c + "&channel=stable");
       const rel = (j.releases || [])[0];
-      out[c] = { tag: rel ? rel.tag : "" };
+      // ic 一起缓存：徽标要能立刻说「这个新版与 mihomo 客户端不兼容」，
+      // 而缓存在 localStorage 里的只有标签，重新判断需要再解析一次版本号。
+      out[c] = { tag: rel ? rel.tag : "", ic: !!(rel && rel.mihomo_incompatible) };
     } catch(e){ out[c] = { tag: "" }; }
   }));
   out.at = Date.now();
@@ -12931,6 +12981,8 @@ async function fetchVersions(comp, install = false) {
     $("vs_title").firstChild.textContent = install ? "安装 " : "更新 ";
     $("vs_confirm").textContent = install ? "安装选中版本" : "更新到选中版本";
     $("vs_url").value = ""; $("vs_sha").value = "";
+    // 兼容性提示跟着上一次选的版本走会误导人：新列表新判断
+    if ($("vs_compat")) { $("vs_compat").style.display = "none"; $("vs_compat").innerHTML = ""; }
     $("vs_confirm").disabled = false;
     // 每次打开都回到官方地址：上一次选的镜像不该悄悄延续到另一次安装
     await loadMirrors();
@@ -12964,7 +13016,8 @@ function renderVersionOptions() {
     return;
   }
   $("vs_select").innerHTML = verList.map((r, i) =>
-    `<option value="${i}">${r.tag}${r.prerelease ? " · 预发布" : ""}${r.sha256 ? " ✔" : ""}</option>`).join("");
+    `<option value="${i}">${r.tag}${r.prerelease ? " · 预发布" : ""}${r.sha256 ? " ✔" : ""}` +
+    `${r.mihomo_incompatible ? " · ⚠ 与 mihomo 不兼容" : ""}</option>`).join("");
   $("vs_confirm").disabled = false;
   pickVersion(); // 默认选中该分支最新版本并展示其 Release Notes
 }
@@ -12973,6 +13026,26 @@ function pickVersion() {
   if (!r) return;
   $("vs_url").value = r.url || ""; $("vs_sha").value = r.sha256 || "";
   if (!r.url) $("vs_url").placeholder = `将按官方地址自动下载 ${r.tag}`;
+  // 与 mihomo 不兼容的版本：选中的那一刻就把话说全。
+  // 说明必须具体到「谁的 REALITY 拒谁」，否则用户只会记住「这个版本不好」，
+  // 下次在别处又装回去。
+  const compat = $("vs_compat");
+  if (compat) {
+    if (r.mihomo_incompatible) {
+      compat.className = "mirror-msg warn";
+      compat.style.display = "";
+      compat.innerHTML = `<b>这个版本装上去以后，mihomo / Clash 客户端连不上 REALITY 节点。</b>` +
+        `${escHtml(r.tag)} 起 xray 的 REALITY 默认只接受 xray 26.3.27 以上的客户端，` +
+        `而 mihomo 把客户端版本写死在 1.8.2（MetaCubeX/mihomo#3039），握手会报 ` +
+        `<code>REALITY authentication failed</code>，服务端日志只说 authentication failed——` +
+        `节点参数其实是对的。不用 REALITY 的入站不受影响。要兼顾两条路：` +
+        `停在 26.3.27 或 1.8.x；或者客户端换 xray 内核（v2RayN / Shadowrocket / NekoBox）。`;
+    } else {
+      compat.className = "mirror-msg";
+      compat.style.display = "none";
+      compat.innerHTML = "";
+    }
+  }
   // Release Notes：轻量 markdown 渲染（标题/加粗/行内代码/列表/链接）
   const wrap = $("vs_notes_wrap"), box = $("vs_notes");
   if (r.notes && r.notes.trim()) {

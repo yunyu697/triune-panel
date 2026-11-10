@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.9.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.9.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -722,6 +722,7 @@ textarea{min-height:96px;font-family:var(--mono);font-size:12.5px;resize:vertica
 .mirror-msg{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.55}
 .mirror-msg.ok{color:var(--ok)}
 .mirror-msg.err{color:var(--err)}
+.mirror-msg.warn{color:var(--warn)}
 .mirror-msg b{font-weight:600}
 
 /* ============ 表格 ============ */
@@ -2565,7 +2566,8 @@ canvas{display:block;width:100%}
       <div class="full"><label>分支（稳定版不含 alpha / beta / rc）</label>
         <div class="seg sm" id="vs_chan"></div></div>
       <div class="full"><label>可用版本（GitHub Releases，新 → 旧）</label>
-        <select id="vs_select" class="input" data-act="pickVersion"></select></div>
+        <select id="vs_select" class="input" data-act="pickVersion"></select>
+        <div class="mirror-msg warn" id="vs_compat" style="display:none"></div></div>
       <div class="full"><label>下载 URL（选中版本后自动填入，也可直接粘贴任意地址）</label><input id="vs_url" class="input" placeholder="留空 = 按选中版本自动构造官方地址"></div>
       <div class="full">
         <label>下载镜像<span class="muted" style="font-weight:400"> · 默认官方地址，连不上再换</span></label>

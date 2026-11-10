@@ -31,6 +31,10 @@ func exportFixture(t *testing.T, a *Server, tok string, ins ...string) int64 {
 	h := a.Handler()
 	ids := make([]int64, 0, len(ins))
 	for i, body := range ins {
+		// 显式传空 clients：这些用例断言的是「导出怎么处理用户与入站」，
+		// 自己会建 alice。不传的话后端会给每条入站自动补一个随机用户
+		// （新增入站的默认行为，见 autouser.go），节点数就不是用例算的那样了。
+		body = strings.TrimSuffix(strings.TrimSpace(body), "}") + `,"clients":[]}`
 		in := mkInbound(t, h, tok, body)
 		if in.ID == 0 {
 			t.Fatalf("第 %d 个入站没拿到 ID: %s", i, body)

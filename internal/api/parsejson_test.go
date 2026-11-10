@@ -108,8 +108,16 @@ func TestParseJSONAutoUserWhenNoClients(t *testing.T) {
 	if c.Kind != "密码" {
 		t.Errorf("凭据类型 = %q，应为密码", c.Kind)
 	}
-	if c.Name != "trojan-1-user1" {
-		t.Errorf("默认用户名 = %q", c.Name)
+	// 自动补的用户名与「直接新增入站」同一套规则：8 位随机串（不含 l/1/o/0）。
+	// 曾经叫 `<入站名>-user1`，但导入的配置里 u1 / user1 满地都是，撞名之后
+	// 内核把它们当同一个人。
+	if len(c.Name) != autoUserNameLen {
+		t.Errorf("默认用户名应是 %d 位，实际 %q", autoUserNameLen, c.Name)
+	}
+	for _, r := range c.Name {
+		if !strings.ContainsRune(autoUserNameAlphabet, r) {
+			t.Errorf("默认用户名 %q 含字母表外的字符 %q", c.Name, r)
+		}
 	}
 	// 既然已经自动补了用户，就不能再保留「需要手动加用户」的提示
 	for _, w := range it.Warnings {

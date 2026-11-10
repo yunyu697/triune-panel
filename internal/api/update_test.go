@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -209,5 +210,72 @@ func TestComponentsIncludesPanelBinaryPath(t *testing.T) {
 		if c.Component == "" {
 			t.Error("内核条目缺 component")
 		}
+	}
+}
+
+// TestXrayVersionListMarksMihomoIncompatible 版本列表要标出「装上去 mihomo 连不上」的版本。
+//
+// 这条标记的价值在于**选之前**就看见：xray ≥ 26.7.11 的 REALITY 默认只接受
+// 26.3.27 以上的客户端，而 mihomo 把客户端版本写死在 1.8.2，于是握手报
+// REALITY authentication failed，节点参数却全对。等装完再去诊断页看结论，
+// 故障已经发生了。
+//
+// 判据与诊断页共用一条版本线（xrayTooNewForOldRealityClients），这里连边界
+// 一起钉住：26.7.10 不该标，26.7.11 必须标。
+func TestXrayVersionListMarksMihomoIncompatible(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"tag_name": "v26.10.31", "published_at": "2026-10-31T00:00:00Z"},
+			{"tag_name": "v26.7.11", "published_at": "2026-07-11T00:00:00Z"},
+			{"tag_name": "v26.7.10", "published_at": "2026-07-10T00:00:00Z"},
+			{"tag_name": "v26.3.27", "published_at": "2026-03-27T00:00:00Z"},
+		})
+	}))
+	defer srv.Close()
+	a := newRoleTestServer(t)
+	if err := a.Store.SetSetting("gh_api_base", srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	owner := loginAs(t, a, "admin", "admin")
+
+	w := do(a, owner, "GET", "/api/updates/versions?component=xray&channel=all", nil)
+	if w.Code != 200 {
+		t.Fatalf("版本列表应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Releases []struct {
+			Tag  string `json:"tag"`
+			Flag bool   `json:"mihomo_incompatible"`
+		} `json:"releases"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if len(resp.Releases) != 4 {
+		t.Fatalf("应有 4 条版本，实际 %d", len(resp.Releases))
+	}
+	want := map[string]bool{
+		"v26.10.31": true,
+		"v26.7.11":  true,  // 起始版本本身就拒
+		"v26.7.10":  false, // 边界下一条不该误伤
+		"v26.3.27":  false,
+	}
+	for _, r := range resp.Releases {
+		if r.Flag != want[r.Tag] {
+			t.Errorf("%s 的 mihomo_incompatible 应为 %v，实际 %v", r.Tag, want[r.Tag], r.Flag)
+		}
+	}
+
+	// 同一个判据不能渗到别的组件：sing-box / mihomo 没有 minClientVer 这套机制
+	if err := a.Store.SetSetting("gh_api_base", srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	w = do(a, owner, "GET", "/api/updates/versions?component=singbox&channel=all", nil)
+	if w.Code != 200 {
+		t.Fatalf("sing-box 版本列表应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "mihomo_incompatible") {
+		t.Errorf("sing-box 的版本不该带 mihomo 兼容标记: %s", w.Body.String())
 	}
 }

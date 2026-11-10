@@ -8,6 +8,54 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v1.9.2
+
+### xray 版本列表标出「与 mihomo 不兼容」的版本
+
+问题不在节点参数上，在版本线上：xray 从 **26.7.11** 起，`realitySettings` 不写
+`minClientVer` 时默认按 26.3.27 判定，而 mihomo 把 REALITY 客户端版本写死在 1.8.2
+（MetaCubeX/mihomo#3039）。于是升完 xray，mihomo / Clash 客户端报
+`REALITY authentication failed`，服务端日志只有一句 authentication failed——而
+「组件更新」当时只写「↑ v26.10.31」，看不出会付什么代价。
+
+- 版本列表的每条 release 带 `mihomo_incompatible`，前端在选项后追加
+  `· ⚠ 与 mihomo 不兼容`（边界：26.7.11 起标，26.7.10 不标）。
+- 选中这类版本时在下方展开说明：谁会失败、**不用 REALITY 的入站不受影响**、
+  两条出路（停在 26.3.27 / 1.8.x，或客户端换 xray 内核）。
+- 组件表「可更新」徽标也带 ⚠，title 里写明原因——徽标是「点进去之前唯一会看的东西」。
+- 判据与「入站自检 → 客户端兼容性」共用同一条版本线（`xrayTooNewForOldRealityClients`），
+  避免一处说别升、另一处还推荐升。
+
+### 新增入站时自动建一个用户
+
+以前新增入站不会有任何用户：入站建好、开关打开、应用成功、界面一片绿，但导不出
+链接、订阅是空的，用户完全看不出缺了什么。
+
+- 直接新增入站（请求里没有 `clients` 字段）时自动建一个用户，名字是 **8 位随机串**
+  （字母表去掉 `l` / `1` / `o` / `0`：它要被人抄进客户端），保存提示里写出这个名字。
+- 名字随机而不是 `<入站名>-user1`：导入的配置里 `u1` / `user1` 满地都是，撞名之后
+  内核把它们当同一个人（xray 的 email、sing-box 的 name 都要求唯一）。JSON 填表时
+  自动补的那个用户也统一成这套命名。
+- **导入的入站带了用户就按导入的信息建**，不会被随机值顶掉；`clients` 显式传空数组
+  表示「这条入站不要用户」（导入时取消勾选「一并创建用户」走的就是这条）。
+- 没有「用户」概念的协议不建：`direct`（端口转发）、`wireguard`（peers 不是用户）、
+  免认证的 `socks` / `http` / `mixed`；开了密码认证的 socks 才建 `用户名:密码`。
+
+### 验证
+
+- 新增回归：`TestXrayVersionListMarksMihomoIncompatible`（含 26.7.10 / 26.7.11 边界，
+  且 sing-box 列表不得出现该字段）、`TestCreateInboundAutoCreatesUser`、
+  `TestCreateInboundKeepsImportedClients`、`TestCreateInboundEmptyClientsMeansNoUsers`、
+  `TestCreateInboundSkipsUserlessProtocols`（direct / 免认证 socks / 认证 socks /
+  wireguard 四种）、`TestAutoUserNamesAreDistinctAndShort`、`TestRandomUserNameCoverage`。
+- 两处变异（去掉版本线标记、去掉自动建用户）让上述 4 条用例转红，逐字节还原后转绿。
+- `backups-hostopt.js` 54 → **69 项**：徽标 ⚠、列表标记数、边界不误标、选中展开/
+  切换隐藏、保存后提示写出自动用户名、用户数 +1 且名字是 8 位合规串。
+- `go vet` + `go test ./...` 全绿；离线 e2e `layout-check`（55/0）、`modal`（10/10）、
+  `view-restore`（47/0）、`workbench-command`（51/0）、`toast` 全过。
+
+---
+
 ## v1.9.1
 
 ### 修「加 hysteria2 入站后应用失败、内核停了却不回滚」

@@ -238,6 +238,99 @@ const ck = (n, want, got) => {
   ck("回退后修复按钮回来", true, afterRevert.btnBack);
   ck("回退后清空已修复区", "", afterRevert.areaText);
 
+  // ---- 9. 组件更新：xray 版本列表标出「与 mihomo 不兼容」的版本 ----
+  // 这条的价值在于**装之前**就看见：xray ≥ 26.7.11 的 REALITY 默认只接受
+  // 26.3.27 以上的客户端，mihomo 把客户端版本写死在 1.8.2，握手报
+  // REALITY authentication failed 而节点参数全对。所以既要看选项里的标记，
+  // 也要看选中后的说明，以及边界（26.7.10 不该误伤）。
+  await page.evaluate(() => document.querySelector('.nav-item[data-v="settings"]').click());
+  await page.waitForTimeout(700);
+  // 组件表的「可更新」徽标也要带提醒：只写「↑ v26.x」等于没说清楚代价。
+  // 先清掉 6 小时缓存，否则用的是上一次会话里存下的老结论。
+  await page.evaluate(async () => {
+    try { localStorage.removeItem("tp_comp_upd"); } catch(e) {}
+    await refreshComponentUpdates();
+  });
+  await page.waitForTimeout(400);
+  const badge = await page.evaluate(() => {
+    const el = document.getElementById("upd_xray");
+    const b = el && el.querySelector("[title]");
+    return { text: el ? el.textContent : "", title: b ? b.getAttribute("title") : "" };
+  });
+  ck("可更新徽标带不兼容提醒 ⚠", true, badge.text.includes("⚠"));
+  ck("徽标 title 点名 REALITY 限制", true, badge.title.includes("REALITY"));
+  await page.evaluate(() => fetchVersions("xray"));
+  await page.waitForTimeout(500);
+  const vers = await page.evaluate(() => {
+    const opts = [...document.querySelectorAll("#vs_select option")].map(o => o.textContent.trim());
+    const box = document.getElementById("vs_compat");
+    return {
+      open: document.getElementById("mVersions").classList.contains("show"),
+      opts,
+      marked: opts.filter(t => t.includes("与 mihomo 不兼容")).length,
+      boundary: (opts.find(t => t.startsWith("v26.7.10")) || "").includes("mihomo"),
+      oldest: (opts.find(t => t.startsWith("v26.3.27")) || "").includes("mihomo"),
+      shown: box.style.display !== "none",
+      text: box.textContent || "",
+    };
+  });
+  ck("版本列表弹窗打开", true, vers.open);
+  ck("xray 列表共 4 条", 4, vers.opts.length);
+  ck("不兼容版本恰好标了 2 条", 2, vers.marked);
+  ck("边界 26.7.10 不带标记", false, vers.boundary);
+  ck("26.3.27 不带标记", false, vers.oldest);
+  ck("默认选中最新（不兼容）时展开说明", true, vers.shown);
+  ck("说明点名 REALITY 与客户端版本", true,
+    vers.text.includes("REALITY") && vers.text.includes("mihomo"));
+
+  // 切到兼容版本：说明必须消失（不能留着上一个版本的结论）
+  await page.evaluate(() => {
+    const sel = document.getElementById("vs_select");
+    sel.selectedIndex = [...sel.options].findIndex(o => o.textContent.includes("26.3.27"));
+    pickVersion();
+  });
+  await page.waitForTimeout(150);
+  ck("选兼容版本后说明隐藏", false,
+    await page.evaluate(() => document.getElementById("vs_compat").style.display !== "none"));
+  // 再切回 26.7.11：起始版本本身就要报
+  await page.evaluate(() => {
+    const sel = document.getElementById("vs_select");
+    sel.selectedIndex = [...sel.options].findIndex(o => o.textContent.includes("26.7.11"));
+    pickVersion();
+  });
+  await page.waitForTimeout(150);
+  ck("起始版本 26.7.11 也带说明", true,
+    await page.evaluate(() => document.getElementById("vs_compat").textContent.includes("26.7.11")));
+  await page.evaluate(() => closeModal("mVersions"));
+
+  // ---- 10. 新增入站时自动建一个用户（8 位随机名） ----
+  // 不建的话：入站保存成功、应用成功、界面一片绿，但导不出链接、订阅是空的。
+  await page.evaluate(() => document.querySelector('.nav-item[data-v="inbounds"]').click());
+  await page.waitForTimeout(400);
+  const beforeUsers = await page.evaluate(() => req("/api/clients").then(x => x.length));
+  await page.evaluate(() => openInboundModal(null));
+  await page.waitForTimeout(400);
+  await page.evaluate(async () => {
+    document.getElementById("ib_name").value = "e2e-auto";
+    document.getElementById("ib_port").value = "26301";
+    await saveInbound();
+  });
+  await page.waitForTimeout(700);
+  const autoRes = await page.evaluate(async () => {
+    const cs = await req("/api/clients");
+    return {
+      n: cs.length,
+      names: cs.map(x => x.client.name),
+      toast: [...document.querySelectorAll(".toast")].map(t => t.textContent).join(" | "),
+      modalClosed: !document.getElementById("mInbound").classList.contains("show"),
+    };
+  });
+  ck("保存成功后弹窗关闭", true, autoRes.modalClosed);
+  ck("自动建了 1 个用户", beforeUsers + 1, autoRes.n);
+  ck("提示里写出自动用户名", true, /已自动创建用户/.test(autoRes.toast));
+  const autoName = autoRes.names.find(n => /^[abcdefghijkmnpqrstuvwxyz23456789]{8}$/.test(n));
+  ck("用户名是 8 位、不含 l/1/o/0", true, !!autoName);
+
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   await browser.close();
   process.exit(fail ? 1 : 0);

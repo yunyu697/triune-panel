@@ -168,9 +168,12 @@ func TestExportSummaryCountsZeroNodes(t *testing.T) {
 	h := a.Handler()
 	tok := loginForToken(t, a)
 
+	// clients 显式传空：这条用例要的正是「一个用户都没有」的入站。
+	// 不传这个字段，新建入站会按默认行为自动补一个随机用户（见 autouser.go），
+	// 那测的就不是零节点了。
 	body := `{"name":"nouser-01","core":"xray","protocol":"vless","listen":"127.0.0.1",
 		"port":24564,"tag":"nouser-01","transport":"tcp","tls":"none","enabled":true,
-		"settings":"{}"}`
+		"settings":"{}","clients":[]}`
 	in := mkInbound(t, h, tok, body)
 
 	w := apiReq(t, h, tok, "GET", "/api/inbounds/"+itoa64(in.ID)+"/export?format=summary", "")

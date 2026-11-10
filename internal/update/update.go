@@ -47,6 +47,16 @@ type Release struct {
 	AssetAPIURLs map[string]string `json:"-"`
 	Prerelease   bool              `json:"prerelease"`             // 预发布（alpha/beta/rc）
 	PublishedAt  string            `json:"published_at,omitempty"` // RFC3339，仅用于排序兜底
+	// MihomoIncompatible 标记「这个版本装上去以后，mihomo 客户端会连不上」。
+	//
+	// 目前只有 xray 会带这个标记：xray ≥ 26.7.11 的 REALITY 默认只接受
+	// 26.3.27 以上的客户端，而 mihomo 把 REALITY 客户端版本写死在 1.8.2
+	// （MetaCubeX/mihomo#3039），于是握手报 `REALITY authentication failed`，
+	// 服务端日志只说 authentication failed——节点参数其实全对。
+	//
+	// 由 api 层按版本线填（这里只存结论，不判断内核语义）：版本列表拿到的
+	// 是 GitHub 的原始数据，而「哪条版本线开始不兼容」是面板的产品知识。
+	MihomoIncompatible bool `json:"mihomo_incompatible,omitempty"`
 	// UpdatedAt 资产最后一次刷新的时间（滚动 tag 用；普通 release 与 PublishedAt 相同）。
 	UpdatedAt string `json:"updated_at,omitempty"`
 }

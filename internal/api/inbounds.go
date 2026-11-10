@@ -34,12 +34,14 @@ func (a *Server) listInbounds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
-	// clients 是可选的「顺手建的用户」：从 JSON 填表时，用户和入站是一起
-	// 确认过的，分两个请求去建会出现「入站建好了、用户没建上」的半截状态，
-	// 而这个半截状态在面板上看起来和成功一模一样（只是没人能连上）。
+	// Clients 用指针：区分「没传这个字段」和「传了空数组」。
+	//
+	// 没传 = 面板自己新增入站，没人提过用户，顺手补一个（见 autouser.go）；
+	// 传了空数组 = 调用方明确不要用户（例如导入时取消了「一并创建用户」），
+	// 这时再自动补一个就是违背用户意图。
 	var req struct {
 		model.Inbound
-		Clients []inboundClientSpec `json:"clients"`
+		Clients *[]inboundClientSpec `json:"clients"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, 400, err.Error())
@@ -71,7 +73,18 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	// 入站建好之后再建用户并绑定；单个用户失败不影响入站本身（已建），
 	// 但会写日志，避免「静默少了几个用户」。
-	made := a.createInboundClients(&in, req.Clients)
+	//
+	// 请求里没提 clients 时自动补一个用户：新建入站最常见的下一句是「链接呢」，
+	// 而没人绑定的入站导不出任何链接。名字是 8 位随机串，理由见 autouser.go。
+	var specs []inboundClientSpec
+	autoUser := ""
+	if req.Clients != nil {
+		specs = *req.Clients
+	} else if s, ok := a.autoInboundClient(&in); ok {
+		specs = []inboundClientSpec{s}
+		autoUser = s.Name
+	}
+	made := a.createInboundClients(&in, specs)
 	// 自动放行防火墙端口：仅非草稿、且开启自动管理时。草稿是导入预览，
 	// 未参与渲染，待「取消草稿」转正时（updateInbound）再放行。
 	if fwAuto(a) && !in.Draft {
@@ -85,11 +98,25 @@ func (a *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 	if in.Draft {
 		detail += "（草稿）"
 	}
-	if made > 0 {
+	switch {
+	case autoUser != "" && made > 0:
+		detail += "，自动建用户 " + autoUser
+	case made > 0:
 		detail += fmt.Sprintf("，同时建 %d 个用户", made)
 	}
 	a.changed(r, AuditInboundCreate, in.Name, detail)
-	writeJSON(w, 200, in)
+	writeJSON(w, 200, inboundCreated{Inbound: in, AutoClient: autoUser, Users: made})
+}
+
+// inboundCreated 建入站的响应。
+//
+// 入站字段仍然平铺在顶层（老调用方把它解成 model.Inbound 不受影响），只多给
+// 两个字段说明「顺手建了谁」——界面要把这个名字说出来，否则用户得自己去用户页
+// 才能发现多了一个人。
+type inboundCreated struct {
+	model.Inbound
+	AutoClient string `json:"auto_client,omitempty"`
+	Users      int    `json:"users"` // 本次真正建成的用户数（含导入带进来的）
 }
 
 // inboundClientSpec 建入站时顺带建的用户（从 JSON 填表时带上）。

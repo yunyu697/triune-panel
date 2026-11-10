@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"triune/internal/core"
+	"triune/internal/model"
 	"triune/internal/update"
 )
 
@@ -138,7 +139,26 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err.Error())
 		return
 	}
+	markMihomoIncompat(comp, rels)
 	writeVersions(w, comp, "github", rels, channel)
+}
+
+// markMihomoIncompat 给版本列表打上「装上之后 mihomo 客户端连不上」的标记。
+//
+// 判据与诊断页的「客户端兼容性」是同一条版本线（xrayTooNewForOldRealityClients），
+// 两处必须一起改——一边说 26.7.11 之后不行、另一边还推荐升级，等于换了一个
+// 地方骗人。
+//
+// 标记打在**版本**上而不是「当前配置有没有 REALITY」上：用户是在选版本的
+// 那一刻决定要不要升的，等装完再去诊断页看结论，故障已经发生了。详情由前端
+// 在选中该版本时展开（它知道用户选的是哪一条）。
+func markMihomoIncompat(component string, rels []update.Release) {
+	if component != model.CoreXray {
+		return // sing-box / mihomo 没有 minClientVer 这套机制
+	}
+	for i := range rels {
+		rels[i].MihomoIncompatible = xrayTooNewForOldRealityClients(rels[i].Tag)
+	}
 }
 
 // fillPanelAssetURL 给每条 release 挑出「本机这个平台」的二进制直链填进 url。
