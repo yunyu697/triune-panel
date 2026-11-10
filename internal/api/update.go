@@ -53,21 +53,39 @@ func (a *Server) handleComponents(w http.ResponseWriter, r *http.Request) {
 				entry["version_error"] = err.Error()
 			}
 		}
-		if p, err := a.Pipe.ConfigPath(name); err == nil {
-			if st, serr := os.Stat(p); serr == nil {
-				entry["config_exists"] = !st.IsDir()
+		// Pipe / ProcMgr 判空：正常运行时一定装了，但这个接口是设置页一进来就调的，
+		// 一旦哪天在没装管道的环境里被调到，panic 会把整个请求打断（页面整块空白），
+		// 而这里少给一个字段只是少显示一个状态而已。
+		if a.Pipe != nil {
+			if p, err := a.Pipe.ConfigPath(name); err == nil {
+				if st, serr := os.Stat(p); serr == nil {
+					entry["config_exists"] = !st.IsDir()
+				}
 			}
 		}
-		running, _ := a.ProcMgr.Status(name)
-		entry["running"] = running
+		if a.ProcMgr != nil {
+			running, _ := a.ProcMgr.Status(name)
+			entry["running"] = running
+		}
 		backups, _ := update.ListBackups(a.backupDirFor(name))
 		entry["backups"] = backups
 		cores = append(cores, entry)
 	}
 	writeJSON(w, 200, map[string]any{
-		"panel": map[string]any{"component": "panel", "version": Version},
+		// 面板自己的可执行文件路径：组件表有一列「路径」，面板那行不能空着。
+		// 取不到就留空，前端显示「—」，不为一行路径让整个接口失败。
+		"panel": map[string]any{"component": "panel", "version": Version, "bin": panelExe()},
 		"cores": cores,
 	})
+}
+
+// panelExe 返回面板自身的可执行文件路径；取不到返回空串。
+func panelExe() string {
+	exe, err := selfExe()
+	if err != nil {
+		return ""
+	}
+	return exe
 }
 
 // GET /api/updates/versions?component=panel|singbox|xray|mihomo&channel=all|stable|prerelease

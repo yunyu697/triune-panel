@@ -160,8 +160,9 @@ const ck = (n, want, got) => {
     await page.waitForTimeout(400);
     const m = await page.evaluate((LONG) => {
       const rows = document.querySelectorAll("#updtbody tr");
-      if (rows[1]) rows[1].children[1].textContent = LONG.singbox;
-      if (rows[2]) rows[2].children[1].textContent = LONG.mihomo;
+      // 版本列是第 3 格（组件 / 路径 / 当前版本 / 可更新 / 状态 / 操作）
+      if (rows[1]) rows[1].children[2].textContent = LONG.singbox;
+      if (rows[2]) rows[2].children[2].textContent = LONG.mihomo;
       const card = document.getElementById("set_card_update");
       const wrap = card.querySelector(".tbl-wrap");
       const btns = [...card.querySelectorAll("#updtbody .btn")];
@@ -170,6 +171,57 @@ const ck = (n, want, got) => {
     }, LONG_VER);
     ck(`${w}px：长版本串下操作按钮仍在卡片内（${m.n} 个）`, true, m.over <= 1);
     ck(`${w}px：组件更新表不需要横向滑动`, true, m.hscroll <= 1);
+    await page.close();
+  }
+
+  // ---- 2.5.1 组件更新表的列宽与对齐 ----
+  // 三代坑都在这张表上：长版本串把「操作」顶出卡片 → 修好后「组件」列反过来
+  // 吃掉全部剩余空间（573px，里面只有「singbox」四个字）→ 「操作」列的下拉比
+  // 按钮高 2px，按钮不在一条基线上。这几条断言量的都是「看不见的布局」：
+  // 只断言「元素存在」抓不到比例失调。
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.goto(URL);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      document.querySelector('.nav-item[data-v="settings"]').click();
+      document.querySelector('#set_sect_seg button[data-sect="maintain"]').click();
+    });
+    await page.waitForTimeout(1400);
+    const r = await page.evaluate(() => {
+      const tbl = document.querySelector(".upd-tbl");
+      const ths = [...tbl.querySelectorAll("thead th")];
+      const w = ths.map(t => Math.round(t.getBoundingClientRect().width));
+      // 「可更新」列的徽标起点要每行一致
+      const badges = [...tbl.querySelectorAll("tbody tr")].map(tr => {
+        const cell = tr.children[3];
+        if (!cell) return null;
+        const b = cell.querySelector(".badge");
+        return b ? Math.round(b.getBoundingClientRect().left) : null;
+      }).filter(v => v !== null);
+      // 操作列：同一行里的按钮必须同一基线、同一高度
+      const rows = [...tbl.querySelectorAll("tbody tr")].map(tr => {
+        const acts = [...tr.querySelectorAll(".upd-acts > *")];
+        if (acts.length < 2) return null;
+        const ys = acts.map(a => Math.round(a.getBoundingClientRect().y));
+        const hs = acts.map(a => Math.round(a.getBoundingClientRect().height));
+        return { sameY: new Set(ys).size === 1, sameH: new Set(hs).size === 1, n: acts.length };
+      }).filter(Boolean);
+      return {
+        cols: w,
+        badgeLeft: badges,
+        badgeAligned: new Set(badges).size === 1,
+        rows,
+        allSameY: rows.every(x => x.sameY),
+        allSameH: rows.every(x => x.sameH),
+      };
+    });
+    ck("组件更新表是六列（组件/路径/当前版本/可更新/状态/操作）", 6, r.cols.length);
+    ck("组件列收窄到 220px 以内（原来会吃掉全部剩余空间）", true, r.cols[0] <= 220);
+    ck("「可更新」列有独立宽度", true, r.cols[3] >= 90);
+    ck("更新徽标每行起点一致", true, r.badgeAligned);
+    ck("操作列按钮同一基线", true, r.allSameY);
+    ck("操作列按钮同高（下拉不再比按钮高 2px）", true, r.allSameH);
     await page.close();
   }
 

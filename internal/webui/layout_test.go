@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -198,17 +199,20 @@ func TestSettingsTabsShareCardShell(t *testing.T) {
 	}
 }
 
-// TestComponentTableKeepsActionsVisible 组件更新表的「操作」列不许被版本号挤出去。
+// TestComponentTableKeepsActionsVisible 组件更新表的列宽与对齐不许被改坏。
 //
-// 内核的版本串是二进制自己输出的第一行：mihomo 的 `-v` 是
-// 「Mihomo Meta v1.19.1 linux amd64 with go1.24.1 Sat Jun 21 2025」，60 多个字符。
-// 而全局 td 是 `white-space:nowrap`，这一格会把整张表顶宽，最后一列（操作）
-// 被推到卡片外面——用户看到的就是「按钮被版本号遮住了」。修法有三处，缺一不可：
-//  1. 版本列允许换行（nowrap 会让 min-content 等于整行长度）；
-//  2. 操作列 `width:1%`，按内容收缩，永远分到它需要的宽度；
-//  3. 窄屏（≤360px）四列实在挤不下时改成两行式，而不是靠横向滑动藏按钮。
+// 这张表走过三代坑：
+//  1. 内核 `-v` 的整行输出（mihomo 是「Mihomo Meta v1.19.1 linux amd64 with
+//     go1.24.1 Sat Jun 21 2025」）塞进「当前版本」列，td 默认 nowrap，整张表被
+//     这一格顶宽，「操作」列被推出卡片——用户看到的就是「按钮被版本号遮住了」；
+//  2. 修好之后，「组件」列反而吃掉了全部剩余空间（实测 573px，里面只有
+//     「singbox」四个字），比例完全失调；且列宽写死 px，卡片宽度跟着侧栏变
+//     （侧栏展开时 701～1116px）时「操作」列会被压成 0；
+//  3. 「操作」列的下拉比按钮高 2px（29 vs 27），一列看下来按钮不在一条基线上。
 //
-// 颜色/尺寸之外这类「看不见的布局」最容易在改表格样式时被顺手删掉，钉住。
+// 现在：table-layout:fixed + 百分比列宽（随卡片等比缩放）、「可更新」列有独立
+// 一列、操作列用 flex 统一 26px 高。这些都是「看不见的布局」，最容易在改表格
+// 样式时被顺手删掉，钉住。
 func TestComponentTableKeepsActionsVisible(t *testing.T) {
 	html := string(indexHTML)
 	css := stripCSSComments(html)
@@ -216,29 +220,70 @@ func TestComponentTableKeepsActionsVisible(t *testing.T) {
 	if !strings.Contains(html, `<table class="upd-tbl">`) {
 		t.Fatal("组件更新表丢了 class=\"upd-tbl\"，下面的列宽规则会全部失效")
 	}
+	// 表头必须还是六列，少一列整张表就会错位。
+	head := `<thead><tr><th>组件</th><th>路径</th><th>当前版本</th><th>可更新</th><th>状态</th><th class="ta-r">操作</th></tr></thead>`
+	if !strings.Contains(html, head) {
+		got := ""
+		for _, ln := range strings.Split(html, "\n") {
+			if strings.Contains(ln, "<th>组件") {
+				got = strings.TrimSpace(ln)
+				break
+			}
+		}
+		t.Errorf("组件更新表表头应固定为六列（组件/路径/当前版本/可更新/状态/操作），实际：%s", got)
+	}
 
-	ver := cssRule(t, css, ".upd-tbl td:nth-child(2)")
-	for _, frag := range []string{"white-space:normal", "overflow-wrap:anywhere"} {
-		if !strings.Contains(ver, frag) {
-			t.Errorf(".upd-tbl 版本列缺 %q：长版本串会把表格顶宽，操作列被推出卡片", frag)
+	// 固定布局 + 百分比列宽：卡片宽度随侧栏变化，px 会把操作列压成 0。
+	if tbl := cssRule(t, css, ".upd-tbl"); !strings.Contains(tbl, "table-layout:fixed") {
+		t.Errorf(".upd-tbl 必须 table-layout:fixed，实际 %q", tbl)
+	}
+	for i, want := range []string{"13%", "20%", "23%", "14%", "10%"} {
+		sel := fmt.Sprintf(".upd-tbl th:nth-child(%d)", i+1)
+		got := cssRule(t, css, sel)
+		if !strings.Contains(got, "width:"+want) {
+			t.Errorf("%s 应为百分比列宽 width:%s，实际 %q", sel, want, got)
 		}
 	}
-	if act := cssRule(t, css, ".upd-tbl th:nth-child(4)"); !strings.Contains(act, "width:1%") {
-		t.Error(".upd-tbl 操作列必须 width:1%（按内容收缩），否则会被版本列挤掉")
+
+	// 版本列与路径列必须允许换行，否则长串会把表格顶宽。
+	for _, sel := range []string{".upd-tbl td:nth-child(2)", ".upd-tbl td:nth-child(3)"} {
+		rule := cssRule(t, css, sel)
+		for _, frag := range []string{"white-space:normal", "overflow-wrap:anywhere"} {
+			if !strings.Contains(rule, frag) {
+				t.Errorf("%s 缺 %q：长串会把表格顶宽，操作列被推出卡片", sel, frag)
+			}
+		}
 	}
 
-	// 窄屏兜底：320px 上四列怎么压都差几十像素，必须换成两行式。
-	i := strings.Index(css, "@media (max-width:360px)")
-	if i < 0 {
-		t.Fatal("缺少 ≤360px 的组件表兜底：320px 下操作按钮会落在视口外")
+	// 操作列：flex + 统一高度，否则下拉比按钮高 2px，按钮不在一条基线上。
+	acts := cssRule(t, css, ".upd-acts")
+	for _, frag := range []string{"display:flex", "align-items:center", "justify-content:flex-end", "gap:6px"} {
+		if !strings.Contains(acts, frag) {
+			t.Errorf(".upd-acts 缺 %q：操作按钮会不在同一基线上", frag)
+		}
 	}
-	block := css[i:]
-	if j := strings.Index(block, "\n}"); j >= 0 {
-		block = block[:j]
+	if h := cssRule(t, css, ".upd-acts .btn.sm,.upd-acts .sel-sm"); !strings.Contains(h, "height:26px") {
+		t.Errorf("操作列的下拉与按钮应统一 26px 高，实际 %q", h)
+	}
+
+	// 窄屏兜底：卡片窄到放不下六列时改成两行式，而不是靠横向滑动藏按钮。
+	// 注意 index.html 里有多处 @media (max-width:760px)，得找「装着 .upd-tbl 规则」
+	// 的那一处，不能只认第一处。
+	grid := strings.Index(css, ".upd-tbl tr{display:grid")
+	if grid < 0 {
+		t.Fatal("缺少窄屏两行式兜底：六列在窄卡片上挤不下，操作按钮会被挤出卡片")
+	}
+	q := strings.LastIndex(css[:grid], "@media (max-width:")
+	if q < 0 {
+		t.Fatal("两行式兜底不在媒体查询里")
+	}
+	if !strings.Contains(css[q:grid], "max-width:760px") {
+		t.Errorf("两行式兜底应落在 ≤760px（卡片窄于这个宽度就放不下六列），实际 %q",
+			css[q:q+40])
 	}
 	for _, frag := range []string{".upd-tbl thead{display:none}", ".upd-tbl tr{display:grid"} {
-		if !strings.Contains(block, frag) {
-			t.Errorf("≤360px 兜底缺 %q：四列在 320px 上挤不下，按钮又会被挤出去", frag)
+		if !strings.Contains(css[q:grid+40], frag) {
+			t.Errorf("窄屏兜底缺 %q：六列在窄卡片上挤不下，按钮又会被挤出去", frag)
 		}
 	}
 
@@ -251,9 +296,35 @@ func TestComponentTableKeepsActionsVisible(t *testing.T) {
 	for _, frag := range []string{
 		`class="mono upd-ver" title="${escHtml(c.version || "")}"`,
 		`class="muted mono upd-bin" title="${escHtml(c.bin || "")}"`,
+		// 「可更新」列：徽标位置每行要一致，所以必须是表格里独立的一格。
+		`class="upd-upd" id="upd_${escHtml(c.component)}"`,
+		`<div class="upd-acts">`,
 	} {
 		if !strings.Contains(src, frag) {
 			t.Errorf("app.js 缺 %q：版本/路径未转义或丢了 title（长串截断后看不到全文）", frag)
+		}
+	}
+}
+
+// TestComponentUpdateCheckIsCached 更新检测会打 GitHub，必须有频率控制。
+//
+// 匿名 GitHub API 每 IP 每小时只有 60 次请求。这张表一进来就要问四个组件的
+// 最新版本，没有缓存就是每次进设置页都问一遍，必然被限流——而限流表现为
+// 「可更新」列永远是空的，还很难联想到是频率问题。
+func TestComponentUpdateCheckIsCached(t *testing.T) {
+	app, _, err := AssetFile("app.js")
+	if err != nil {
+		t.Fatalf("读 app.js 失败: %v", err)
+	}
+	src := string(app)
+	for _, frag := range []string{
+		`const UPD_TTL = 6 * 3600 * 1000`,
+		`localStorage.setItem(UPD_KEY`,
+		`localStorage.getItem(UPD_KEY)`,
+		`&channel=stable`,
+	} {
+		if !strings.Contains(src, frag) {
+			t.Errorf("app.js 缺 %q：更新检查没有频率控制会撞 GitHub 匿名限流", frag)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.8.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.9.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -744,49 +744,60 @@ tbody tr:last-child td{border-bottom:none}
 td.ta-r,th.ta-r{text-align:right}
 td.num{font-variant-numeric:tabular-nums}
 
-/* 组件更新表：内核 `-v` 的第一行可能很长（mihomo 是
+/* 组件更新表：
+   内核 `-v` 的第一行可能很长（mihomo 是
    「Mihomo Meta v1.19.1 linux amd64 with go1.24.1 Sat Jun 21 2025」），
-   而 td 默认 nowrap，整张表会被这一格撑宽，「操作」列被推出卡片右侧——
-   看起来就像按钮被版本号遮住了。这里只对这一张表放开换行，
-   并把操作列钉成「按内容收缩」，按钮就不会再被挤出去。 */
-.upd-tbl th:nth-child(2){width:284px}
-.upd-tbl th:nth-child(3){width:84px}
-.upd-tbl th:nth-child(4){width:1%}
-.upd-tbl td:nth-child(1){max-width:264px}
-.upd-tbl td:nth-child(1) .mono{white-space:normal;overflow-wrap:anywhere}
-.upd-tbl td:nth-child(2){white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:12.5px}
+   而 td 默认 nowrap。早期版本把这一整行塞进「当前版本」列，表格又是 width:100%，
+   没定宽的「组件」列会把剩余空间全吃掉——实测组件列 573px（里面只有
+   「singbox」四个字），「操作」列只剩 175px，「下拉 + 一键安装」塞不下，
+   按钮被迫换行、只露出「一键」。现在改成：
+     · 各列定宽（table-layout:fixed），比例稳定，组件列收窄；
+     · 新增「可更新」列，提示可升版本，徽标起点每行一致；
+     · 「操作」列用 flex：按钮同行等高、间距一致，宽度不够时整组换行。 */
+.upd-tbl{table-layout:fixed}
+/* 列宽用百分比而不是固定 px：卡片宽度跟着侧栏变（侧栏展开时 701～1116px，
+   收起时又是另一档），固定 px 会把「操作」列压成 0、按钮溢出卡片。
+   百分比在 table-layout:fixed 下按表格宽度等比缩放，任何宽度都稳。 */
+.upd-tbl th,.upd-tbl td{padding:11px 10px}
+.upd-tbl th:nth-child(1){width:13%}
+.upd-tbl th:nth-child(2){width:20%}
+.upd-tbl th:nth-child(3){width:23%}
+.upd-tbl th:nth-child(4){width:14%}
+.upd-tbl th:nth-child(5){width:10%}
+.upd-tbl td:nth-child(1){min-width:0}
+.upd-tbl td:nth-child(2){white-space:normal;overflow-wrap:anywhere;line-height:1.45;font-size:12px}
+.upd-tbl td:nth-child(3){white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:12.5px}
+.upd-tbl td:nth-child(4){white-space:normal}
+/* 「可更新」列：徽标左对齐，各行起点一致；没有新版本时只留一个淡灰短横 */
+.upd-none{font-size:12px;opacity:.75}
+.upd-new{white-space:nowrap}
+/* 操作列：统一 26px 高、同一基线、间距 6px。
+   下拉原来比按钮高 2px（29 vs 27），一列看下来按钮不在一条基线上。 */
+.upd-acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px}
+.upd-acts .btn.sm,.upd-acts .sel-sm{height:26px;flex:none}
+.upd-acts .sel-sm + .btn{margin-left:0}
 @media (max-width:760px){
-  /* 窄屏没有「版本列定宽」的余地：交还自动布局，允许按钮折行，宁可横向滑动也不压住按钮。 */
-  .upd-tbl th:nth-child(2){width:auto}
-  .upd-tbl td:nth-child(1){max-width:150px}
-  .upd-tbl td:nth-child(4){white-space:normal}
-}
-@media (max-width:560px){
-  /* 手机宽度下四列只有约 300px 可用：整体收一档，让「操作」留在视口里，
-     而不是靠横向滑动才能点到（那和「被遮挡」在体感上没有区别）。 */
+  /* 六列在任何窄卡片里都放不下（组件名、徽标、按钮各自 nowrap），
+     与其让它横向滑动、把「操作」推到视口外，不如整体收一档并改成两行式：
+     组件 + 可更新一行，路径与版本各占一行，状态与按钮各占一角。 */
   .upd-tbl th,.upd-tbl td{padding:9px 6px}
-  .upd-tbl td:nth-child(1){max-width:88px}
   .upd-tbl .btn.sm{padding:3px 7px;font-size:11.5px}
   .upd-tbl .badge{font-size:10.5px;padding:1px 6px}
   .upd-tbl .sel-sm{max-width:78px;padding:3px 16px 3px 6px;font-size:11.5px}
   /* overflow-wrap:anywhere 在表格里不总能压住 min-content，窄屏再加一道 break-all：
      版本串本来就该按字符断，宁可断得难看，也不能把「操作」顶出去。 */
-  .upd-tbl td:nth-child(2){word-break:break-all}
-}
-@media (max-width:360px){
-  /* 320px 的老机型四列怎么压都差三四十像素，与其让它横向滑动、
-     把「操作」推到视口外，不如改成两行式：组件 + 状态一行，版本与按钮各占一行。
-     只在这一张表上生效，其它表格维持原样的紧凑排版。 */
+  .upd-tbl td:nth-child(3){word-break:break-all}
   .upd-tbl thead{display:none}
   .upd-tbl tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;
     padding:10px 4px;border-bottom:1px solid var(--line)}
   .upd-tbl tr:last-child{border-bottom:none}
   .upd-tbl td{border:none;padding:0;white-space:normal}
-  .upd-tbl td:nth-child(1){grid-column:1;max-width:none}
-  .upd-tbl td:nth-child(2){grid-column:1/-1;color:var(--muted)}
-  .upd-tbl td:nth-child(3){grid-column:2;text-align:right}
-  .upd-tbl td:nth-child(4){grid-column:1/-1;text-align:left;margin-top:4px}
-  .upd-tbl .upd-bin{display:none}
+  .upd-tbl td:nth-child(1){grid-area:1/1;max-width:none}
+  .upd-tbl td:nth-child(2){grid-area:2/1/3/3;color:var(--muted);font-size:11.5px}
+  .upd-tbl td:nth-child(3){grid-area:3/1;color:var(--muted)}
+  .upd-tbl td:nth-child(4){grid-area:1/2;justify-self:end}
+  .upd-tbl td:nth-child(5){grid-area:3/2;justify-self:end}
+  .upd-tbl td:nth-child(6){grid-area:4/1/5/3;justify-self:end;margin-top:4px}
 }
 .empty{padding:34px;text-align:center;color:var(--muted);font-size:13px}
 .progress{width:110px;height:7px;background:var(--line);border-radius:99px;display:inline-block;vertical-align:middle;overflow:hidden}
@@ -2064,8 +2075,8 @@ canvas{display:block;width:100%}
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
         <div class="tbl-wrap"><table class="upd-tbl">
-          <thead><tr><th>组件</th><th>当前版本</th><th>状态</th><th class="ta-r">操作</th></tr></thead>
-          <tbody id="updtbody"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
+          <thead><tr><th>组件</th><th>路径</th><th>当前版本</th><th>可更新</th><th>状态</th><th class="ta-r">操作</th></tr></thead>
+          <tbody id="updtbody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
         </table></div>
         <p class="muted" style="margin-top:10px">
           <b>装到哪里</b>：未配置路径的内核，一键安装会装进面板专用目录 <code>data/bin/&lt;内核&gt;/</code>，

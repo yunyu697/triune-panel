@@ -168,3 +168,46 @@ func TestResolveCoreAssetAPIURL(t *testing.T) {
 		t.Errorf("找不到目标 release 时应返回空串，实际 %q", got)
 	}
 }
+
+// TestComponentsIncludesPanelBinaryPath 组件接口要带上面板自己的可执行文件路径。
+//
+// 组件更新表的「路径」列是给四个组件都留了位置的，面板那行不能空着——
+// 空着会让人以为面板没有独立二进制。取不到路径时留空串即可（前端显示「—」），
+// 但不能因为取不到就让整个接口失败。
+func TestComponentsIncludesPanelBinaryPath(t *testing.T) {
+	a := newRoleTestServer(t)
+	owner := loginAs(t, a, "admin", "admin")
+	w := do(a, owner, "GET", "/api/components", nil)
+	if w.Code != 200 {
+		t.Fatalf("/api/components 应 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Panel struct {
+			Component string `json:"component"`
+			Version   string `json:"version"`
+			Bin       string `json:"bin"`
+		} `json:"panel"`
+		Cores []struct {
+			Component string `json:"component"`
+			Bin       string `json:"bin"`
+			BinSet    bool   `json:"bin_set"`
+		} `json:"cores"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if out.Panel.Component != "panel" || out.Panel.Version == "" {
+		t.Errorf("面板条目应有 component/version，实际 %+v", out.Panel)
+	}
+	if out.Panel.Bin == "" {
+		t.Error("面板条目应带自己的可执行文件路径（组件表有「路径」列）")
+	}
+	if len(out.Cores) != 3 {
+		t.Fatalf("应有三个内核条目，实际 %d", len(out.Cores))
+	}
+	for _, c := range out.Cores {
+		if c.Component == "" {
+			t.Error("内核条目缺 component")
+		}
+	}
+}

@@ -1444,7 +1444,7 @@ async function mockRoute(path, opts) {
     ];
   }
   if (api === "components") return {
-    panel:{component:"panel",version:"v0.5.0-demo"},
+    panel:{component:"panel",version:"v0.5.0-demo",bin:"/opt/triune-panel/triune-panel"},
     cores:[
       {component:"singbox",bin:"/usr/local/bin/sing-box",bin_set:true,version:"sing-box version 1.9.7",running:true,config_exists:true,backups:["1.9.5-20261001-120000.bak"]},
       {component:"xray",bin:"/usr/local/bin/xray",bin_set:true,version:"Xray 24.12.18 (Xray, Penetrates Everything.)",running:false,config_exists:true,backups:[]},
@@ -1471,15 +1471,28 @@ async function mockRoute(path, opts) {
     return {mirrors:ms, default:"", timeout_ms:6000};
   }
   if (api === "updates" && rest.startsWith("/versions")) {
-    // 演示数据里特意放一条预发布，好让人看见「稳定版 / 预发布」是怎么分的
-    const releases = [
+    const comp = q.component || "singbox";
+    // 每个组件一份版本列表：面板与 sing-box 有新版本，xray 已是最新，mihomo 没装
+    // （没法比）——「可更新」列的三种状态一眼能比出来。
+    // sing-box 这份特意放一条预发布，好让人看见「稳定版 / 预发布」是怎么分的
+    const rich = [
       {tag:"v1.11.0-alpha.2",prerelease:true,notes:"## 预发布\n- 实验性 **Hysteria3** 支持\n- 接口可能有变动，不建议生产使用"},
       {tag:"v1.10.0",notes:"## 新功能\n- 支持 **Hysteria2** 混淆参数 `obfs`\n- 修复高并发下的内存占用\n\n### 修复\n- WS 路径含查询串时握手失败"},
       {tag:"v1.9.7",notes:"稳定性修复版本。\n\n- 修复 TLS 证书热加载\n- 提升日志可读性"},
       {tag:"v1.9.5"},{tag:"v1.8.9"}];
-    return {component:q.component,source:"github",channel:"all",
-      counts:{all:releases.length,stable:releases.filter(r=>!r.prerelease).length,prerelease:releases.filter(r=>r.prerelease).length},
-      releases};
+    const lists = {
+      panel: [{tag:"v0.6.0",notes:"## 新版本\n- 演示数据：面板自身也有新版可升"},{tag:"v0.5.0"}],
+      singbox: rich,
+      xray: [{tag:"v24.12.18"},{tag:"v24.11.30"}],
+      mihomo: [{tag:"v1.19.1"},{tag:"v1.19.0"}],
+    };
+    const releases = lists[comp] || rich;
+    const ch = q.channel || "all";
+    const counts = {all:releases.length,stable:releases.filter(r=>!r.prerelease).length,
+                    prerelease:releases.filter(r=>r.prerelease).length};
+    const shown = ch === "all" ? releases
+      : releases.filter(r => (ch === "prerelease") === !!r.prerelease);
+    return {component:comp,source:"github",channel:ch,counts,releases:shown};
   }
   if (api.startsWith("cores/") && api.endsWith("/update")) { await new Promise(r=>setTimeout(r,900)); const c=api.split("/")[1];
     const installed = !MDB.settings["bin_"+c];
@@ -7593,27 +7606,105 @@ async function loadComponents() {
     compData = await req("/api/components");
     const rows = [];
     const p = compData.panel;
-    rows.push(`<tr><td><b>panel</b>（本面板）</td><td class="mono upd-ver" title="${escHtml(p.version)}">${escHtml(p.version)}</td><td><span class="badge b-ok">运行中</span></td>
-      <td class="ta-r"><button class="btn sm" data-act="fetchVersions" data-args='["panel"]'>版本列表</button>
-      <button class="btn sm" data-act="panelRollbackDlg">回滚</button></td></tr>`);
+    rows.push(`<tr><td><b>panel</b>（本面板）</td>
+      <td class="muted mono upd-bin" title="${escHtml(p.bin || "面板自身的可执行文件")}">${escHtml(p.bin || "—")}</td>
+      <td class="mono upd-ver" title="${escHtml(p.version)}">${escHtml(p.version)}</td>
+      <td class="upd-upd" id="upd_panel">${updCellHTML("panel", p.version)}</td>
+      <td><span class="badge b-ok">运行中</span></td>
+      <td><div class="upd-acts">
+        <button class="btn sm" data-act="fetchVersions" data-args='["panel"]'>版本列表</button>
+        <button class="btn sm" data-act="panelRollbackDlg">回滚</button></div></td></tr>`);
     for (const c of compData.cores) {
       const st = c.running ? '<span class="badge b-ok">运行中</span>'
-        : c.version_error ? `<span class="badge b-warn" title="${c.version_error}">二进制异常</span>`
+        : c.version_error ? `<span class="badge b-warn" title="${escHtml(c.version_error)}">二进制异常</span>`
         : '<span class="badge b-idle">未运行</span>';
       const primary = c.bin_set
         ? `<button class="btn sm" data-act="fetchVersions" data-args="${escJson([c.component])}">版本列表</button>`
         : `<select class="sel-sm" id="ch_${c.component}" data-comp="${c.component}" data-act="pickChannel" data-args='[]' data-el="1" title="安装分支：稳定版不含 alpha / beta / rc">
              ${channelOptions(c.component)}</select>
            <button class="btn sm primary" data-act="fetchVersions" data-args="${escJson([c.component,true])}">一键安装</button>`;
+      const rb = c.backups && c.backups.length
+        ? `<button class="btn sm" data-act="coreRollbackDlg" data-args="${escJson([c.component])}">回滚(${c.backups.length})</button>` : "";
       rows.push(`<tr>
-        <td><b>${c.component}</b><div class="muted mono upd-bin" title="${escHtml(c.bin || "")}" style="font-size:11.5px">${escHtml(c.bin || "未配置路径")}</div></td>
+        <td><b>${escHtml(c.component)}</b></td>
+        <td class="muted mono upd-bin" title="${escHtml(c.bin || "")}">${escHtml(c.bin || "未配置路径")}</td>
         <td class="mono upd-ver" title="${escHtml(c.version || "")}">${c.version ? escHtml(c.version) : '<span class="muted">未知</span>'}</td>
+        <td class="upd-upd" id="upd_${escHtml(c.component)}">${updCellHTML(c.component, c.version)}</td>
         <td>${st}</td>
-        <td class="ta-r">${primary}
-          ${c.backups && c.backups.length ? `<button class="btn sm" data-act="coreRollbackDlg" data-args="${escJson([c.component])}">回滚(${c.backups.length})</button>` : ""}</td></tr>`);
+        <td><div class="upd-acts">${primary}${rb}</div></td></tr>`);
     }
     $("updtbody").innerHTML = rows.join("");
-  } catch(e){ $("updtbody").innerHTML = `<tr><td colspan="4" class="muted">加载失败</td></tr>`; }
+    refreshComponentUpdates();
+  } catch(e){ $("updtbody").innerHTML = `<tr><td colspan="6" class="muted">加载失败</td></tr>`; }
+}
+
+/* ================= 组件更新提醒 =================
+   把各组件的最新稳定版拉下来，和当前版本比一比，在「可更新」列给出提示。
+   - 只取稳定版（channel=stable）：预发布不该在生产面板上被提示成「可更新」。
+   - 频率控制：结果写 localStorage，6 小时内不再问 GitHub —— 匿名 GitHub API
+     每 IP 每小时只有 60 次请求，每次进设置页都问一遍必然被限流。
+   - 拿不到就静默降级成「—」，不弹错误、不挡页面。 */
+const UPD_TTL = 6 * 3600 * 1000;
+const UPD_KEY = "tp_comp_upd";
+let compUpd = {};
+
+function updCacheRead() {
+  try {
+    const j = JSON.parse(localStorage.getItem(UPD_KEY) || "null");
+    return j && typeof j === "object" ? j : null;
+  } catch(e){ return null; }
+}
+function updCacheWrite(j) {
+  try { localStorage.setItem(UPD_KEY, JSON.stringify(j)); } catch(e){}
+}
+// 从「sing-box version 1.9.7」这类输出里取版本号；取不到返回 null
+function verOf(s) {
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(s || ""));
+  return m ? [+m[1], +m[2], +(m[3] || 0)] : null;
+}
+// a 比 b 新吗？逐段比；预发布后缀不比（1.11.0 与 1.11.0-alpha 视作同一版本）
+function verNewer(a, b) {
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+function updCellHTML(comp, cur) {
+  const u = compUpd && compUpd[comp];
+  if (!u || !u.tag) return `<span class="muted upd-none" title="尚未检查更新">—</span>`;
+  const lat = verOf(u.tag), curv = verOf(cur);
+  if (!lat || !curv) return `<span class="muted upd-none" title="当前版本无法比较">—</span>`;
+  if (!verNewer(lat, curv)) return `<span class="muted upd-none">最新</span>`;
+  return `<span class="badge b-warn upd-new" title="可更新到 ${escHtml(u.tag)}（当前 ${escHtml(cur)}）">↑ ${escHtml(u.tag)}</span>`;
+}
+function renderUpdCells() {
+  if (!compData) return;
+  const list = [{ c: "panel", v: compData.panel && compData.panel.version }];
+  for (const c of (compData.cores || [])) list.push({ c: c.component, v: c.version });
+  for (const it of list) {
+    const el = $("upd_" + it.c);
+    if (el) el.innerHTML = updCellHTML(it.c, it.v);
+  }
+}
+async function refreshComponentUpdates() {
+  const cache = updCacheRead();
+  if (cache) {
+    compUpd = cache;
+    renderUpdCells();                       // 先用缓存画出来，别让徽标闪一下
+    if (Date.now() - (cache.at || 0) < UPD_TTL) return;  // 缓存还新鲜
+  }
+  const comps = ["panel", "singbox", "xray", "mihomo"];
+  const out = {};
+  await Promise.all(comps.map(async c => {
+    try {
+      const j = await req("/api/updates/versions?component=" + c + "&channel=stable");
+      const rel = (j.releases || [])[0];
+      out[c] = { tag: rel ? rel.tag : "" };
+    } catch(e){ out[c] = { tag: "" }; }
+  }));
+  out.at = Date.now();
+  compUpd = out;
+  updCacheWrite(out);
+  renderUpdCells();
 }
 
 /* ================= 下载镜像 ================= */
