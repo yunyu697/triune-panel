@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.9.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.9.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -10700,9 +10700,29 @@ const IB_SS_METHODS = [
   ["none", "none（不加密，仅内网）"]
 ];
 const IB_SS_NET = [["tcp,udp", "TCP + UDP（默认）"], ["tcp", "仅 TCP"], ["udp", "仅 UDP"]];
-const IB_HANDSHAKE_SITES = ["www.apple.com", "www.microsoft.com", "www.cloudflare.com",
+/* Reality 握手目标候选。
+   刻意不只用那几张大站：dest 的「快」取决于本机到它的网络路径，同一个机房到
+   Apple/Microsoft 慢、到游戏/零售 CDN 快是很常见的。列表按行业与地区分散，
+   覆盖北美 / 欧洲 / 日本，含流媒体、游戏、SaaS、电商、汽车、新闻、航天、开发者站。
+   真实选择仍由「目标择优」实测决定——这里只是给它一批更值得测的候选。 */
+const IB_HANDSHAKE_SITES = [
+  // 最早的一批（连通性最稳，作为基准）
+  "www.apple.com", "www.microsoft.com", "www.cloudflare.com",
   "addons.mozilla.org", "www.bing.com", "www.yahoo.com", "www.samsung.com",
-  "gateway.icloud.com", "www.nvidia.com", "www.amd.com", "www.lovelive-anime.jp"];
+  "gateway.icloud.com", "www.nvidia.com", "www.amd.com", "www.lovelive-anime.jp",
+  // 流媒体 / 游戏（CDN 分布密集，亚洲机房常比办公站快）
+  "www.spotify.com", "www.twitch.tv", "store.steampowered.com",
+  "www.playstation.com", "www.nintendo.com",
+  // SaaS / 开发者（TLS 1.3 + H2 齐全）
+  "www.salesforce.com", "www.jetbrains.com", "www.atlassian.com",
+  // 电商 / 零售（各地区本地化 CDN）
+  "www.shopify.com", "www.etsy.com", "www.ikea.com", "www.uniqlo.com",
+  // 汽车 / 出行
+  "www.tesla.com", "www.bmw.com", "www.toyota.com",
+  "www.airbnb.com", "www.booking.com",
+  // 新闻 / 航天 / 创意
+  "www.bbc.co.uk", "www.reuters.com", "www.nasa.gov", "www.adobe.com",
+];
 /* spiderX 没有「正确值」这回事：它只是握手成功后客户端去目标站点上「爬」的路径，
    用来模仿真实浏览。固定填 / 是最常见的默认值，也正好是最好认的指纹，
    所以新建时直接给一串随机的——想手填就在输入框里改。 */
@@ -11341,11 +11361,13 @@ function openDestPick() {
 }
 
 // parseDestLines 每行一个 host 或 host:port（也认空格分隔）。
+// 上限与后端 destProbeMaxCandidates 保持一致：多出来的会被后端整批拒绝，
+// 在界面这一层就截断，避免用户填了 40 个却只得到一句「一次最多测 32 个」。
 function parseDestLines(text) {
   const out = [];
   String(text || "").split(/[\s,]+/).forEach(s => {
     s = s.trim();
-    if (!s || out.length >= 16) return;
+    if (!s || out.length >= 32) return;
     let host = s, port = 443;
     const i = s.lastIndexOf(":");
     if (i > 0 && /^\d+$/.test(s.slice(i + 1))) {
@@ -12226,8 +12248,12 @@ async function applyCfg() {
     loadRevisions(); loadStatus();
   } catch (e) {
     toast(e.message, "err");
-    toast("运行中的配置未被修改，服务不受影响", "info");
-    loadRevisions();
+    // 后端会在错误里写明是否已回滚。只有真的没动过 / 已回滚，才能说
+    // 「服务不受影响」——原来无条件补这句，内核已经停了却告诉用户没事。
+    if (/未被修改|保持原配置|自动回滚|服务保持可用/.test(e.message || "")) {
+      toast("运行中的配置未被修改，服务不受影响", "info");
+    }
+    loadRevisions(); loadStatus();
   }
 }
 async function rollback() {

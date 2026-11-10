@@ -248,6 +248,13 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 	}
 
 	// TLS
+	// hysteria2 / tuic / anytls 在 sing-box 里**强制** TLS（QUIC 本身跑在
+	// TLS 上）。TLS 选成 none / reality 时渲染器不写 tls 段，sing-box 的
+	// check 会抛一句英文 `initialize inbound[0]: TLS required`；更麻烦的是
+	// 这条错误出现在「应用」时，用户很难对上号。这里提前拦下并说清楚。
+	if singboxTLSOnly(in.Protocol) && in.TLS != "tls" {
+		return nil, fmt.Errorf("%s 在 sing-box 中必须使用 TLS：请把 TLS 设为 tls 并填写证书路径与私钥路径（不支持 reality / 无 TLS）", in.Protocol)
+	}
 	switch in.TLS {
 	case "tls":
 		tls := map[string]any{"enabled": true}
@@ -270,8 +277,15 @@ func (s *SingBox) renderInbound(iw core.InboundWithClients) (map[string]any, err
 		}
 		// 这些协议在 sing-box 里 TLS 是强制的，没证书只会得到
 		// "missing certificate" 这种内核内部报错，这里提前说清楚。
-		if _, hasCert := tls["certificate_path"]; !hasCert && singboxRequiresCert(in.Protocol) {
-			return nil, fmt.Errorf("%s 入站必须配置 TLS 证书：请填写证书路径与私钥路径（或先用面板 ACME 签发）", in.Protocol)
+		if singboxRequiresCert(in.Protocol) {
+			if _, hasCert := tls["certificate_path"]; !hasCert {
+				return nil, fmt.Errorf("%s 入站必须配置 TLS 证书：请填写证书路径与私钥路径（或先用面板 ACME 签发）", in.Protocol)
+			}
+			// 只填证书不填私钥时 sing-box check 会报 `missing key`，
+			// 同样是一句指不到表单字段的英文；这里点名字段。
+			if _, hasKey := tls["key_path"]; !hasKey {
+				return nil, fmt.Errorf("%s 入站填了证书路径但缺少私钥路径（key_path），请一并填写", in.Protocol)
+			}
 		}
 		obj["tls"] = tls
 	case "reality":
@@ -344,4 +358,10 @@ func singboxRequiresCert(protocol string) bool {
 		return true
 	}
 	return false
+}
+
+// singboxTLSOnly 判断该协议是否只接受标准 TLS（none / reality 都不成立）。
+// 与 singboxRequiresCert 同一组协议：QUIC 类协议本身就跑在 TLS 上。
+func singboxTLSOnly(protocol string) bool {
+	return singboxRequiresCert(protocol)
 }

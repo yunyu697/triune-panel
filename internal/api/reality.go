@@ -118,11 +118,15 @@ func normalizeRealitySettings(in *model.Inbound) {
 // 「这个 dest 值不值得填」。两者都会握手，但对象完全不同。
 
 const (
-	destProbeMaxCandidates = 16              // 一次最多测这么多个，避免把面板拖住
+	// 候选从 11 个扩到 32 个：单一机房到 Apple/Microsoft 慢、到游戏/零售 CDN
+	// 快是常态，候选太少就挑不出真正快的那条路径。并发提高到 10、单次超时
+	// 略降到 3.5s，把「32 个 × 3 次」压在 20s 内；失败的候选大多快速失败，
+	// 真正吃满超时的很少。
+	destProbeMaxCandidates = 32              // 一次最多测这么多个，避免把面板拖住
 	destProbeAttempts      = 3               // 每个目标握手 3 次取中位数，单次抖动不算数
-	destProbeConcurrency   = 6               // 并发握手数
-	destProbeDialTimeout   = 4 * time.Second // 单次握手
-	destProbeTotalTimeout  = 14 * time.Second
+	destProbeConcurrency   = 10              // 并发握手数
+	destProbeDialTimeout   = 3500 * time.Millisecond
+	destProbeTotalTimeout  = 20 * time.Second
 )
 
 // destCandidate 一个候选握手目标。

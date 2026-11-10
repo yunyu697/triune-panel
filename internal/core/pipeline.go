@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"triune/internal/proc"
@@ -31,6 +33,17 @@ type PipelineManager struct {
 	Settings SettingProvider
 	// Version 是面板版本，写进渲染戳（见 RenderStamp）。
 	Version string
+	// StartGrace 是「启动后观察多久」的窗口，0 用默认值。
+	// 内核启动即退出时靠它把「配置已替换但服务没起来」暴露出来，
+	// 从而有机会回滚；测试里调小以缩短耗时。
+	StartGrace time.Duration
+	// applyMu 串行化「应用 / 回滚」。
+	//
+	// 面板有多个入口会触发这同一件事（应用弹窗、切换内核、启动自愈、
+	// 控制套接字），并发跑会出现：A 刚 Stop 完内核，B 也在 Stop/Restart，
+	// 两个 Start 交错，最终谁都没守住端口，内核停在半路。串行化最省事，
+	// 代价只是并发应用时排队——这种操作本来就该一次只做一件。
+	applyMu sync.Mutex
 }
 
 // RenderStamp 记录「磁盘上这份配置是哪一版面板渲染出来的」。
@@ -191,6 +204,8 @@ func (m *PipelineManager) validate(name string, c Core, content []byte) validate
 
 // Apply 执行完整流水线。任何一步失败都不会影响正在运行的配置。
 func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note string) (*ApplyResult, error) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	c, err := Get(name)
 	if err != nil {
 		return nil, err
@@ -229,61 +244,127 @@ func (m *PipelineManager) Apply(name string, ins []InboundWithClients, note stri
 		return &ApplyResult{Core: name, Validated: true, Hash: hash}, res.err
 	}
 
-	// 4. 原子替换
+	bin, _ := m.Settings.Get("bin_" + name)
+	manage := m.ProcMgr != nil && bin != ""
+
+	// 4. 停旧进程并做端口预检 —— **在替换配置之前**。
+	//
+	// 端口预检原来放在 rename 之后：预检失败要把刚写进去的新配置再写回来，
+	// 多一次可能失败的写盘；更糟的是预检通过、内核却仍因绑定失败而退出的
+	// 情况（sing-box 的 check 只校验语法，不 bind socket），旧代码只是把
+	// 错误抛给调用方，配置已经被换掉、旧内核已经停了——该内核下的所有节点
+	// 一起断，而界面上只说了一句「启动失败」。现在顺序前移，并在下面的
+	// 启动阶段补回滚：应用失败必须保持原配置在跑，这是对用户的核心承诺。
+	if manage {
+		m.ProcMgr.Stop(name)
+		if perr := checkPortsFree(ins); perr != nil {
+			// 端口被占，但很可能就是「上一代面板」留下的自家内核：
+			// exec 换进程映像时子进程不跟着退，崩溃 / 被 SIGKILL 也一样。
+			// 认得出是自己的（二进制与配置路径都对上）就先清掉再试一次；
+			// 认不出才当作别人的程序，如实报错。
+			if killed := proc.ReapOrphans(bin, cfgPath); len(killed) > 0 {
+				log.Printf("[core] 端口被上一代面板留下的 %s 进程 %v 占着，已清理并重试", name, killed)
+				perr = checkPortsFree(ins)
+			}
+			if perr != nil {
+				os.Remove(tmp)
+				// 配置还没替换：磁盘上仍是旧配置，直接把旧内核拉起来。
+				_ = m.ProcMgr.Start(name, bin, cfgPath, dir)
+				return &ApplyResult{Core: name, Validated: res.validated, Restarted: false, Hash: hash}, perr
+			}
+		}
+	}
+
+	// 5. 原子替换
 	if err := os.Rename(tmp, cfgPath); err != nil {
 		os.Remove(tmp)
 		return nil, fmt.Errorf("atomic rename: %w", err)
 	}
-	// 4.1 记下「这份配置是哪一版渲染的」。放在替换之后：中间崩了只会丢戳，
+	// 5.1 记下「这份配置是哪一版渲染的」。放在替换之后：中间崩了只会丢戳，
 	// 下次启动当成来历不明重新渲染一遍，方向是安全的；反过来先写戳再替换，
 	// 崩在中间就会把一份旧配置标成新版本，自愈永远不触发。
 	m.writeStamp(name, hash)
 
-	// 5. 重启内核进程
+	// 6. 重启内核，并确认它活过观察窗口
 	restarted := false
-	if m.ProcMgr != nil {
-		if bin, _ := m.Settings.Get("bin_" + name); bin != "" {
-			// 先停旧进程释放端口，再做端口预检：
-			// 端口被别的程序占着时，内核往往只记一条日志就"启动成功"
-			// （xray 尤为明显），界面显示已启用但根本连不上。
-			m.ProcMgr.Stop(name)
-			perr := checkPortsFree(ins)
-			if perr != nil {
-				// 端口被占，但很可能就是「上一代面板」留下的自家内核：
-				// exec 换进程映像时子进程不跟着退，崩溃 / 被 SIGKILL 也一样。
-				// 认得出是自己的（二进制与配置路径都对上）就先清掉再试一次；
-				// 认不出才当作别人的程序，如实报错。
-				if killed := proc.ReapOrphans(bin, cfgPath); len(killed) > 0 {
-					log.Printf("[core] 端口 %d 被上一代面板留下的 %s 进程 %v 占着，已清理并重试",
-						ins[0].Inbound.Port, name, killed)
-					perr = checkPortsFree(ins)
-				}
-			}
-			if perr != nil {
-				// 回滚：把刚才备份的运行配置写回并重启旧内核，
-				// 不能让一次失败的应用把线上服务停掉。
-				if len(oldCfg) > 0 {
-					if werr := os.WriteFile(cfgPath, oldCfg, 0o600); werr == nil {
-						_ = m.ProcMgr.Start(name, bin, cfgPath, m.coreDir(name))
-					}
-				}
-				return &ApplyResult{Core: name, Validated: res.validated, Restarted: false, Hash: hash}, perr
-			}
-			if err := m.ProcMgr.Restart(name, bin, cfgPath, m.coreDir(name)); err != nil {
-				// 配置已经原子替换成功，但进程起不来（二进制不可执行、
-				// 工作目录不可写……）。必须把错误抛出去，否则界面显示
-				// "已启用"而实际没有任何服务在跑。
-				return &ApplyResult{Core: name, Validated: res.validated, Restarted: false, Hash: hash},
-					fmt.Errorf("配置已更新，但 %s 启动失败：%w", name, err)
-			}
-			restarted = true
+	if manage {
+		if err := m.ProcMgr.Restart(name, bin, cfgPath, dir); err != nil {
+			// 配置已经原子替换成功，但进程起不来（二进制不可执行、
+			// 工作目录不可写……）。必须回滚，否则该内核下的节点全断。
+			return m.revertAfterStartFailure(name, bin, cfgPath, dir, oldCfg, hash, res.validated,
+				fmt.Errorf("配置已更新，但 %s 启动失败：%w", name, err))
 		}
+		if !m.waitAlive(name) {
+			// 启动即退出：check 不 bind socket，端口被占 / 证书在运行期
+			// 加载失败等都要到这一刻才暴露。
+			return m.revertAfterStartFailure(name, bin, cfgPath, dir, oldCfg, hash, res.validated,
+				fmt.Errorf("%s 启动后立即退出。最近日志：\n%s", name, m.logTail(name, 15)))
+		}
+		restarted = true
 	}
 	return &ApplyResult{Core: name, Validated: res.validated, Restarted: restarted, Hash: hash}, nil
 }
 
+// startGrace 返回启动观察窗口。
+func (m *PipelineManager) startGrace() time.Duration {
+	if m.StartGrace > 0 {
+		return m.StartGrace
+	}
+	return 1500 * time.Millisecond
+}
+
+// waitAlive 在观察窗口内持续确认进程还活着。
+// 进程在窗口内退出即返回 false；活过窗口返回 true。
+func (m *PipelineManager) waitAlive(name string) bool {
+	deadline := time.Now().Add(m.startGrace())
+	for {
+		if alive, _ := m.ProcMgr.Status(name); !alive {
+			return false
+		}
+		if !time.Now().Before(deadline) {
+			return true
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+}
+
+func (m *PipelineManager) logTail(name string, n int) string {
+	if m.ProcMgr == nil {
+		return ""
+	}
+	return strings.Join(m.ProcMgr.Logs(name, m.coreDir(name), n), "\n")
+}
+
+// revertAfterStartFailure 把磁盘配置恢复成上一份，并把旧内核重新拉起来。
+//
+// 为什么必须做：apply 已经把新配置原子替换上去了，内核进程却没起来。
+// 不回滚的话，一次「应用」会把该内核下的所有节点一起停掉，而面板只能
+// 报一句「启动失败」——用户看到的正是「内核直接停了」。
+//
+// 返回的错误里明确写出是否已回滚：调用方据此决定界面提示，不能一律
+// 说「运行中的配置未被修改」。
+func (m *PipelineManager) revertAfterStartFailure(name, bin, cfgPath, dir string, oldCfg []byte, hash string, validated bool, cause error) (*ApplyResult, error) {
+	res := &ApplyResult{Core: name, Validated: validated, Restarted: false, Hash: hash}
+	if len(oldCfg) == 0 {
+		return res, fmt.Errorf("%w；此前没有可回滚的配置", cause)
+	}
+	if werr := os.WriteFile(cfgPath, oldCfg, 0o600); werr != nil {
+		return res, fmt.Errorf("%w；回滚写入旧配置失败：%v（服务可能已中断，请查看内核日志）", cause, werr)
+	}
+	// 戳跟着回退：否则下次启动会以为这份旧配置是当前版本渲染的，自愈不会触发。
+	m.writeStamp(name, shortHash(oldCfg))
+	if m.ProcMgr != nil {
+		if serr := m.ProcMgr.Start(name, bin, cfgPath, dir); serr != nil {
+			return res, fmt.Errorf("%w；已恢复旧配置，但旧内核也没能重新启动：%v", cause, serr)
+		}
+	}
+	return res, fmt.Errorf("%w；已自动回滚到上一份配置，服务保持可用", cause)
+}
+
 // Rollback 把最新备份恢复为运行配置并重启。
 func (m *PipelineManager) Rollback(name string) (string, error) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	c, err := Get(name)
 	if err != nil {
 		return "", err

@@ -107,8 +107,7 @@ func TestRenderQUICProtocolsCompat(t *testing.T) {
 }
 
 // socks/mixed 的 user 只有 username/password，多余 name 会导致严格校验失败。
-func TestRenderSocksUsersNoNameField(t *testing.T) {
-	s := &SingBox{}
+func TestRenderSocksUsersNoNameField(t *testing.T) {	s := &SingBox{}
 	in := &model.Inbound{Name: "socks", Core: "singbox", Protocol: "socks", Port: 1080, Transport: "tcp"}
 	obj, err := s.renderInbound(core.InboundWithClients{Inbound: in,
 		Clients: []*model.Client{{Name: "u1", Credential: "p1", Enabled: true}}})
@@ -480,5 +479,42 @@ func TestRenderInboundDropsXrayOnlyFields(t *testing.T) {
 	// 正常字段不能跟着被删
 	if obj["type"] != "vless" || obj["listen_port"] != 24464 {
 		t.Errorf("基础字段被误删: %v", obj)
+	}
+}
+
+// hysteria2 / tuic / anytls 在 sing-box 中强制 TLS，且证书与私钥必须成对。
+// 缺失时必须在渲染期给出指得到表单字段的中文错误，而不是等应用时
+// 抛一句内核英文日志（`TLS required` / `missing key`）。
+func TestHysteria2PreflightTLS(t *testing.T) {
+	s := &SingBox{}
+	clients := []*model.Client{{Name: "u1", Credential: "p1", Enabled: true}}
+	cases := []struct {
+		name, tls, settings, want string
+	}{
+		{"no-tls", "none", `{}`, "必须使用 TLS"},
+		{"reality", "reality", `{"private_key":"x","handshake_server":"a.com"}`, "必须使用 TLS"},
+		{"no-cert", "tls", `{}`, "必须配置 TLS 证书"},
+		{"no-key", "tls", `{"certificate_path":"/tmp/c.pem"}`, "key_path"},
+	}
+	for _, c := range cases {
+		in := &model.Inbound{Name: "hy2", Core: "singbox", Protocol: "hysteria2",
+			Port: 443, Transport: "udp", TLS: c.tls, Settings: c.settings}
+		_, err := s.renderInbound(core.InboundWithClients{Inbound: in, Clients: clients})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err=%v，应包含 %q", c.name, err, c.want)
+		}
+	}
+
+	// 证书 + 私钥齐全时必须正常渲染出 tls 段
+	ok := &model.Inbound{Name: "hy2", Core: "singbox", Protocol: "hysteria2",
+		Port: 443, Transport: "udp", TLS: "tls",
+		Settings: `{"certificate_path":"/tmp/c.pem","key_path":"/tmp/k.pem"}`}
+	obj, err := s.renderInbound(core.InboundWithClients{Inbound: ok, Clients: clients})
+	if err != nil {
+		t.Fatalf("合法 hysteria2 不应报错: %v", err)
+	}
+	tls, _ := obj["tls"].(map[string]any)
+	if tls["certificate_path"] != "/tmp/c.pem" || tls["key_path"] != "/tmp/k.pem" {
+		t.Errorf("tls 段不完整: %v", tls)
 	}
 }

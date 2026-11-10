@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"triune/internal/core"
 	"triune/internal/link"
@@ -117,23 +118,48 @@ func (a *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	res, err := a.Pipe.Apply(req.Core, input, req.Note)
 	if err != nil {
 		_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevFailed, err.Error())
-		a.auditFail(r, AuditApply, req.Core, "应用失败（运行中配置未变）："+err.Error())
-		// 运行中配置未受影响 —— 这是本系统的安全保证
-		writeJSON(w, 422, map[string]any{"error": err.Error(), "revision_id": rev.ID, "hint": "运行中的配置未被修改；可用 rollback 恢复历史备份"})
+		a.auditFail(r, AuditApply, req.Core, "应用失败："+err.Error())
+		// 不能一律说「运行中的配置未被修改」：启动失败可能是「已回滚」
+		// 也可能是「连旧配置都没拉起来」。按错误里的实际情况给下一步。
+		msg := err.Error()
+		hint := "配置未生效，运行中的服务未受影响；详细原因见上方错误"
+		switch {
+		case strings.Contains(msg, "已自动回滚"):
+			hint = "已自动回滚到上一份配置，服务保持可用；修正上方错误后重新应用即可"
+		case strings.Contains(msg, "没有可回滚"),
+			strings.Contains(msg, "没能重新启动"),
+			strings.Contains(msg, "回滚写入"):
+			hint = "服务可能已中断：请查看内核日志，并在「配置历史」里手动回滚到上一份可用配置"
+		}
+		writeJSON(w, 422, map[string]any{"error": msg, "revision_id": rev.ID, "hint": hint})
 		return
 	}
 	_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevApplied, "")
 	res.RevisionID = rev.ID
 	// 启动后短暂观察：端口占用、证书缺失、协议参数错误等"启动即退出"
 	// 的问题在这里暴露，而不是界面上显示成功、实际没有服务在监听。
+	// Apply 内部已做过「启动即退出」的判活与回滚，这里只补「进程活着但
+	// 没在监听」那一类（xray 端口被占、mihomo 证书加载失败）：同样必须回滚，
+	// 否则该内核下的节点会带着一份不可用的配置一起断掉。
 	if res.Restarted {
 		if herr := a.healthCheck(req.Core); herr != nil {
-			_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevFailed, herr.Error())
-			a.auditFail(r, AuditApply, req.Core, "内核启动后退出："+herr.Error())
+			rbOK := true
+			rbDetail := ""
+			if _, rerr := a.Pipe.Rollback(req.Core); rerr != nil {
+				rbOK = false
+				rbDetail = "；自动回滚失败：" + rerr.Error()
+			}
+			_ = a.Store.UpdateRevisionStatus(rev.ID, model.RevFailed, herr.Error()+rbDetail)
+			a.auditFail(r, AuditApply, req.Core, "内核启动后检查失败："+herr.Error()+rbDetail)
+			hint := "已恢复到上一份可用配置并重启内核，服务保持可用；修正上方错误后重新应用即可"
+			if !rbOK {
+				hint = "自动回滚失败，该内核下的服务可能已中断，请查看内核日志后手动回滚"
+			}
 			writeJSON(w, 422, map[string]any{
-				"error":       herr.Error(),
+				"error":       herr.Error() + rbDetail,
 				"revision_id": rev.ID,
-				"hint":        "配置已写入，但内核进程没能存活；修正上方错误后重新应用即可",
+				"rolled_back": rbOK,
+				"hint":        hint,
 			})
 			return
 		}

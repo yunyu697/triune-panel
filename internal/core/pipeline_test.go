@@ -1,13 +1,16 @@
 package core
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"triune/internal/model"
+	"triune/internal/proc"
 )
 
 // fakeCore 测试用内核：渲染内容可控，校验命令可指定成功或失败。
@@ -305,5 +308,117 @@ func TestAllSkipsUnregistered(t *testing.T) {
 		case model.CoreSingBox, model.CoreXray, model.CoreMihomo:
 			t.Fatalf("未 import 实现包却出现了 %s", c.Name())
 		}
+	}
+}
+
+// stubBin 写一个「只有配置里出现 \"bad\":true 才退出」的假内核脚本。
+// 用来复现「check 通过、run 启动即退出」——这是 sing-box check 不 bind
+// socket 时最典型的失败形态（端口被占、证书运行期加载失败等）。
+func stubBin(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fake-core")
+	script := "#!/bin/sh\n" +
+		"cfg=\"\"\nfor a in \"$@\"; do cfg=\"$a\"; done\n" +
+		"if grep -q '\"bad\":true' \"$cfg\" 2>/dev/null; then\n" +
+		"  echo 'FATAL[0000] simulate startup failure' >&2\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"exec sleep 30\n"
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestApplyStartFailureRollsBack 是整个修复的核心回归：
+//
+// 新配置通过 check、但内核启动即退出时，必须把磁盘配置恢复成上一份并
+// 重启旧内核——否则一次「应用」会把该内核下的所有节点一起停掉。
+func TestApplyStartFailureRollsBack(t *testing.T) {
+	const name = "fake-rollback"
+	const good = `{"good":true}`
+	const bad = `{"bad":true}`
+
+	Register(&fakeCore{name: name, content: good, badCmd: "true"})
+	dir := t.TempDir()
+	pm := proc.NewManager()
+	defer pm.StopAll()
+	m := &PipelineManager{
+		DataDir:    dir,
+		ProcMgr:    pm,
+		Settings:   mapSettings{"bin_" + name: stubBin(t)},
+		StartGrace: 1200 * time.Millisecond,
+	}
+
+	if _, err := m.Apply(name, nil, "first"); err != nil {
+		t.Fatalf("首次 apply 应成功: %v", err)
+	}
+	if alive, _ := pm.Status(name); !alive {
+		t.Fatal("首次 apply 后内核应处于运行状态")
+	}
+
+	// 换成「启动即退出」的配置
+	Register(&fakeCore{name: name, content: bad, badCmd: "true"})
+	_, err := m.Apply(name, nil, "second")
+	if err == nil {
+		t.Fatal("启动即退出时必须返回错误")
+	}
+	if !strings.Contains(err.Error(), "已自动回滚") {
+		t.Fatalf("错误里应说明已回滚，实际: %v", err)
+	}
+	data, rerr := os.ReadFile(cfgPathOf(t, m, name))
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(data) != good {
+		t.Fatalf("失败后磁盘配置应恢复为上一份 %q，实际 %q", good, data)
+	}
+	if alive, _ := pm.Status(name); !alive {
+		t.Fatal("回滚后旧内核必须重新跑起来，不能停着")
+	}
+}
+
+// TestApplyPortBusyKeepsRunningConfig 端口预检移到替换之前：
+// 预检失败时磁盘配置一个字节都不该动，且旧内核要重新拉起。
+func TestApplyPortBusyKeepsRunningConfig(t *testing.T) {
+	const name = "fake-portbusy"
+	const good = `{"good":true}`
+
+	Register(&fakeCore{name: name, content: good, badCmd: "true"})
+	dir := t.TempDir()
+	pm := proc.NewManager()
+	defer pm.StopAll()
+	m := &PipelineManager{
+		DataDir:    dir,
+		ProcMgr:    pm,
+		Settings:   mapSettings{"bin_" + name: stubBin(t)},
+		StartGrace: 1200 * time.Millisecond,
+	}
+	if _, err := m.Apply(name, nil, "first"); err != nil {
+		t.Fatalf("首次 apply: %v", err)
+	}
+
+	// 占住一个端口，再拿同一个端口渲染。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	Register(&fakeCore{name: name, content: `{"next":true}`, badCmd: "true"})
+	ins := []InboundWithClients{{Inbound: &model.Inbound{
+		Core: name, Protocol: "vless", Port: port, Listen: "127.0.0.1", TLS: "none",
+	}}}
+	if _, err := m.Apply(name, ins, "busy"); err == nil {
+		t.Fatal("端口被占时必须报错")
+	}
+	data, _ := os.ReadFile(cfgPathOf(t, m, name))
+	if string(data) != good {
+		t.Fatalf("端口预检失败不应替换配置：want %q, got %q", good, data)
+	}
+	if alive, _ := pm.Status(name); !alive {
+		t.Fatal("端口预检失败后旧内核应仍在运行")
 	}
 }

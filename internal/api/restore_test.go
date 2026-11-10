@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"triune/internal/api"
 	"triune/internal/core"
@@ -42,7 +43,12 @@ func restoreFixture(t *testing.T, fakeBin bool) (*api.Server, *proc.Manager, str
 			pm.Stop(n)
 		}
 	})
-	pipe := &core.PipelineManager{DataDir: dir, ProcMgr: pm, Settings: st}
+	pipe := &core.PipelineManager{
+		DataDir: dir, ProcMgr: pm, Settings: st,
+		// Apply 现在会在启动后观察一小段再决定「起来没」；测试里用常驻桩，
+		// 窗口调小以缩短耗时，进程本身会一直活着。
+		StartGrace: 200 * time.Millisecond,
+	}
 	a := api.New(st, pipe, pm, dir)
 
 	bin := filepath.Join(dir, "fake-core.sh")
@@ -101,7 +107,9 @@ func writeStamp(t *testing.T, dir, coreName, version string) {
 func fastBin(t *testing.T, a *api.Server, dir string) string {
 	t.Helper()
 	p := filepath.Join(dir, "fast-core.sh")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	// 必须常驻：Apply 启动后会观察进程是否还活着，`exit 0` 会被判成
+	// 「启动即退出」并回滚，测试就永远看不到自愈后的新配置。
+	if err := os.WriteFile(p, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Store.SetSetting("bin_singbox", p); err != nil {

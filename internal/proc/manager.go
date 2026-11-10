@@ -18,7 +18,11 @@ type procInfo struct {
 	logFile *os.File
 	logBuf  []string
 	started time.Time
-	mu      sync.Mutex
+	// exited 由 Wait goroutine 在回收后置位。只用 Signal(0) 判活不够：
+	// 进程刚死、还没被 Wait 回收时是僵尸，Signal(0) 照样返回 nil，
+	// 于是「启动即退出」在健康检查窗口里会被误判成存活。
+	exited bool
+	mu     sync.Mutex
 }
 
 type Manager struct {
@@ -71,6 +75,7 @@ func (m *Manager) Start(name, binPath, cfgPath, workDir string) error {
 		_ = cmd.Wait() // 进程退出后保留信息供状态查询
 		p.mu.Lock()
 		defer p.mu.Unlock()
+		p.exited = true
 		if p.logFile != nil {
 			p.logFile.Close()
 			p.logFile = nil
@@ -128,13 +133,27 @@ func (m *Manager) Restart(name, binPath, cfgPath, workDir string) error {
 func (m *Manager) Status(name string) (bool, time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.statusLocked(name)
+}
+
+// statusLocked 是 Status 的无锁版本，供已持 m.mu 的调用方使用。
+//
+// 必须共用同一份判活逻辑：RunningCores 曾经持着 m.mu 又去调 Status，
+// 而 Status 内部再 Lock 同一把非重入的 sync.Mutex——一次 /metrics 采集
+// 就会把整个内核管理器永久卡死，之后所有「应用 / 停止 / 重启」都阻塞在这里，
+// 界面既不报错也没有任何进展。
+func (m *Manager) statusLocked(name string) (bool, time.Time) {
 	p, ok := m.procs[name]
 	if !ok {
 		return false, time.Time{}
 	}
-	// 进程可能已退出但未从 map 移除（goroutine 只关日志），
-	// 用 Signal(0) 探活
-	if p.cmd.Process == nil || p.cmd.Process.Signal(syscall.Signal(0)) != nil {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// 已经 Wait 回收过：确定死了，不必再看 Signal。
+	if p.exited || p.cmd.Process == nil {
+		return false, time.Time{}
+	}
+	if p.cmd.Process.Signal(syscall.Signal(0)) != nil {
 		return false, time.Time{}
 	}
 	return true, p.started
@@ -145,7 +164,7 @@ func (m *Manager) RunningCores() []string {
 	defer m.mu.Unlock()
 	var out []string
 	for name := range m.procs {
-		if running, _ := m.Status(name); running {
+		if running, _ := m.statusLocked(name); running {
 			out = append(out, name)
 		}
 	}
