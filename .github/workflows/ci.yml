@@ -154,7 +154,7 @@ jobs:
           E2E_CHANNEL: bundled
         run: |
           set -euo pipefail
-          for s in first-paint-flicker view-restore theme-switch-flicker \
+          for s in first-paint-flicker view-restore theme-switch-flicker theme-contrast \
                    section-restore bypass-server layout-check backups-hostopt workbench-command; do
             echo "→ ${s}"
             node ".e2e/${s}.js"

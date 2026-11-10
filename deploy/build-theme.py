@@ -173,7 +173,35 @@ def button_color(acc, on_acc):
 
 def tokens(s, mode):
     dark = mode == "dark"
-    muted = ensure_contrast(s["muted"], [s["bg"], s["card"], s["side"]], toward=s["text"])
+    soft_t = .17 if dark else .11
+    # 先把「文字其实坐在上面」的面算出来，再据此校正文字色。以前只对
+    # bg / card / side 三块做校正，于是悬停底、斑马纹、代码底、玻璃面板、
+    # 品牌浅底、语义浅底上的小字全都掉到 4.0～4.4——正是「换主题后可读性变差」
+    # 的手感来源。顺序反了（先定色再算面）就会漏。
+    acc_soft = mix(s["bg"], s["acc"], soft_t)
+    ok_soft = mix(s["bg"], s["ok"], soft_t)
+    err_soft = mix(s["bg"], s["err"], soft_t)
+    warn_soft = mix(s["bg"], s["warn"], soft_t)
+    zebra = mix(s["card"], s["hover"], .55)
+    code_bg = mix(s["bg"], s["hover"], .7)
+    # 悬浮玻璃面板：亮色 .82 白压环境底纹，暗色 .10 白层把面板提亮一档。
+    glass = mix(s["bg"], "#ffffff", .10 if dark else .82)
+    # 玻璃顶上还有一层 --glass-hi 高光（暗色 .11 / 亮色 .85 白），导航文字正好
+    # 落在这一带；只算 --glass 会低估实际底色，暗色侧栏实测掉到 3.9:1。
+    glass_hi = mix(glass, "#ffffff", .11 if dark else .85)
+    text_surfaces = [s["bg"], s["card"], s["side"], s["hover"], zebra, code_bg,
+                     glass, glass_hi, acc_soft, ok_soft, err_soft, warn_soft]
+    # 目标留 0.15 余量：上面的「面」是算出来的近似值，真实渲染还有底纹与
+    # 渐变叠加，卡在 4.5 上会有一半个组合在浏览器里掉到 4.4。
+    muted = ensure_contrast(s["muted"], text_surfaces, target=4.65, toward=s["text"])
+    acc_text = ensure_contrast(s["acc_text"], [s["bg"], s["card"], s["side"], acc_soft],
+                              target=4.65, toward=s["text"])
+    ok = ensure_contrast(s["ok"], [s["bg"], s["card"], s["side"], ok_soft],
+                         target=4.65, toward=s["text"])
+    err = ensure_contrast(s["err"], [s["bg"], s["card"], s["side"], err_soft],
+                          target=4.65, toward=s["text"])
+    warn = ensure_contrast(s["warn"], [s["bg"], s["card"], s["side"], warn_soft],
+                           target=4.65, toward=s["text"])
     surfaces = {
         "--bg": s["bg"], "--side": s["side"], "--card": s["card"],
         "--text": s["text"], "--muted": muted,
@@ -181,17 +209,16 @@ def tokens(s, mode):
     }
     brand = {
         "--acc": s["acc"], "--acc2": s["acc2"],
-        "--acc-soft": mix(s["bg"], s["acc"], .16 if dark else .11),
-        "--acc-text": s["acc_text"], "--on-acc": s["on_acc"],
+        "--acc-soft": acc_soft,
+        "--acc-text": acc_text, "--on-acc": s["on_acc"],
         "--acc-btn": button_color(s["acc"], s["on_acc"]),
         "--acc2-btn": button_color(s["acc2"], s["on_acc"]),
     }
     # 语义色的 soft 底跟随本方案的背景，而不是所有方案共用一块固定浅灰。
-    soft_t = .17 if dark else .11
     semantic = {
-        "--ok": s["ok"], "--ok-soft": mix(s["bg"], s["ok"], soft_t),
-        "--err": s["err"], "--err-soft": mix(s["bg"], s["err"], soft_t),
-        "--warn": s["warn"], "--warn-soft": mix(s["bg"], s["warn"], soft_t),
+        "--ok": ok, "--ok-soft": ok_soft,
+        "--err": err, "--err-soft": err_soft,
+        "--warn": warn, "--warn-soft": warn_soft,
     }
     ink = (0, 0, 0) if dark else (16, 24, 40)
     sh = "rgba(%d,%d,%d," % ink
@@ -231,9 +258,10 @@ def tokens(s, mode):
         "--focus": "rgba(%d,%d,%d,.45)" % (ar, ag, ab),
     }
     extras = {
-        # 代码块 / 表格斑马纹 / 焦点环也归配色方案管，不再写死灰色。
-        "--code-bg": mix(s["bg"], s["hover"], .7),
-        "--zebra": mix(s["card"], s["hover"], .55),
+        # 代码块 / 表格斑马纹：与上面校正文字色时用的是同一组值，别再算一遍
+        # （两边各算一次，日后改系数就会出现「校正的是 A、实际用的是 B」）。
+        "--code-bg": code_bg,
+        "--zebra": zebra,
     }
     out = {}
     for d in (surfaces, brand, semantic, charts, depth, extras):

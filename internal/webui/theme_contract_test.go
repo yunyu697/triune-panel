@@ -181,6 +181,17 @@ func TestThemeContrastWCAG(t *testing.T) {
 			// 不能只为了按钮上的白字压暗。
 			{"--on-acc", "--acc-btn"}, {"--on-acc", "--acc2-btn"},
 			{"--muted", "--bg"}, {"--muted", "--card"}, {"--muted", "--side"},
+			// 小字真正坐着的不止上面三块面：卡片里还有悬停底、斑马纹、代码块，
+			// 常驻外壳是半透明玻璃，登录页特性行铺的是品牌浅底。以前只校正三块
+			// 面，这些位置的实际渲染值掉到 4.0～4.4，也就是「换主题后小字发灰」。
+			{"--muted", "--hover"}, {"--muted", "--zebra"}, {"--muted", "--code-bg"},
+			{"--muted", "--acc-soft"},
+			// 选中态与链接用的是 --acc-text，压在品牌浅底上。
+			{"--acc-text", "--acc-soft"}, {"--acc-text", "--card"},
+			// 语义色既做状态点也做文字，浅底上同样要达标。
+			{"--ok", "--ok-soft"}, {"--ok", "--card"},
+			{"--err", "--err-soft"}, {"--err", "--card"},
+			{"--warn", "--warn-soft"}, {"--warn", "--card"},
 		} {
 			fg, bg := vars[pair[0]], vars[pair[1]]
 			c, ok := contrast(fg, bg)
@@ -194,6 +205,82 @@ func TestThemeContrastWCAG(t *testing.T) {
 					k, pair[0], pair[1], c, fg, bg)
 			}
 		}
+	}
+}
+
+// 玻璃面板与高光那一层不是令牌，没法在上面两两比对，只能按生成器的合成
+// 口径算一次：小字要在一块「比背景更亮」的面上也达标，否则暗色侧栏里的
+// 未选中导航会掉到 4:1 以下（实测 3.96）。
+//
+// 底色取 --bg 而不是 --side：磨砂分支里 .side 铺的是 --glass（半透明白），
+// 它后面就是 body 的 --bg，--side 那一层在 @supports 里已经被覆盖掉了。
+func TestMutedSurvivesGlassPanels(t *testing.T) {
+	for k, vars := range parseCombos(t) {
+		dark := strings.HasPrefix(k, "dark/")
+		r, g, bl, ok := hexRGB(vars["--bg"])
+		if !ok {
+			t.Fatalf("%s 的 --bg 不是纯色：%q", k, vars["--bg"])
+		}
+		bg := [3]float64{r, g, bl}
+		// 侧栏自己铺 --glass，顶上一段还有 --glass-hi 高光；两层都按最亮处取。
+		glass := blend(bg, [3]float64{255, 255, 255}, 0.10)
+		if !dark {
+			glass = blend(bg, [3]float64{255, 255, 255}, 0.82)
+		}
+		hi := blend(glass, [3]float64{255, 255, 255}, 0.11)
+		if !dark {
+			hi = blend(glass, [3]float64{255, 255, 255}, 0.85)
+		}
+		for _, surface := range [][3]float64{glass, hi} {
+			hex := fmt.Sprintf("#%02x%02x%02x",
+				int(surface[0]+.5), int(surface[1]+.5), int(surface[2]+.5))
+			c, ok := contrast(vars["--muted"], hex)
+			if !ok {
+				t.Fatalf("%s 合成面色 %s 解析失败", k, hex)
+			}
+			if c < 4.5 {
+				t.Errorf("%s --muted 在玻璃面 %s 上只有 %.2f:1（--muted=%s）",
+					k, hex, c, vars["--muted"])
+			}
+		}
+	}
+}
+
+// blend 与生成器的 mix() 同一口径：把 white 按 t 混进 c，得到不透明色。
+func blend(c [3]float64, white [3]float64, t float64) [3]float64 {
+	out := [3]float64{}
+	for i := 0; i < 3; i++ {
+		out[i] = c[i]*(1-t) + white[i]*t
+	}
+	return out
+}
+
+// 令牌对了不等于用对了：这一版的两处「换主题后看不清」都不是配色表的问题，
+// 而是 CSS 用错了令牌。
+//   · 实心品牌面写死 color:#fff —— 暗色方案的 --on-acc 是深色，白字压浅色
+//     渐变只剩 1.7:1；
+//   · .todo-row 是 <button>，没写 color 就被 UA 样式表钉成 buttontext（黑），
+//     暗色主题下待办标题成了黑字压深底。
+// 这两条只有浏览器量得到，令牌测试全绿也照样出事，所以在这里用静态断言兜住。
+func TestBrandFillsUseOnAccInk(t *testing.T) {
+	b, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, bad := range []string{"color:#fff;", "color:#ffffff;", "color: #fff;", "color:#fff}"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("index.html 里还有写死的白字 %q：品牌实心面必须用 var(--on-acc)"+
+				"（暗色 --on-acc 是深色，写死白字会掉到 1.7:1）", bad)
+		}
+	}
+	rule := regexp.MustCompile(`(?s)\.todo-row\{[^}]*\}`).FindString(s)
+	if rule == "" {
+		t.Fatal("找不到 .todo-row 规则")
+	}
+	if !strings.Contains(rule, "color:var(--text)") {
+		t.Error(".todo-row 必须显式写 color:var(--text)：<button> 不继承 body 的 color，" +
+			"UA 的 buttontext 是黑色，暗色主题下待办标题会变成黑字压深底")
 	}
 }
 
