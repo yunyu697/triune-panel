@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -2078,7 +2078,7 @@ canvas{display:block;width:100%}
         </div>
       </div>
 
-      <div class="card" data-sect="maintain">
+      <div class="card" id="set_card_cert" data-sect="maintain">
         <h3>ACME 证书（Let's Encrypt）<span class="spacer"></span><span class="badge b-idle hide" id="cert_badge"></span></h3>
         <div class="frm">
           <div><label>域名</label><input id="s_acme_domain" class="input" placeholder="example.com, *.example.com"></div>
@@ -2098,7 +2098,8 @@ canvas{display:block;width:100%}
           <label><input type="checkbox" id="s_acme"> 启用自动签发 / 续期</label>
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
-          <button class="btn primary sm" data-act="openHttpsModal">一键启用 HTTPS</button>
+          <button class="btn primary sm" data-act="saveCertSettings">保存证书设置</button>
+          <button class="btn sm" data-act="openHttpsModal">一键启用 HTTPS</button>
           <button class="btn sm" data-act="issueCert">立即签发 / 续期检查</button>
           <span class="muted" id="certmsg"></span>
         </div>
@@ -12569,6 +12570,9 @@ function certPathsOf(c) {
                  key: dir.replace(/\/+$/, "") + "/privkey.pem" } : { cert: "", key: "" };
 }
 async function issueCert() {
+  // 签发读的是**库里已保存的**设置，不是界面上正在编辑的值。改了没保存就签发，
+  // 签的还是旧方式（典型现象：泛域名报「只能用 DNS-01」，而界面明明选着 DNS-01）。
+  if (SET_DIRTY.has("set_card_cert")) toast("证书设置还没保存，这次签发用的是已保存的值", "warn");
   try {
     const j = await req("/api/certs/issue", { method:"POST" });
     $("certmsg").textContent = j.msg || "已触发";
@@ -12597,8 +12601,13 @@ async function submitHTTPS() {
   if (!domain) { toast("请填写面板域名", "err"); return; }
   if (!email) { toast("请填写邮箱（用于证书到期通知）", "err"); return; }
   try {
+    // 验证方式与凭据也要一起提交：PUT 是部分更新，只写这三个键的话，
+    // 界面上刚切成 DNS-01、库里还是 HTTP-01，签发必然按旧方式走。
     await req("/api/settings", { method:"PUT", body:{
-      acme_enabled:"1", acme_domain:domain, acme_email:email } });
+      acme_enabled:"1", acme_domain:domain, acme_email:email,
+      acme_dns_provider:$("s_acme_dns_provider").value,
+      acme_dns_env:$("s_acme_dns_env").value } });
+    markDirty("set_card_cert", false);
     // 回读服务端而不是就地改输入框：服务端会归一化域名（补逗号、去尾点），
     // 就地赋值会让卡片显示和库里不一致，用户下次「保存」时又把脏值写回去。
     await loadSettings();
@@ -13390,9 +13399,36 @@ async function saveSettings() {
   try {
     await req("/api/settings", { method:"PUT", body });
     markDirty("set_card_basic", false);
+    // 这个 body 里也带着 acme_* 四个键：用户若是先改了证书卡、再点这里的「保存设置」，
+    // 证书卡上的脏点必须一起消掉，否则会一直挂着「未保存」。
+    markDirty("set_card_cert", false);
     toast("设置已保存（统计开关需应用后生效）");
   }
   catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- 证书卡自己的保存 ----
+   它必须有自己的入口：证书卡在「运维」分组，而「保存设置」在「常用」分组里，
+   底部常驻条又只认登记过的卡片（SET_BAR_SECTIONS），停在证书卡时那条是收起的。
+   于是「切到 DNS-01 → 填凭据」之后没有任何按钮可按，改动也从不点亮脏点——
+   用户会以为已经存上了，下次续期才发现还在用 HTTP-01。
+   凭据框里若是打码占位符就原样提交，后端会当成「没改过」（见 putSettings）。 */
+async function saveCertSettings() {
+  const body = {
+    acme_enabled:$("s_acme").checked?"1":"0",
+    acme_domain:$("s_acme_domain").value,
+    acme_email:$("s_acme_email").value,
+    acme_dns_provider:$("s_acme_dns_provider").value,
+    acme_dns_env:$("s_acme_dns_env").value };
+  try {
+    await req("/api/settings", { method:"PUT", body });
+    markDirty("set_card_cert", false);
+    // 回读打码值：真凭据已经进库，输入框里不该继续留着明文
+    const ta = $("s_acme_dns_env");
+    if (ta.value && ta.value !== "********") ta.value = "********";
+    // acme_enabled 为 1 时后端保存完就会触发一次检查（putSettings 末尾），这里照实说
+    toast($("s_acme").checked ? "证书设置已保存，已触发一次签发检查" : "证书设置已保存");
+  } catch (e) { toast(e.message, "err"); }
 }
 
 /* ---- 设置页常驻操作条 ----
@@ -13402,6 +13438,7 @@ async function saveSettings() {
 const SET_BAR_SECTIONS = [
   { id:"set_card_basic",  name:"基础设置", label:"保存设置",     run:() => saveSettings() },
   { id:"set_card_notify", name:"变更通知", label:"保存通知设置", run:() => saveNotify() },
+  { id:"set_card_cert",   name:"ACME 证书", label:"保存证书设置", run:() => saveCertSettings() },
   { id:"set_card_update", name:"组件更新", label:"保存更新设置", run:() => saveUpdateSettings() },
 ];
 let setBarCur = null;
@@ -13523,10 +13560,10 @@ if (setSectSeg) setSectSeg.addEventListener("click", e => {
 });
 
 /* ---- 未保存改动标记 ----
-   三张卡各有自己的保存按钮，切组会把卡片藏起来。给改过的组在标签上点个圆点，
+   四张卡各有自己的保存按钮，切组会把卡片藏起来。给改过的组在标签上点个圆点，
    切回来一眼能看到「这组还有东西没存」。
-   只认这三张卡：2FA 与管理员账号是即时生效的按钮，没有「未保存」这个状态。 */
-const SET_SAVE_CARDS = ["set_card_basic", "set_card_notify", "set_card_update"];
+   只认这四张卡：2FA 与管理员账号是即时生效的按钮，没有「未保存」这个状态。 */
+const SET_SAVE_CARDS = ["set_card_basic", "set_card_notify", "set_card_cert", "set_card_update"];
 const SET_DIRTY = new Set();
 function markDirty(id, on) {
   if (on) SET_DIRTY.add(id); else SET_DIRTY.delete(id);
