@@ -139,6 +139,12 @@ const setTheme = async (page, mode, scheme) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(URL);
   await page.waitForTimeout(1000);
+  // 关掉所有过渡/动画：否则切主题或切视图时 getComputedStyle 会量到过渡中的
+  // 中间色（慢 runner 上尤其明显），造成「稳定态其实达标、却被判低对比度」的假红。
+  // 我们只关心最终落定的配色，不关心切换动画，所以量之前先把动画取消。
+  await page.addStyleTag({
+    content: "*,*::before,*::after{transition:none!important;animation:none!important}",
+  });
 
   // ---- 1. 待办行：<button> 的 color 不能落回 UA 的 buttontext ----
   await setTheme(page, "dark", "azure");
