@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -49,7 +50,7 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		v, _ := a.Store.GetSetting("bin_" + c.Name())
 		out["bin_"+c.Name()] = v
 	}
-	for _, k := range []string{"public_host", "stats_enabled", "stats_secret",
+	for _, k := range []string{"public_host", "server_ip", "stats_enabled", "stats_secret",
 		"quota_warn_pct", "fw_auto",
 		// Prometheus 指标令牌（空 = /metrics 关闭）
 		MetricsTokenSetting,
@@ -112,6 +113,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed := map[string]bool{
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
+		// 服务器公网 IP：只用于「新建入站 → 节点地址」的预填与选择。
+		// 弹性 IP / NAT 的机器上默认路由探测到的是内网地址，这时靠它兜底。
+		"server_ip": true,
 		"quota_warn_pct": true,
 		// Prometheus 指标令牌：写空字符串即关闭 /metrics
 		MetricsTokenSetting: true,
@@ -156,6 +160,21 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "可信反向代理填写有误："+err.Error())
 			return
 		}
+	}
+	// 服务器公网 IP：只给「新建入站 → 节点地址 → 用 IP」做预填。
+	// 允许留空（走默认路由自动探测），填了就必须是 IP——写成域名会被当成 IP
+	// 预填进地址框，导出的链接连不上，而错误要到客户端才暴露。
+	if v, ok := m["server_ip"]; ok && strings.TrimSpace(v) != "" {
+		n, msg := parseNodeHost(v)
+		if msg != "" {
+			fail(w, 400, "服务器公网 IP："+msg)
+			return
+		}
+		if net.ParseIP(n) == nil {
+			fail(w, 400, "服务器公网 IP 必须填 IP（如 1.2.3.4）；域名请填上面的「节点公开地址」")
+			return
+		}
+		m["server_ip"] = n
 	}
 	// 规则集下载源同学校验：库里只留合法值，否则生成页读到一个已下线的
 	// 镜像 ID 时会静默退回官方，用户却以为自己在走镜像。

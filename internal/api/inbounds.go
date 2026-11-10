@@ -215,6 +215,11 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 			ferr = json.Unmarshal(v, &in.Listen)
 		case "port":
 			ferr = json.Unmarshal(v, &in.Port)
+		case "node_host":
+			// 漏掉这一行的后果不是「改不了地址」，而是**开关一次入站就把地址
+			// 清空**：前端 toggleInbound 会把整条入站 PUT 回来，白名单里没有的
+			// 键被静默丢弃，于是 NodeHost 归零、导出的链接悄悄换回全局地址。
+			ferr = json.Unmarshal(v, &in.NodeHost)
 		case "tag":
 			ferr = json.Unmarshal(v, &in.Tag)
 		case "transport":
@@ -295,9 +300,17 @@ func (a *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 //   - 端口冲突：同端口同协议族的两个入站，任何一个内核都起不来（见 validatePortConflict）；
 //   - tag 重复：xray 报 `existing tag found: dup` 并拒绝**整份**配置，用户看到的
 //     是一串内核日志，而不是「你有两个入站重名了」。
+//   - 节点地址填错：进了库就只影响导出的链接，内核侧一切正常，所以报错现场
+//     永远在客户端（连不上），服务端日志干干净净。归一化后写回 in.NodeHost。
 //
 // 注意 tag 只要求在同一内核内唯一：三个内核各有一份独立配置，同名互不影响。
 func (a *Server) validateInboundInput(in *model.Inbound, selfID int64) string {
+	// 客户端连接地址：先归一化（剥掉协议 / 端口 / 路径），非法值直接拒。
+	if h, msg := parseNodeHost(in.NodeHost); msg != "" {
+		return msg
+	} else {
+		in.NodeHost = h
+	}
 	if in.Port < 1 || in.Port > 65535 {
 		return fmt.Sprintf("端口 %d 不合法：必须是 1-65535", in.Port)
 	}

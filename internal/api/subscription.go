@@ -228,6 +228,11 @@ func (a *Server) externalInSub() bool {
 // 客户端发空 short-id，REALITY 握手必然失败。表现就是"建完节点连不上"，
 // 而同机器上 3x-ui 的节点（链接里 sid/sni 齐全）是通的。
 func (a *Server) inboundToNode(in *model.Inbound, c *model.Client, host string) *link.Node {
+	// 入站级的地址优先：同一台机器上「REALITY 连 IP、CDN 回源连域名」是常态，
+	// 一个全局地址必然写错一半。空串表示这条入站没指定，沿用全局。
+	if h := strings.TrimSpace(in.NodeHost); h != "" {
+		host = h
+	}
 	n := &link.Node{
 		Protocol: in.Protocol,
 		Name:     in.Name,

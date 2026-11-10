@@ -94,8 +94,7 @@ func noExportMsg(skipped []string, core string) string {
 		"不能拿来连远程服务器。请改选 " + strings.Join(exportableProtocols, " / ") + " 的入站。"
 }
 
-// dedupeNodeNames 保证节点名唯一。
-//
+// dedupeNodeNames 保证节点名唯一。//
 // 在客户端配置里，节点名就是 tag（sing-box）或 proxy name（mihomo），重名会被
 // 内核直接判死：
 //
@@ -120,4 +119,22 @@ func dedupeNodeNames(nodes []*link.Node) {
 		used[name] = true
 		n.Name = name
 	}
+}
+
+// loopbackNodeHosts 收集导出节点里真正指向回环的地址（去重、保持出现顺序）。
+//
+// 判据放在节点上而不是全局 public_host 上：入站可以各自指定地址（见
+// model.Inbound.NodeHost），只要所有节点都是公网地址，就不该弹「地址是回环」
+// 这种提示——错报一次之后，用户会连真的提示一起忽略。
+func loopbackNodeHosts(nodes []*link.Node) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		if n.Host == "" || seen[n.Host] || !isLoopbackHost(n.Host) {
+			continue
+		}
+		seen[n.Host] = true
+		out = append(out, n.Host)
+	}
+	return out
 }

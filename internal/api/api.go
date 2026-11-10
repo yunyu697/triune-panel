@@ -99,6 +99,9 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth2fa", a.auth(a.handleAuth2FAStatus))
 	mux.HandleFunc("GET /api/status", a.auth(a.handleStatus))
 	mux.HandleFunc("GET /api/inbounds", a.auth(a.listInbounds))
+	// 新建入站的「节点地址」选择器要的候选：本机 IP + 已知域名。
+	// 只读角色也能看（地址本来就在导出的链接里），不涉及凭据。
+	mux.HandleFunc("GET /api/server/addr", a.auth(a.handleServerAddr))
 	// 出站 / 路由 / DNS 的只读视图：渲染当前入站后抽三段出来，不落盘不重启。
 	// 只读角色也能看——里面不含任何凭据，而它本来就是给排障用的。
 	mux.HandleFunc("GET /api/outbounds", a.auth(a.handleOutbounds))

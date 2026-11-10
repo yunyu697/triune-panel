@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v1.9.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v1.9.3 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -959,6 +959,9 @@ canvas{display:block;width:100%}
 .radio-row input{width:auto;accent-color:var(--acc)}
 .sub-token{display:inline-flex;align-items:center;gap:6px;max-width:300px;flex-wrap:wrap}
 .sub-token a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 入站列表里那行「→ 1.2.3.4」：长域名必须能断行，否则 320px 下会把
+   整张表撑出横向滚动条（见 memory：固定宽 table 的老坑）。 */
+.ib-addr{display:block;font-size:11.5px;font-weight:400;margin-top:2px;overflow-wrap:anywhere}
 .quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:11px}
 .quick{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);border-radius:var(--r);
   padding:12px 14px;cursor:pointer;font-family:var(--font);font-size:13.5px;color:var(--text);text-align:left;
@@ -1905,6 +1908,8 @@ canvas{display:block;width:100%}
           <div><label>mihomo 二进制路径</label><input id="s_binmihomo" class="input"></div>
           <p class="muted" style="margin:0">留空可前往下方「组件更新与版本管理」一键安装面板专用副本到 <code>data/bin/</code>，与系统其他服务互不影响。</p>
           <div><label>节点公开地址（订阅生成用）</label><input id="s_host" class="input" placeholder="如 vps.example.com"></div>
+          <div><label>服务器公网 IP <span class="muted" style="font-weight:400">（可选）</span></label>
+            <input id="s_serverip" class="input" placeholder="留空 = 自动探测；弹性 IP / NAT 的机器请填"></div>
           <div><label>可信反向代理网段</label>
             <input id="s_trusted_proxies" class="input" placeholder="如 127.0.0.1 或 10.0.0.0/8"></div>
           <div><label>统计 API 密钥</label><input id="s_stats_secret" class="input"></div>
@@ -2372,6 +2377,21 @@ canvas{display:block;width:100%}
         <select id="ib_protocol" class="input" data-act="ibOnProto"></select></div>
       <div><label>端口 <span class="muted" style="font-weight:400">（自动推荐）</span></label><input id="ib_port" class="input" type="number"></div>
       <div><label>监听地址（留空=全部）</label><input id="ib_listen" class="input" placeholder="留空 = 监听全部网卡"></div>
+      <!-- 节点地址：客户端连 IP 还是域名。域名常解析到 CDN，此时 REALITY / 直连 TLS
+           必须连源站 IP，走 CDN 的 ws+tls 又必须连域名——一台机器两类都可能有，
+           所以按入站选，而不是一个全局值。 -->
+      <div class="full">
+        <label>节点地址 <span class="muted" style="font-weight:400">（客户端连这个；端口仍用上面填的入站端口）</span></label>
+        <div class="seg sm" id="ib_addr_seg">
+          <button data-act="ibAddrMode" data-args='["inherit"]' data-mode="inherit">跟随面板设置</button>
+          <button data-act="ibAddrMode" data-args='["ip"]' data-mode="ip">用 IP</button>
+          <button data-act="ibAddrMode" data-args='["domain"]' data-mode="domain">用域名</button>
+        </div>
+        <input id="ib_nodehost" class="input mono" style="margin-top:8px" list="ib_addr_domains"
+          placeholder="1.2.3.4 或 node.example.com">
+        <datalist id="ib_addr_domains"></datalist>
+        <span class="hint" id="ib_addr_hint" style="display:block;margin-top:6px"></span>
+      </div>
       <div><label>传输</label><select id="ib_transport" class="input" data-act="ibDynamic"></select></div>
       <div><label>TLS</label><select id="ib_tls" class="input" data-act="ibOnTLS"></select></div>
       <div id="ib_dyn_tls" class="full" style="display:none"><div class="frm" id="ib_dyn_tls_inner"></div></div>

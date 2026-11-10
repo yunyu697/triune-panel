@@ -75,9 +75,10 @@ func TestExportWarnsWhenNodeHostIsLoopback(t *testing.T) {
 	if !strings.Contains(warn, "回环") {
 		t.Errorf("节点地址是 127.0.0.1 时应有回环提示，实际 warnings: %q", warn)
 	}
-	// 文案得指出下一步怎么做，否则用户还是只能猜
-	if !strings.Contains(warn, "公网地址") {
-		t.Errorf("提示里应指出去填「公网地址」，实际: %q", warn)
+	// 文案得指出下一步怎么做，否则用户还是只能猜。两处都能改：全局的
+	// 「节点公开地址」，或这一条入站的「节点地址」。
+	if !strings.Contains(warn, "节点公开地址") || !strings.Contains(warn, "节点地址") {
+		t.Errorf("提示里应指出去填「节点公开地址」或入站的「节点地址」，实际: %q", warn)
 	}
 
 	// 2) 填了公网域名 → 不该再提示

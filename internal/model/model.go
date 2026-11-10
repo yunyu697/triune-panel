@@ -24,6 +24,15 @@ type Inbound struct {
 	Protocol  string    `json:"protocol"` // vless/vmess/trojan/shadowsocks/hysteria2/tuic/mixed/socks...
 	Listen    string    `json:"listen"`
 	Port      int       `json:"port"`
+	// NodeHost 是**客户端连接用**的地址（IP 或域名），只影响导出的节点 /
+	// 订阅里的 server，与 Listen 完全无关：Listen 是内核 bind 在哪块网卡。
+	//
+	// 空串 = 跟随设置里的「节点公开地址」，也就是 v1.9.3 之前的唯一行为。
+	// 非空 = 这条入站导出的节点一律用这个地址。存在的理由：域名常常解析到
+	// CDN（Cloudflare 小黄云），此时 REALITY / 直连 TLS 的客户端必须连源站 IP，
+	// 而走 CDN 的 ws+tls 入站反过来必须连域名——一台机器上两种入站同时存在，
+	// 一个全局地址必然写错一半。
+	NodeHost  string    `json:"node_host"`
 	Tag       string    `json:"tag"`
 	Transport string    `json:"transport"` // tcp/ws/grpc/h2/quic
 	TLS       string    `json:"tls"`       // none | tls | reality

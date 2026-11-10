@@ -180,6 +180,14 @@ var migrations = []string{
 	);
 	CREATE INDEX IF NOT EXISTS idx_saved_configs_core ON saved_configs(core, id);
 	`,
+	// v6: 入站的客户端连接地址
+	//
+	// 空串 = 跟随设置里的「节点公开地址」（与加这一列之前的行为完全一致），
+	// 所以老库升级后导出的链接一个字都不会变。非空 = 这条入站单独用这个
+	// 地址（IP 或域名），见 model.Inbound.NodeHost 的说明。
+	`
+	ALTER TABLE inbounds ADD COLUMN node_host TEXT NOT NULL DEFAULT '';
+	`,
 }
 
 func Open(dataDir string) (*Store, error) {
@@ -302,9 +310,9 @@ func (s *Store) Get(key string) (string, error) { return s.GetSetting(key) }
 // ---- Inbounds ----
 
 func (s *Store) CreateInbound(in *model.Inbound) error {
-	res, err := s.db.Exec(`INSERT INTO inbounds(name,core,protocol,listen,port,tag,transport,tls,settings,enabled,draft)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		in.Name, in.Core, in.Protocol, in.Listen, in.Port, in.Tag, in.Transport, in.TLS, in.Settings,
+	res, err := s.db.Exec(`INSERT INTO inbounds(name,core,protocol,listen,port,node_host,tag,transport,tls,settings,enabled,draft)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		in.Name, in.Core, in.Protocol, in.Listen, in.Port, in.NodeHost, in.Tag, in.Transport, in.TLS, in.Settings,
 		b2i(in.Enabled), b2i(in.Draft))
 	if err != nil {
 		return err
@@ -314,8 +322,8 @@ func (s *Store) CreateInbound(in *model.Inbound) error {
 }
 
 func (s *Store) UpdateInbound(in *model.Inbound) error {
-	_, err := s.db.Exec(`UPDATE inbounds SET name=?,core=?,protocol=?,listen=?,port=?,tag=?,transport=?,tls=?,settings=?,enabled=?,draft=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		in.Name, in.Core, in.Protocol, in.Listen, in.Port, in.Tag, in.Transport, in.TLS, in.Settings,
+	_, err := s.db.Exec(`UPDATE inbounds SET name=?,core=?,protocol=?,listen=?,port=?,node_host=?,tag=?,transport=?,tls=?,settings=?,enabled=?,draft=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		in.Name, in.Core, in.Protocol, in.Listen, in.Port, in.NodeHost, in.Tag, in.Transport, in.TLS, in.Settings,
 		b2i(in.Enabled), b2i(in.Draft), in.ID)
 	return err
 }
@@ -328,7 +336,7 @@ func (s *Store) DeleteInbound(id int64) error {
 func scanInbound(row interface{ Scan(...any) error }) (*model.Inbound, error) {
 	var in model.Inbound
 	var enabled, draft int
-	err := row.Scan(&in.ID, &in.Name, &in.Core, &in.Protocol, &in.Listen, &in.Port, &in.Tag,
+	err := row.Scan(&in.ID, &in.Name, &in.Core, &in.Protocol, &in.Listen, &in.Port, &in.NodeHost, &in.Tag,
 		&in.Transport, &in.TLS, &in.Settings, &enabled, &draft, &in.CreatedAt, &in.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -337,7 +345,7 @@ func scanInbound(row interface{ Scan(...any) error }) (*model.Inbound, error) {
 	return &in, nil
 }
 
-const inboundCols = `id,name,core,protocol,listen,port,tag,transport,tls,settings,enabled,draft,created_at,updated_at`
+const inboundCols = `id,name,core,protocol,listen,port,node_host,tag,transport,tls,settings,enabled,draft,created_at,updated_at`
 
 func (s *Store) ListInbounds(core string) ([]*model.Inbound, error) {
 	q := `SELECT ` + inboundCols + ` FROM inbounds`

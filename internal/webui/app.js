@@ -993,9 +993,9 @@ if (DEMO) {
        created_at:"2026-10-27 18:02:00",updated_at:"2026-10-27 18:02:00"}
     ],
     inbounds:[
-      {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",enabled:true,draft:false,settings:"{}"},
-      {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",enabled:true,draft:false,settings:"{}"},
-      {id:3,name:"sg-01-hy2",core:"singbox",protocol:"hysteria2",port:36712,transport:"udp",tls:"tls",listen:"",enabled:false,draft:false,settings:"{}"}
+      {id:1,name:"hk-01-reality",core:"singbox",protocol:"vless",port:443,transport:"tcp",tls:"reality",listen:"",node_host:"203.0.113.10",enabled:true,draft:false,settings:"{}"},
+      {id:2,name:"jp-01-ws",core:"xray",protocol:"vless",port:8443,transport:"ws",tls:"tls",listen:"",node_host:"cdn.example.com",enabled:true,draft:false,settings:"{}"},
+      {id:3,name:"sg-01-hy2",core:"singbox",protocol:"hysteria2",port:36712,transport:"udp",tls:"tls",listen:"",node_host:"",enabled:false,draft:false,settings:"{}"}
     ],
     clients:[
       {client:{id:1,name:"alice",credential:"8f2b1c3d-9e4a-4f5b-8c6d-7e8f9a0b1c2d",sub_token:"demo1234abcd",quota_gb:50,expires_at:null,enabled:true},inbound_ids:[1,2]},
@@ -1019,7 +1019,7 @@ if (DEMO) {
       {id:2,core:"singbox",status:"applied",note:"auto: 用户停用后重新应用",created_at:"2026-10-31T02:10:05",content:"(修订内容示例)"},
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
-    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
+    settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",server_ip:"203.0.113.10",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"0",acme_domain:"",acme_email:"",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
       backup_keep_count:"0",backup_max_mb:"0",backup_max_days:"0",backup_auto_prune:"0"},
     // 备份容量治理与主机体检的演示数据：让离线 demo 也能完整走一遍预览→清理、
     // 检测→应用→撤销，而不是点进去一片空白。
@@ -1235,6 +1235,11 @@ async function mockRoute(path, opts) {
   if (api === "inbounds" && rest === "/parse-json") return demoFillInbound(String(opts.body?.text || ""), opts.body?.core || "xray");
   // 演示模式：出站 / 路由 / DNS 的只读视图（真机由后端渲染当前配置得到）
   if (api === "outbounds" && m === "GET") return demoOutbounds(q.core || "xray");
+  // 演示模式：新建入站的「节点地址」候选（真机探测出口 IP + 读 ACME / 公开地址）
+  if (api === "server" && rest === "/addr") return {
+    ip: "203.0.113.10", ip_source: "setting",
+    domains: ["vps.example.com", "cdn.example.com"], public_host: "vps.example.com"
+  };
   if (api === "inbounds" && m === "GET") return MDB.inbounds;
   if (api === "inbounds" && m === "POST") {
     const b = Object.assign({}, opts.body);
@@ -2488,7 +2493,7 @@ async function loadInbounds() {
     INB_N = j.length;
     const stInb = $("st_inb"); if (stInb) stInb.textContent = j.length;
     $("ibtbody").innerHTML = j.map(i => { return `<tr>
-      <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}${i.enabled ? "" : ' <span class="badge b-warn" title="未启用：端口没有监听，导出的链接连不上">未启用</span>'}</td>
+      <td><b>${i.name}</b>${i.draft ? ' <span class="badge b-warn">草稿</span>' : ""}${i.enabled ? "" : ' <span class="badge b-warn" title="未启用：端口没有监听，导出的链接连不上">未启用</span>'}${i.node_host ? `<span class="muted ib-addr" title="客户端连接地址（导出的链接用这个）">→ ${escHtml(i.node_host)}</span>` : ""}</td>
       <td><span class="badge b-acc">${i.core}</span></td><td>${i.protocol}</td>
       <td class="num">${i.port}</td><td>${i.transport}</td><td>${i.tls}</td>
       <td><label class="sw"><input type="checkbox" ${i.enabled?"checked":""} data-act="toggleInbound" data-args="${escJson([i.id])}" data-el="checked"><i></i></label></td>
@@ -6064,6 +6069,73 @@ function maskCred(s) {
   return s.length <= 8 ? "*".repeat(s.length) : s.slice(0, 6) + "…（" + s.length + " 位）";
 }
 
+/* ---- 入站节点地址（客户端连 IP 还是域名）----
+   域名经常解析到 CDN（Cloudflare 小黄云）：此时 REALITY / 直连 TLS 的客户端
+   必须连源站 IP，而走 CDN 的 ws+tls 入站反过来必须连域名。一台机器上两类入站
+   同时存在，一个全局「节点公开地址」必然写错一半——所以地址下沉到入站级。
+   留空 = 跟随面板设置，与加这个功能之前的行为完全一致（老库升级后链接不变）。 */
+let IB_ADDR = { ip: "", domains: [], public_host: "", loaded: false };
+
+async function loadServerAddr() {
+  if (IB_ADDR.loaded) return IB_ADDR;
+  try {
+    const j = await req("/api/server/addr");
+    IB_ADDR = { ip: j.ip || "", domains: j.domains || [], public_host: j.public_host || "", loaded: true };
+  } catch (e) {
+    // 探测失败不该挡住建入站：选择器退化成「跟随面板设置 + 手填」
+    IB_ADDR = { ip: "", domains: [], public_host: "", loaded: true };
+  }
+  return IB_ADDR;
+}
+
+// ibAddrIsIP 判定一个地址字符串是 IP（含 IPv6）而不是域名，用于回填时选模式。
+function ibAddrIsIP(s) {
+  if (!s) return false;
+  if (s.includes(":")) return true;                    // IPv6
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s);            // IPv4
+}
+
+function ibAddrHint() {
+  const mode = $("ib_nodehost").dataset.mode || "inherit";
+  const h = $("ib_addr_hint");
+  if (!h) return;
+  if (mode === "inherit") {
+    h.textContent = IB_ADDR.public_host
+      ? "跟随「设置 → 节点公开地址」：" + IB_ADDR.public_host
+      : "跟随「设置 → 节点公开地址」；那里留空时用访问面板的地址";
+  } else if (mode === "ip") {
+    h.textContent = IB_ADDR.ip
+      ? "域名解析到 CDN 时选这个：REALITY / 直连 TLS 连域名会连到 CDN，握手进不来"
+      : "没探测到公网 IP（弹性 IP / NAT 机器拿到的是内网地址），请手填源站 IP";
+  } else {
+    h.textContent = IB_ADDR.domains.length
+      ? "走 CDN 回源、或客户端要按域名校验证书时选这个"
+      : "没有已知域名，请手填（ACME 域名与「节点公开地址」会自动带出来）";
+  }
+}
+
+function ibAddrSet(mode, value) {
+  [...$("ib_addr_seg").children].forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  const inp = $("ib_nodehost");
+  inp.dataset.mode = mode;
+  inp.classList.toggle("hide", mode === "inherit");
+  if (value != null) inp.value = value;
+  ibAddrHint();
+}
+
+async function ibAddrMode(mode) {
+  await loadServerAddr();
+  const cur = $("ib_nodehost").value.trim();
+  let v = cur;
+  if (mode === "inherit") v = "";
+  // 只在「当前值是自动带出来的」时才替换：用户手填过的地址不因为他点一下
+  // 另一个模式就被抹掉（他可能就是想让 IP 和域名都留着对比）。
+  else if (mode === "ip" && (!cur || cur === IB_ADDR.domains[0])) v = IB_ADDR.ip || "";
+  else if (mode === "domain" && (!cur || cur === IB_ADDR.ip)) v = IB_ADDR.domains[0] || "";
+  ibAddrSet(mode, v);
+  if (v) $("ib_nodehost").focus();
+}
+
 async function openInboundModal(id) {
   $("ibtitle").textContent = id ? "编辑入站" : "新增入站";
   // 每次打开都清空上一次的 JSON 解析结果：新增入站时带着上一条的
@@ -6094,6 +6166,13 @@ async function openInboundModal(id) {
   $("ib_listen").value = v.listen || "";
   $("ib_port").value = v.port || "";
   $("ib_settings").value = v.settings || "{}";
+  // 节点地址：老入站没有这个字段（空串）= 跟随面板设置。
+  // 回填时按值的形态选模式，让「这条到底连的是 IP 还是域名」一眼可见。
+  await loadServerAddr();
+  $("ib_addr_domains").innerHTML = IB_ADDR.domains
+    .map(d => `<option value="${escHtml(d)}">`).join("");
+  const nh = (v.node_host || "").trim();
+  ibAddrSet(nh ? (ibAddrIsIP(nh) ? "ip" : "domain") : "inherit", nh);
   // 运行中的入站改内核必须走安全切换流程，编辑弹窗里直接锁住内核选择
   const lockCore = id && v.enabled && !v.draft;
   $("ib_core").disabled = lockCore;
@@ -6135,9 +6214,18 @@ async function saveInbound() {
   let settings;
   try { settings = JSON.stringify(ibFormToSettings()); }
   catch(e){ toast("Settings JSON 无效: " + e.message, "err"); return; }
+  // 节点地址：跟随面板设置时显式传空串（= 用全局），否则用输入框里的值。
+  // 空着却选了「用 IP / 用域名」是没填完，不能静默退回跟随——那会让用户
+  // 以为链接用的是 IP，实际发出去的是别处的地址。
+  const addrMode = $("ib_nodehost").dataset.mode || "inherit";
+  const nodeHost = addrMode === "inherit" ? "" : $("ib_nodehost").value.trim();
+  if (addrMode !== "inherit" && !nodeHost) {
+    toast("节点地址选了「" + (addrMode === "ip" ? "用 IP" : "用域名") + "」但没填值，或改回「跟随面板设置」", "err");
+    return;
+  }
   const body = { name:$("ib_name").value, core:$("ib_core").value, protocol:ibProto(),
     listen:$("ib_listen").value, port:+$("ib_port").value, transport:$("ib_transport").value,
-    tls:$("ib_tls").value, settings };
+    tls:$("ib_tls").value, settings, node_host:nodeHost };
   if (!body.name || !body.port) { toast("名称与端口不能为空", "err"); return; }
   // 从 JSON 填表时勾了「一并创建用户」：和入站一起提交。
   // 分两个请求会出现「入站建好了、用户没建上」——面板上看着和成功一模一样。
@@ -7460,6 +7548,7 @@ async function loadSettings() {
     const j = await req("/api/settings");
     $("s_binsingbox").value = j.bin_singbox || ""; $("s_binxray").value = j.bin_xray || "";
     $("s_binmihomo").value = j.bin_mihomo || ""; $("s_host").value = j.public_host || "";
+    $("s_serverip").value = j.server_ip || "";
     $("s_stats").checked = j.stats_enabled === "1"; $("s_stats_secret").value = j.stats_secret || "";
     $("ext_in_sub").checked = j.external_in_sub === "1"; extSwitchLabel(j.external_in_sub === "1");
     $("s_metrics_token").value = j.metrics_token || "";
@@ -8087,7 +8176,7 @@ function genMetricsToken(){
 }
 async function saveSettings() {
   const body = { bin_singbox:$("s_binsingbox").value, bin_xray:$("s_binxray").value,
-    bin_mihomo:$("s_binmihomo").value, public_host:$("s_host").value,
+    bin_mihomo:$("s_binmihomo").value, public_host:$("s_host").value, server_ip:$("s_serverip").value.trim(),
     stats_enabled:$("s_stats").checked?"1":"0", stats_secret:$("s_stats_secret").value,
     metrics_token:$("s_metrics_token").value.trim(),
     quota_warn_pct:String(+$("s_warn_pct").value || 80),

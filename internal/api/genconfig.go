@@ -654,14 +654,19 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 客户端配置里的 server 就是 publicHost 的结果。没填「公网地址」而管理员又是
-	// 用 127.0.0.1 / localhost 打开的面板时，导出的节点会指向回环地址——拿到
-	// 另一台机器上永远连不上，而配置本身每一项都是对的，用户只能反复怀疑节点。
-	// 这里只提示不阻断：面板和客户端同机（本机测试、内网中转）确实能这么用。
-	if q.Target == "client" && isLoopbackHost(host) {
-		warns = append(warns, fmt.Sprintf(
-			"导出的节点地址是 %s（本机回环），只有客户端和面板在同一台机器上才连得通。"+
-				"请到「设置 → 公网地址」填服务器的公网 IP 或域名后重新导出。", host))
+	// 客户端配置里的 server 来自「入站的节点地址」，没指定时才回落到 publicHost。
+	// 没填「公网地址」而管理员又是用 127.0.0.1 / localhost 打开的面板时，导出的
+	// 节点会指向回环地址——拿到另一台机器上永远连不上，而配置本身每一项都是对的，
+	// 用户只能反复怀疑节点。
+	// 这里按**实际生成的节点**判断，不看全局值：入站可以各自指定地址，只要所有
+	// 节点都是公网地址就不该提示。只提示不阻断：面板和客户端同机确实能这么用。
+	if q.Target == "client" {
+		if bad := loopbackNodeHosts(nodes); len(bad) > 0 {
+			warns = append(warns, fmt.Sprintf(
+				"导出的节点地址是 %s（本机回环），只有客户端和面板在同一台机器上才连得通。"+
+					"请到「设置 → 节点公开地址」填服务器的公网 IP 或域名，或在入站的「节点地址」里单独指定后重新导出。",
+				strings.Join(bad, "、")))
+		}
 	}
 
 	// 下载源：非法值已在 resolveMirror 里退回官方，这里只把原因转成提示
