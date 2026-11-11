@@ -588,9 +588,39 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "core 必须是 mihomo 或 singbox")
 		return
 	}
-	if q.Target != "client" && q.Target != "main-router" && q.Target != "side-router" {
-		fail(w, 400, "target 必须是 client / main-router / side-router")
+	if !validGenTarget(q.Target) {
+		fail(w, 400, "target 必须是 client / main-router / side-router / openwrt-momo")
 		return
+	}
+	// momo 跑的是 sing-box，profile 就是一份 config.json；给 mihomo 的 YAML
+	// 它连解析都不会，静默「替用户改成 sing-box」只会让人以为自己勾错了。
+	if q.Target == genTargetMomo && q.Core != "singbox" {
+		fail(w, 400, "OpenWrt-momo 基于 sing-box：请把配置内核切成 sing-box（mihomo 的 YAML 不能作为 momo 的 profile）")
+		return
+	}
+	// 版本在这里先定下来：它是「这份请求本身」的合法性，不该等到收集完节点
+	// 才检查。否则用户选错版本时看到的可能是「没有有效用户」，把问题指到
+	// 完全无关的地方。
+	ver := defaultSBVersion
+	if q.Core == "singbox" {
+		var err error
+		ver, err = parseSBVersion(q.CoreVersion)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		if !ver.atLeast(minSBVersion.Major, minSBVersion.Minor) {
+			fail(w, 400, fmt.Sprintf(
+				"sing-box %s 不支持：1.10 及以前没有路由 action，配置结构完全不同（block/dns 出站 + inet4_address）。请选 1.11 或更高。", ver))
+			return
+		}
+		// momo 的依赖写死 sing-box >= 1.12，它的 mixin 会往 profile 里塞
+		// 1.12 才有意义的 dns / cache_file 字段；1.11 的旧 DNS address 格式
+		// 与 fakeip type 都对不上，生成的配置「能存进去、起不来」。
+		if q.Target == genTargetMomo && !ver.atLeast(1, 12) {
+			fail(w, 400, "OpenWrt-momo 需要 sing-box 1.12 或更高（1.11 的 DNS 格式与 momo 的 mixin 不兼容），请重新选择版本")
+			return
+		}
 	}
 	if len(q.InboundIDs) == 0 {
 		fail(w, 400, "请至少选择一个入站")
@@ -689,29 +719,21 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 			coreLabel(q.Core), strings.Join(skipped, "、")))
 	}
 
-	// sing-box 必须先定版本：1.11 与 1.12+ 是两套 JSON。
-	ver := defaultSBVersion
+	// ver 已在请求校验时定好（1.11 与 1.12+ 是两套 JSON）；这里只补上
+	// 「这份配置按哪个版本写的」提示，让用户下载后还能对得上号。
 	if q.Core == "singbox" {
-		var err error
-		ver, err = parseSBVersion(q.CoreVersion)
-		if err != nil {
-			fail(w, 400, err.Error())
-			return
-		}
-		if !ver.atLeast(minSBVersion.Major, minSBVersion.Minor) {
-			fail(w, 400, fmt.Sprintf(
-				"sing-box %s 不支持：1.10 及以前没有路由 action，配置结构完全不同（block/dns 出站 + inet4_address）。请选 1.11 或更高。", ver))
-			return
-		}
 		if note := versionNote(ver); note != "" {
 			warns = append(warns, "sing-box "+ver.String()+"："+note)
 		}
 	}
 
 	var g *generator
-	if q.Core == "mihomo" {
+	switch {
+	case q.Target == genTargetMomo:
+		g = genMomo(ver, nodes, sets, q.CustomRules, &warns, mir, bypass)
+	case q.Core == "mihomo":
 		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, mir, bypass)
-	} else {
+	default:
 		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, mir, bypass)
 	}
 
@@ -1025,6 +1047,9 @@ func targetNote(target string) string {
 		return "主路由模式：TUN 接管全机流量，DNS 劫持 :53，局域网设备无需任何配置。\n重启路由前建议先在单设备上验证配置。"
 	case "side-router":
 		return "旁路由模式：将本机 IP 设为局域网设备的网关与 DNS 即可接管；\n主路由无需改动（关闭主路由 DHCP 冲突即可并存）。"
+	case genTargetMomo:
+		return "OpenWrt-momo：输出完整的 sing-box config.json 作为 profile，自带 momo 固定 tag 的入站与 fake-ip DNS；\n" +
+			"momo 自己接管 nftables / 策略路由，配置里的 tun-in 必须保持 auto_route:false。"
 	default:
 		return "客户端模式：默认使用混合端口 7890（HTTP/SOCKS），配合系统代理或浏览器插件使用。"
 	}

@@ -62,3 +62,56 @@ func TestBypassServerOptionWired(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenWrtMomoTargetWired OpenWrt-momo 是「目标」，但它绑死了 sing-box 内核
+// 与 1.12+ 版本。这条链最容易漏的是：按钮加了、界面还停在 mihomo，请求体
+// 发出去直接 400；或者离线演示没有 momo 分支，demo.html 显示的是主路由配置。
+func TestOpenWrtMomoTargetWired(t *testing.T) {
+	html := string(indexHTML)
+	appJS, _, err := AssetFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(appJS)
+
+	if !strings.Contains(html, `data-v="openwrt-momo"`) {
+		t.Error("配置生成页缺 OpenWrt-momo 目标按钮")
+	}
+	if !strings.Contains(src, `"openwrt-momo": "OpenWrt-momo：`) ||
+		!strings.Contains(src, `"openwrt-momo": "OpenWrt-momo"`) {
+		t.Error("目标提示或保存配置的目标标签没登记 openwrt-momo")
+	}
+
+	sync := funcBody(src, "function syncGenTargetCore() {")
+	for _, s := range []string{
+		`genTarget === "openwrt-momo"`,
+		`genCore = "singbox"`,
+		`mihomoBtn.disabled = momo`,
+		`genSBVer = "1.12"`,
+		`renderSets(); filterSets()`,
+	} {
+		if !strings.Contains(sync, s) {
+			t.Errorf("syncGenTargetCore() 缺少 %q", s)
+		}
+	}
+	// 目标切换必须调用它，并让上一份生成结果失效
+	targetClick := src[strings.Index(src, `$("g_target_seg").addEventListener("click"`):]
+	targetClick = targetClick[:strings.Index(targetClick, "});")+3]
+	for _, s := range []string{"syncGenTargetCore()", "genOptionChanged()"} {
+		if !strings.Contains(targetClick, s) {
+			t.Errorf("切换目标的事件处理缺少 %q", s)
+		}
+	}
+
+	// 演示数据必须和后端 genMomo 同形：momo 按 tag 找入站，少一个就起不来
+	demo := funcBody(src, "function demoGenConfig(core, target, ver, bypass) {")
+	for _, s := range []string{
+		`if (target === "openwrt-momo")`,
+		`"dns-in"`, `"redirect-in"`, `"tproxy-in"`, `"tun-in"`,
+		`"fake-ip-dns-server"`, `auto_route: false`, `interface_name: "momo"`,
+	} {
+		if !strings.Contains(demo, s) {
+			t.Errorf("demoGenConfig() 的 momo 分支缺少 %q", s)
+		}
+	}
+}

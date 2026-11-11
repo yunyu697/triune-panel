@@ -8,6 +8,38 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.0.3
+
+### 配置生成新增 OpenWrt-momo 目标
+
+**配置生成 → 使用目标** 多一个「OpenWrt-momo」，直接产出可以贴进 LuCI → Momo → 配置
+的 `config.json`（profile）。momo 是 OpenWrt 上基于 sing-box 的透明代理：它自己铺
+nftables、策略路由与 cgroup 分流，profile 只负责提供内核配置，而且**按固定 tag 找入站**。
+把「主路由」那份配置直接贴过去是不行的——那份 TUN 是 `auto_route:true`，会和 momo 抢路由表，
+更糟的是缺 `dns-in` / `redirect-in` / `tun-in`，momo 的启动检查只会在日志里留一句
+`Check failed` 就退出，内核根本不启动，界面上看不到任何原因。
+
+- 生成器复用 sing-box 主路由模板的节点、规则集、自定义规则与「绕过节点服务器」，
+  只替换入口与 DNS：`dns-in`（direct，1053）、`redirect-in`（7890）、`tproxy-in`（7891）、
+  `tun-in`（`interface_name:momo`、`auto_route:false`）、调试用的 `mixed-in`（7892），
+  全部监听 `::` 以覆盖 momo 默认开启的 IPv6 劫持。
+- DNS 补上 momo 默认 tag 的 `fake-ip-dns-server`（IPv4 + IPv6 段），A/AAAA 查询走 fakeip、
+  HTTPS RR 直接拒；节点服务器域名与国内域名仍走真实 DNS 且排在前面，不会「用隧道连隧道端点」。
+  路由第一条是 `sniff`，随后 `dns-in` 的 `hijack-dns`，域名规则集才真正生效。
+- 选中该目标时界面强制切到 sing-box、禁用 mihomo、把版本从 1.11 抬到 1.12；后端同样
+  在收集节点**之前**校验内核与版本（momo 依赖 sing-box ≥ 1.12），避免选错版本却报
+  「所选入站下没有有效用户」这种指错方向的错。切目标会让上一次生成结果失效。
+- 保存的参数、重新生成、配置管理的目标标签、离线演示数据都同步了 momo。
+
+**验证**：`sing-box 1.12.25 check` 通过，`format -w` 后复检通过（momo 启动时就是这两步），
+本机 1.15.0-alpha 也通过；`TRINE_SINGBOX_BIN` 留了可复跑的真机用例。Go 单测覆盖
+tag / 端口 / `auto_route` / fakeip / sniff / 规则集直连 / 版本门限 / HTTP 400 与 200，
+变异（改 tag、改回 `auto_route:true`）转红。新增 `.e2e/momo-target.js` 28 项真点一遍，
+变异（去掉内核强制切换）17 项转红。
+
+**边界**：tag 按 `/etc/config/momo` 的 `core` 段默认值写死，改过 tag 要同步改配置；
+OpenWrt / firewall4 / LuCI 的 Profile Check 未在实机跑过（见 README 已知限制）。
+
 ## v2.0.2
 
 ### 修复：DNS-01 凭据校验自相矛盾（CF_ 别名填了反被拒、小写被当成「前缀不对」）

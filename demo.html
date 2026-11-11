@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.3 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1751,6 +1751,7 @@ canvas{display:block;width:100%}
               <button data-v="client" class="on">客户端</button>
               <button data-v="main-router">主路由</button>
               <button data-v="side-router">旁路由</button>
+              <button data-v="openwrt-momo" title="OpenWrt 上的 sing-box 透明代理（momo / luci-app-momo）">OpenWrt-momo</button>
             </div>
           </div>
         </div>
@@ -7767,7 +7768,12 @@ const GEN_TARGET_NOTES = {
      现象是「节点在线、网页全打不开」。与 genconfig.go 的文件头提示保持一致。 */
   client: "客户端模式：混合端口 7890（HTTP/SOCKS）+ 系统代理或浏览器插件使用，不启用 TUN，最轻量。端口以客户端界面上显示的为准：Clash Verge 等会用自己的设置覆盖 7890（默认 7897）。",
   "main-router": "主路由模式：启用 TUN 接管全机流量 + DNS 劫持 :53 + 流量嗅探，局域网设备零配置；建议先在单设备上验证配置。",
-  "side-router": "旁路由模式：启用 TUN + DNS 劫持 + 局域网监听；把设备的网关和 DNS 指向本机 IP 即可接管，主路由无需改动。"
+  "side-router": "旁路由模式：启用 TUN + DNS 劫持 + 局域网监听；把设备的网关和 DNS 指向本机 IP 即可接管，主路由无需改动。",
+  /* momo 是 OpenWrt 上的 sing-box 透明代理：profile 就是一份 config.json。
+     它按固定 tag 找入站、自己铺 nftables 与策略路由，所以它和「主路由 /
+     旁路由」的 auto_route:true 恰好相反。这两点不写清，用户把配置贴进
+     LuCI 后只会看到一句 Profile Check failed。 */
+  "openwrt-momo": "OpenWrt-momo：生成完整的 sing-box config.json 作为 profile，自带 dns-in / redirect-in / tproxy-in / tun-in 与 fake-ip DNS；momo 自己接管防火墙和路由，配置里的 TUN 必须保持 auto_route:false。只能用 sing-box 1.12+，把文件贴进 LuCI → Momo → 配置（或用订阅链接导入）；改过 /etc/config/momo 里 core 段的 tag 时要同步改名。"
 };
 const DEMO_CATALOG = {
   sets: [
@@ -9522,6 +9528,7 @@ async function loadGen() {
   genTargetNote();
   renderSBVerSelect();
   syncSBVerVisibility();
+  syncGenTargetCore();
   await loadRuleTags();
 }
 
@@ -9792,8 +9799,37 @@ function syncSBVerVisibility() {
   $("g_sbver_wrap").style.display = genCore === "singbox" ? "" : "none";
 }
 
+/* OpenWrt-momo 只认 sing-box 的 config.json，且依赖 >= 1.12。
+   选中它时把内核切过去、禁用 mihomo、把 1.11 抬到 1.12；切回别的目标恢复。
+   不能只在请求体里偷偷改 core：界面上显示的「mihomo」和实际发走的
+   「singbox」不一致，用户还以为自己导出的是 YAML。 */
+function syncGenTargetCore() {
+  const momo = genTarget === "openwrt-momo";
+  const mihomoBtn = $("g_core_seg").querySelector('button[data-v="mihomo"]');
+  if (mihomoBtn) {
+    mihomoBtn.disabled = momo;
+    mihomoBtn.title = momo ? "OpenWrt-momo 基于 sing-box，只能用 sing-box" : "";
+  }
+  if (momo && genCore !== "singbox") {
+    genCore = "singbox";
+    [...$("g_core_seg").children].forEach(x => x.classList.toggle("on", x.dataset.v === "singbox"));
+    syncSBVerVisibility();
+    // 规则集有「仅 mihomo / 仅 singbox」之分，切内核必须重画，否则置灰状态
+    // 还停留在上一个内核，勾出来的规则集上游根本不存在。
+    renderSets(); filterSets();
+    if (genScenario) applyScenario(genScenario);
+  }
+  if (momo && genSBVer === "1.11") {
+    genSBVer = "1.12";
+    renderSBVerSelect();   // 顺带让旧生成结果失效
+  }
+}
+
 $("g_core_seg").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.v === "mihomo" && genTarget === "openwrt-momo") {
+    toast("OpenWrt-momo 只能用 sing-box；先切到别的使用目标", "warn"); return;
+  }
   genCore = b.dataset.v;
   [...$("g_core_seg").children].forEach(x => x.classList.toggle("on", x === b));
   syncSBVerVisibility();
@@ -9804,7 +9840,11 @@ $("g_target_seg").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   genTarget = b.dataset.v;
   [...$("g_target_seg").children].forEach(x => x.classList.toggle("on", x === b));
+  syncGenTargetCore();
   genTargetNote();
+  // 切了目标，上一次生成的配置就过期了：不清掉的话「下载」拿到的还是
+  // 另一个目标的文件，却顶着新目标的名字。
+  genOptionChanged();
 });
 
 function addCustomSetRow(name, url, beh, pol) {
@@ -10026,13 +10066,70 @@ ${on ? "  - DOMAIN,demo.example.com,DIRECT\n" : ""}  - RULE-SET,geosite-cn,DIREC
   const [maj, min] = String(ver || "1.14").split(".").map(Number);
   const geq = (a, b) => maj > a || (maj === a && min >= b);
   const newDNS = geq(1, 12), noStack = geq(1, 15);
-  const router = target !== "client";
-
   const dnsServers = newDNS
     ? [{ type: "https", tag: "remote", server: "8.8.8.8", detour: "PROXY" },
        { type: "udp", tag: "local", server: "223.5.5.5", detour: "direct" }]
     : [{ tag: "remote", address: "https://8.8.8.8/dns-query", detour: "PROXY" },
        { tag: "local", address: "223.5.5.5", detour: "direct" }];
+
+  /* 离线演示也要和后端 genMomo 同形：momo 的启动检查按 tag 找入站，
+     演示里少了这些字段，用户在 demo.html 里看到的「先长什么样」就是错的。 */
+  if (target === "openwrt-momo") {
+    const tun = { type: "tun", tag: "tun-in", interface_name: "momo",
+      address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"], auto_route: false };
+    if (!noStack) tun.stack = "mixed";
+    const momoIn = [
+      { type: "direct", tag: "dns-in", listen: "::", listen_port: 1053 },
+      { type: "redirect", tag: "redirect-in", listen: "::", listen_port: 7890 },
+      { type: "tproxy", tag: "tproxy-in", listen: "::", listen_port: 7891 },
+      tun,
+      { type: "mixed", tag: "mixed-in", listen: "::", listen_port: 7892 }
+    ];
+    const momoDNS = {
+      servers: dnsServers.concat([{ type: "fakeip", tag: "fake-ip-dns-server",
+        inet4_range: "198.18.0.0/15", inet6_range: "fc00::/18" }]),
+      rules: [
+        { query_type: "HTTPS", action: "reject" },
+        ...(on ? [{ domain: ["demo.example.com"], server: "local" }] : []),
+        { rule_set: ["geosite-cn"], server: "local" },
+        { clash_mode: "direct", server: "local" },
+        { clash_mode: "global", server: "fake-ip-dns-server" },
+        { query_type: ["A", "AAAA"], server: "fake-ip-dns-server" }
+      ],
+      final: "remote"
+    };
+    const momoRoute = {
+      rules: [
+        { action: "sniff", sniffer: ["http", "tls", "quic", "dns"] },
+        { inbound: "dns-in", action: "hijack-dns" },
+        { protocol: "dns", action: "hijack-dns" },
+        ...(on ? [{ domain: ["demo.example.com"], outbound: "direct" }] : []),
+        { rule_set: ["geosite-cn"], outbound: "direct" },
+        { ip_cidr: ["192.168.0.0/16", "10.0.0.0/8"], outbound: "direct" }
+      ],
+      rule_set: [{ type: "remote", tag: "geosite-cn", format: "binary",
+        url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        download_detour: "direct", update_interval: "86400s" }],
+      final: "PROXY",
+      auto_detect_interface: true,
+      default_domain_resolver: { server: "local" }
+    };
+    return JSON.stringify({
+      log: { level: "info", timestamp: true },
+      dns: momoDNS, inbounds: momoIn,
+      outbounds: [
+        { type: "urltest", tag: "Auto", outbounds: ["demo-hk-user1"],
+          url: "http://www.gstatic.com/generate_204", interval: "5m" },
+        { type: "selector", tag: "PROXY", outbounds: ["Auto", "demo-hk-user1"], default: "Auto" },
+        { type: "vless", tag: "demo-hk-user1", server: "demo.example.com", server_port: 443,
+          uuid: "a1b2c3d4-1111-2222-3333-444455556666", tls: { enabled: true } },
+        { type: "direct", tag: "direct" }
+      ],
+      route: momoRoute
+    }, null, 2);
+  }
+
+  const router = target !== "client";
 
   const inbounds = [];
   if (router) {
@@ -10209,7 +10306,7 @@ if ($("tag_mode_seg")) {
 
 /* ================= 配置管理 ================= */
 
-const TARGET_LABEL = { client: "客户端", "main-router": "主路由", "side-router": "旁路由" };
+const TARGET_LABEL = { client: "客户端", "main-router": "主路由", "side-router": "旁路由", "openwrt-momo": "OpenWrt-momo" };
 let SAVED_CFGS = [];
 
 function saveBlob(blob, filename) {

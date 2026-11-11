@@ -142,7 +142,7 @@ WCAG AA 4.5:1 以上；`theme_contract_test.go` 逐项检查 14 个组合的令�
 
 **日常使用**
 
-- [导入入站配置](#导入配置3x-ui--xray-的入站定义) · [外部节点](#分享链接--外部节点默认不进订阅) · [订阅输出](#订阅输出)
+- [导入入站配置](#导入配置3x-ui--xray-的入站定义) · [外部节点](#分享链接--外部节点默认不进订阅) · [订阅输出](#订阅输出) · [OpenWrt-momo 配置](#openwrt-momo第四个目标)
 - [出站与路由](#出站与路由只读) · [配置生成](#配置生成客户端) · [配置管理](#配置管理保存下载重新生成) · [规则标签](#规则标签快捷套用)
 - [界面主题](#界面主题亮暗--色彩方案) · [加到主屏](#加到主屏pwa) · [组件更新与下载镜像](#组件更新与下载镜像)
 
@@ -1002,8 +1002,35 @@ authentication failed`），在客户端侧看不出是哪一项。
 
 ## 配置生成（客户端）
 
-**配置生成** 页把所选入站 × 有效用户展开成节点，按目标（客户端 / 主路由 / 旁路由）
-生成 mihomo YAML 或 sing-box JSON。
+**配置生成** 页把所选入站 × 有效用户展开成节点，按目标（客户端 / 主路由 / 旁路由 /
+OpenWrt-momo）生成 mihomo YAML 或 sing-box JSON。
+
+### OpenWrt-momo（第四个目标）
+
+[OpenWrt-momo](https://github.com/nikkinikki-org/OpenWrt-momo)（`momo` + `luci-app-momo`）
+是 OpenWrt 上基于 sing-box 的透明代理，要求 OpenWrt ≥ 24.10、内核 ≥ 5.13、firewall4、
+sing-box ≥ 1.12。它的 profile 就是一份完整的 `config.json`，但**按固定 tag 找入站**：
+momo 启动时用 `jsonfilter` 检查 `dns-in`（type `direct` + `listen_port`）、
+`redirect-in` / `tproxy-in`（type + `listen_port`）、`tun-in`（`interface_name`），
+少一个就在日志里留一句 `Check failed` 直接退出；`fake-ip-dns-server` 的
+`inet6_range` 决定要不要建 IPv6 的 dummy 路由。这些 tag 来自 `/etc/config/momo` 的
+`config core` 段，**改过默认值就要同步改配置**。
+
+所以不能把「主路由」目标的配置贴给 momo：那份 `tun-in` 是 `auto_route:true`，会和
+momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个入站。选「OpenWrt-momo」
+目标时会：
+
+- 强制切到 sing-box 内核（mihomo 的 YAML momo 不认），版本低于 1.12 自动抬到 1.12；
+- 生成 `dns-in:1053` / `redirect-in:7890` / `tproxy-in:7891` / `tun-in`（`auto_route:false`）
+  / `mixed-in:7892`，都监听 `::` 以覆盖默认开启的 IPv6 劫持；
+- DNS 加 `fake-ip-dns-server`，A/AAAA 走 fakeip、HTTPS RR 拒绝，节点服务器域名与国内域名
+  仍走真实 DNS；路由第一条 `sniff`，否则 TUN 里只有 IP 包、域名规则全部失效。
+
+导入方式：LuCI → Momo → 配置 → 新建文件，把生成的 JSON 贴进去并设为当前 profile；
+也可以把面板的订阅地址配成订阅源。启动后先看日志里的 `Profile Check`：它会按 UCI 的
+`tcp_mode` / `udp_mode`（默认 `redirect` + `tun`）核对对应入站。momo 自己会 mixin
+`log` / `dns` 顶层开关 / `experimental.cache_file` / `clash_api`，**不会**替你补 inbounds
+或 DNS servers，所以这几块必须由 profile 自带。
 
 ### 两个内核的写法不能混
 
@@ -1833,6 +1860,18 @@ scrape_configs:
     - `deploy/verify-reality-link.py` 覆盖的是「xray 服务端 + xray 客户端」与
       「sing-box 服务端 + xray/sing-box 客户端」，**没有**「xray 服务端 + sing-box
       客户端」这一格——所以它不会为这个问题变红。
+22. **OpenWrt-momo 目标只做过内核侧校验，没上过真机**：
+    - 生成的 `config.json` 用 **sing-box 1.12.25** 跑过 `check` 与 `format -w` 后复检
+      （momo 启动时就是这两步），本机 1.15.0-alpha 也通过；但**没有**在
+      OpenWrt 24.10 + firewall4 + LuCI 的 `momo.init` 启动检查、nftables 劫持与
+      透明代理链路上实机跑过。本机没有 OpenWrt 设备，所以「能加载」不等于
+      「在路由器上能翻墙」。
+    - 入站 tag 按 `/etc/config/momo` 的 `core` 段**默认值**写死。改过
+      `dns_inbound_tag` / `redirect_inbound_tag` / `tproxy_inbound_tag` /
+      `tun_inbound_tag` / `fake_ip_dns_server_tag` 的用户，要把配置里的 tag 一起改，
+      否则 momo 的 Profile Check 会直接退出。
+    - 端口（1053 / 7890 / 7891 / 7892）是生成文件里的默认值；同机已有别的服务占用
+      时按需改，momo 会从 profile 里读 `listen_port`，不要求固定值。
 
 ## 架构
 
@@ -1868,6 +1907,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.0.3 | **配置生成新增 OpenWrt-momo 目标**。产出可直接贴进 LuCI → Momo 的完整 sing-box `config.json`：自带 `dns-in` / `redirect-in` / `tproxy-in` / `tun-in`（`auto_route:false`）与 `fake-ip-dns-server`，DNS 的 A/AAAA 走 fakeip、首条路由 `sniff`；选中该目标时强制 sing-box 且版本 ≥ 1.12。用 sing-box 1.12.25 跑过 `check` 与 `format -w`，真机 OpenWrt 链路未验证（见已知限制）。 |
 | v2.0.2 | **修 DNS-01 凭据校验的自相矛盾**。面板一边说接受 `CLOUDFLARE_` / `CF_` 前缀，一边又要求必须出现 `CLOUDFLARE_DNS_API_TOKEN`：填 `CF_DNS_API_TOKEN=…` 得到「缺少 CLOUDFLARE_DNS_API_TOKEN」；全小写的键被判成「不是以 CLOUDFLARE_ 开头」；而 `CLOUDFLARE_API_TOKEN`（Cloudflare 文档最常见、lego 不读）却因前缀对而放行，只在签发时炸。现在改成「名字白名单 + 分组」：组内任写一个、组间都要有（Cloudflare 认 DNS / ZONE token 与「邮箱 + Global Key」共 8 个名字），键统一归一大写，拼错直接说该写哪个名字；值两端的引号与 `Bearer ` 前缀自动剥掉（从 curl 示例复制时最常见）。题外：`cfut_` 开头的令牌是 Cloudflare 新的用户级 API Token 格式，正常 |。DNS-01 的验证方式与凭据在「运维」分组的证书卡里，而唯一能提交它们的「保存设置」在「常用」分组，底部常驻保存条停在证书卡时整条收起、改这些字段也不点亮「未保存」——切成 DNS-01、贴完凭据，眼前没有任何按钮可按，用户以为存上了，实际库里仍是 HTTP-01，直到签发报「泛域名只能用 DNS-01」。现在证书卡自带「保存证书设置」并登记进常驻条与脏点表，保存后凭据框回显 `********`；「一键启用 HTTPS」补上验证方式与凭据（原来只提交三个键，界面切了也写不进库）；「立即签发 / 续期检查」在有未保存改动时先提示它读的是库里的值。e2e `acme-dns.js` 23 → 35 项，变异把证书卡从两张表摘掉会转红 5 条 |
 | v2.0.1 | **修 v2.0.0 的一个入口缺失：证书卡片没有自己的保存按钮**。DNS-01 的验证方式与凭据在「运维」分组的证书卡里，而唯一能提交它们的「保存设置」在「常用」分组，底部常驻保存条停在证书卡时整条收起、改这些字段也不点亮「未保存」——切成 DNS-01、贴完凭据，眼前没有任何按钮可按，用户以为存上了，实际库里仍是 HTTP-01，直到签发报「泛域名只能用 DNS-01」。现在证书卡自带「保存证书设置」并登记进常驻条与脏点表，保存后凭据框回显 `********`；「一键启用 HTTPS」补上验证方式与凭据（原来只提交三个键，界面切了也写不进库）；「立即签发 / 续期检查」在有未保存改动时先提示它读的是库里的值。e2e `acme-dns.js` 23 → 35 项，变异把证书卡从两张表摘掉会转红 5 条 |
 | v2.0.0 | **ACME 支持 DNS-01：泛域名、以及域名挂在 CDN 后面的机器**。以前只有 HTTP-01，两条硬伤——泛域名 `*.example.com` 在协议层就只能走 DNS-01；域名挂在小黄云后面时 CA 打不到本机 `:80`。现在「验证方式」二选一：HTTP-01（默认，签发时临时占 80）或 DNS-01（**不占任何端口**，可签泛域名，CDN 后面也能用）。服务商收录 6 家（Cloudflare / 阿里云 / DNSPod / GoDaddy / NameSilo / DuckDNS），清单由后端下发，只编进这几家（lego 近两百个 provider 全量引入会把二进制撑大，实测这 6 家 +2.59 MB）；域名支持一条证书多个名字（`example.com, *.example.com`），这才是泛域名的常态——只签 `*.` 时裸域名反而没证书。凭据存库但**接口只回 `********`**，原样提交等于没改：一个 Cloudflare token 能改整个域名的解析再冒充这个站，它不该出现在 DOM、截图和录屏里（变更通知与审计的 diff 同样打码）；凭据框只收该服务商前缀的变量，因为最终会进 `os.Setenv`，放开任意键等于让人写 `PATH=`。泛域名 + HTTP-01、选了服务商没凭据、有凭据没选服务商——这三种组合在保存期就拒，不用等异步签发回一句英文报错。证书目录名做了安全化（`*.example.com` → `certs/wildcard.example.com/`），单域名老路径不变；证书卡片直接给出两个 pem 的完整路径。验证：certmgr 7 条 + api 4 条用例、两处变异各转红，e2e `acme-dns.js` 23 项已进 CI。**DNS-01 未做端到端验证**（本机无公网域名与服务商账号） |
