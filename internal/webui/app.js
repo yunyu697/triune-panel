@@ -1448,7 +1448,8 @@ async function mockRoute(path, opts) {
   // 必须放在 api === "certs" 之前，否则会被那条前缀匹配吃掉。
   if (api === "certs" && rest === "/providers") return { providers: [
     { id:"cloudflare", label:"Cloudflare（小黄云）", env:["CLOUDFLARE_DNS_API_TOKEN"],
-      hint:"Cloudflare 控制台 → API 令牌 → 用「编辑区域 DNS」模板，区域只选这一个域名。",
+      hint:"Cloudflare 控制台 → API 令牌 → 用「编辑区域 DNS」模板，区域只选这一个域名。" +
+        "变量名写 CLOUDFLARE_DNS_API_TOKEN，等价的 CF_DNS_API_TOKEN 也认，大小写不限。",
       example:"CLOUDFLARE_DNS_API_TOKEN=你的令牌" },
     { id:"alidns", label:"阿里云 DNS", env:["ALICLOUD_ACCESS_KEY","ALICLOUD_SECRET_KEY"],
       hint:"RAM 子账号 + 只授云解析 DNS 的 AccessKey。",

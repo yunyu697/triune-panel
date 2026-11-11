@@ -135,6 +135,25 @@ func TestAcmeDNSValidation(t *testing.T) {
 		}
 	}
 
+	// 别名与小写必须能存：CF_ 是面板自己声明接受的前缀，CLOUDFLARE_ 之外还要有它；
+	// 小写是用户手打的常态，归一大写即可，不该报「前缀不对」。
+	for _, env := range []string{
+		"CF_DNS_API_TOKEN=t",
+		"cloudflare_dns_api_token=t",
+	} {
+		if w := authedReq(t, a, "PUT", "/api/settings", map[string]string{
+			"acme_dns_provider": "cloudflare", "acme_dns_env": env,
+		}); w.Code != 200 {
+			t.Errorf("%q 应当能保存，实际 %d %s", env, w.Code, w.Body.String())
+		}
+	}
+	// 前缀对但名字错：必须当场拒绝并指到正确的变量名，而不是等到签发时炸
+	if w := authedReq(t, a, "PUT", "/api/settings", map[string]string{
+		"acme_dns_provider": "cloudflare", "acme_dns_env": "CLOUDFLARE_API_TOKEN=t",
+	}); w.Code != 400 || !strings.Contains(w.Body.String(), "CLOUDFLARE_DNS_API_TOKEN") {
+		t.Errorf("拼错的变量名应 400 并给出正确名字，实际 %d %s", w.Code, w.Body.String())
+	}
+
 	// 域名会被归一化：大小写、尾点、分隔符统一成逗号串
 	if w := authedReq(t, a, "PUT", "/api/settings", map[string]string{
 		"acme_domain": "Example.COM. ",

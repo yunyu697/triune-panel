@@ -40,8 +40,16 @@ type DNSProviderInfo struct {
 	ID string `json:"id"`
 	// Label 给人看的名字。
 	Label string `json:"label"`
-	// Env 必须提供的环境变量（第一个是「主凭据」，前端照它渲染提示）。
+	// Env 前端提示用的主变量名（第一个是「主凭据」，写错名字时也拿它当建议）。
 	Env []string `json:"env"`
+	// Require lego 真正读取的变量名，按组给出：**组内任写一个，组间都要有**。
+	//
+	// 为什么不是一个名字列表：同一份凭据常有等价别名。Cloudflare 的
+	// CLOUDFLARE_DNS_API_TOKEN 与 CF_DNS_API_TOKEN 是同一个东西，lego 两个都读；
+	// 只认第一个就会出现「面板说接受 CF_ 前缀、填了又报缺少 CLOUDFLARE_…」这种
+	// 自相矛盾的提示。反过来，只按前缀放行也不行——CLOUDFLARE_API_TOKEN 是
+	// Cloudflare 文档里最常见的写法，但 lego 不读它，放过去只会在签发时炸。
+	Require [][]string `json:"-"`
 	// Prefixes 允许出现在凭据框里的键前缀。
 	//
 	// 这一条是安全边界而不是风格问题：凭据框最终会进 os.Setenv，
@@ -58,15 +66,26 @@ type DNSProviderInfo struct {
 var dnsProviderTable = []DNSProviderInfo{
 	{
 		ID: "cloudflare", Label: "Cloudflare（小黄云）",
-		Env:      []string{"CLOUDFLARE_DNS_API_TOKEN"},
+		Env: []string{"CLOUDFLARE_DNS_API_TOKEN"},
+		Require: [][]string{{
+			"CLOUDFLARE_DNS_API_TOKEN", "CF_DNS_API_TOKEN",
+			"CLOUDFLARE_ZONE_API_TOKEN", "CF_ZONE_API_TOKEN",
+			"CLOUDFLARE_EMAIL", "CF_API_EMAIL",
+			"CLOUDFLARE_API_KEY", "CF_API_KEY",
+		}},
 		Prefixes: []string{"CLOUDFLARE_", "CF_"},
 		Hint: "Cloudflare 控制台 → 我的个人资料 → API 令牌 → 创建令牌，用「编辑区域 DNS」模板，" +
-			"区域选这一个域名即可。用这个令牌就不用填邮箱和 Global Key。",
+			"区域选这一个域名即可。变量名写 CLOUDFLARE_DNS_API_TOKEN（等价的 CF_DNS_API_TOKEN 也认，" +
+			"大小写不限）；用令牌就不用填邮箱和 Global Key。",
 		Example: "CLOUDFLARE_DNS_API_TOKEN=你的令牌",
 	},
 	{
 		ID: "alidns", Label: "阿里云 DNS",
-		Env:      []string{"ALICLOUD_ACCESS_KEY", "ALICLOUD_SECRET_KEY"},
+		Env: []string{"ALICLOUD_ACCESS_KEY", "ALICLOUD_SECRET_KEY"},
+		Require: [][]string{
+			{"ALICLOUD_ACCESS_KEY"},
+			{"ALICLOUD_SECRET_KEY"},
+		},
 		Prefixes: []string{"ALICLOUD_"},
 		Hint: "RAM 控制台建一个子账号，只授「云解析 DNS」的 AliyunDNSFullAccess，" +
 			"给它创建 AccessKey。用主账号的 AccessKey 等于把整个账号交出去，别这么干。",
@@ -75,6 +94,7 @@ var dnsProviderTable = []DNSProviderInfo{
 	{
 		ID: "dnspod", Label: "DNSPod / 腾讯云",
 		Env:      []string{"DNSPOD_API_KEY"},
+		Require:  [][]string{{"DNSPOD_API_KEY"}},
 		Prefixes: []string{"DNSPOD_"},
 		Hint: "DNSPod 控制台 → 用户中心 → 密钥管理 → 创建密钥，值是「ID,Token」两段，" +
 			"中间那个逗号要一起填。腾讯云 DNSPod 的 API 密钥是同一套。",
@@ -82,7 +102,11 @@ var dnsProviderTable = []DNSProviderInfo{
 	},
 	{
 		ID: "godaddy", Label: "GoDaddy",
-		Env:      []string{"GODADDY_API_KEY", "GODADDY_API_SECRET"},
+		Env: []string{"GODADDY_API_KEY", "GODADDY_API_SECRET"},
+		Require: [][]string{
+			{"GODADDY_API_KEY"},
+			{"GODADDY_API_SECRET"},
+		},
 		Prefixes: []string{"GODADDY_"},
 		Hint:     "GoDaddy 开发者门户创建 API Key（生产环境），得到 Key 与 Secret 两个值。",
 		Example:  "GODADDY_API_KEY=...\nGODADDY_API_SECRET=...",
@@ -90,6 +114,7 @@ var dnsProviderTable = []DNSProviderInfo{
 	{
 		ID: "namesilo", Label: "NameSilo",
 		Env:      []string{"NAMESILO_API_KEY"},
+		Require:  [][]string{{"NAMESILO_API_KEY"}},
 		Prefixes: []string{"NAMESILO_"},
 		Hint:     "NameSilo → API Manager 生成 API Key（生成后要等几分钟才生效）。",
 		Example:  "NAMESILO_API_KEY=...",
@@ -97,6 +122,7 @@ var dnsProviderTable = []DNSProviderInfo{
 	{
 		ID: "duckdns", Label: "DuckDNS",
 		Env:      []string{"DUCKDNS_TOKEN"},
+		Require:  [][]string{{"DUCKDNS_TOKEN"}},
 		Prefixes: []string{"DUCKDNS_"},
 		Hint:     "DuckDNS 首页登录后能看到 token。只能签 <名字>.duckdns.org 这类免费子域。",
 		Example:  "DUCKDNS_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
@@ -153,8 +179,20 @@ func newDNSProvider(id string) (challenge.Provider, error) {
 
 // ParseDNSEnv 解析凭据框：每行 KEY=VALUE，# 开头与空行忽略。
 //
-// 只接受该服务商前缀的键：见 DNSProviderInfo.Prefixes 的说明。
+// 三条规矩，都是踩过的坑：
+//   - 键统一转大写：用户手打小写是常态（cloudflare_dns_api_token=…），
+//     而 os.Setenv 与 lego 都只认大写名，按小写去比前缀只会得到一句
+//     「应以 CLOUDFLARE_ 开头」——这句对已经写了全名的人毫无意义。
+//   - 名字必须是 lego 真读的（Require 的并集）：只按前缀放行会让
+//     CLOUDFLARE_API_TOKEN 这种「前缀对、名字错」的写法混过去，签发时才炸。
+//   - 前缀仍是安全边界（见 Prefixes），PATH= 这类必须当场拒。
 func ParseDNSEnv(raw string, info DNSProviderInfo) (map[string]string, error) {
+	known := map[string]bool{}
+	for _, g := range info.Require {
+		for _, k := range g {
+			known[k] = true
+		}
+	}
 	out := map[string]string{}
 	for i, line := range strings.Split(raw, "\n") {
 		s := strings.TrimSpace(line)
@@ -165,26 +203,48 @@ func ParseDNSEnv(raw string, info DNSProviderInfo) (map[string]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("第 %d 行缺少等号：应写成 KEY=VALUE", i+1)
 		}
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		k, v = strings.ToUpper(strings.TrimSpace(k)), strings.TrimSpace(v)
 		if k == "" {
 			return nil, fmt.Errorf("第 %d 行的键是空的", i+1)
 		}
 		if !hasAnyPrefix(k, info.Prefixes) {
-			return nil, fmt.Errorf("第 %d 行的 %s 不是 %s 的凭据变量（应以 %s 开头）",
-				i+1, k, info.Label, strings.Join(info.Prefixes, " 或 "))
+			return nil, fmt.Errorf("第 %d 行的 %s 不能用于 %s：只接受以 %s 开头的键，"+
+				"例如 %s=%s", i+1, k, info.Label, strings.Join(info.Prefixes, " 或 "),
+				info.Env[0], "…")
+		}
+		if !known[k] {
+			return nil, fmt.Errorf("第 %d 行的 %s 不是 %s 读取的变量名：请写成 %s",
+				i+1, k, info.Label, strings.Join(info.Env, " / "))
 		}
 		if v == "" {
 			return nil, fmt.Errorf("第 %d 行的 %s 没有值", i+1, k)
+		}
+		// 从服务商文档里复制时常见两种污染：整体带了引号，或者连着 curl 示例里的
+		// "Bearer " 一起抄下来（Cloudflare 的令牌长这样：cfut_ 开头 + 40 字符 + 校验位）。
+		// 令牌本身不会以这两样开头，剥掉比让它带进 Authorization 头、签发自 401 好。
+		v = strings.Trim(v, `"'`)
+		if len(v) > 7 && strings.EqualFold(v[:7], "Bearer ") {
+			v = strings.TrimSpace(v[7:])
+		}
+		if v == "" {
+			return nil, fmt.Errorf("第 %d 行的 %s 剥掉引号 / Bearer 之后是空的", i+1, k)
 		}
 		out[k] = v
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("没有填凭据：至少需要 %s", strings.Join(info.Env, "、"))
 	}
-	for _, need := range info.Env {
-		if _, ok := out[need]; !ok {
-			return nil, fmt.Errorf("缺少 %s（%s 需要 %s）",
-				need, info.Label, strings.Join(info.Env, " 与 "))
+	// 组间是「且」：阿里云与 GoDaddy 的两个键缺一不可。
+	for _, g := range info.Require {
+		hit := ""
+		for _, k := range g {
+			if _, ok := out[k]; ok {
+				hit = k
+				break
+			}
+		}
+		if hit == "" {
+			return nil, fmt.Errorf("%s 还缺凭据：需要 %s", info.Label, strings.Join(g, " 或 "))
 		}
 	}
 	return out, nil

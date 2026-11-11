@@ -8,6 +8,26 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.0.2
+
+### 修复：DNS-01 凭据校验自相矛盾（CF_ 别名填了反被拒、小写被当成「前缀不对」）
+
+填 Cloudflare 凭据时，面板一边说接受 `CLOUDFLARE_` 或 `CF_` 前缀，一边又要求必须出现
+`CLOUDFLARE_DNS_API_TOKEN`：于是 `CF_DNS_API_TOKEN=…` 得到「缺少 CLOUDFLARE_DNS_API_TOKEN」；
+全小写的键被判成「不是以 CLOUDFLARE_ 或 CF_ 开头」（对已经写了全名的人毫无意义）；而
+`CLOUDFLARE_API_TOKEN`——Cloudflare 文档里最常见的写法、lego 根本不读——反而因为前缀对而被
+放过，只在签发时炸。
+
+- 校验从「前缀 + 必须含首名」改成「名字白名单 + 分组」：`Require [][]string`，**组内任写一个、
+  组间都要有**。Cloudflare 认 8 个名字（DNS / ZONE token 与「邮箱 + Global Key」两套别名）。
+- 键统一归一成大写（`os.Setenv` 与 lego 都只认大写名），手打小写不再报错。
+- 前缀仍是安全边界：`PATH=/usr/bin` 这类照旧当场拒。
+- 名字拼错时直接说「请写成 CLOUDFLARE_DNS_API_TOKEN」，而不是等签发失败。
+- 自动剥掉值两端的引号与 `Bearer ` 前缀（从 Cloudflare 的 curl 示例复制时最常见），
+  否则它会带进 Authorization 头，签发报 401 且错误指不到这里。
+- 测试：`CF_DNS_API_TOKEN` 可单独用、小写归一、`CLOUDFLARE_API_TOKEN` 被拒并指路、阿里云
+  缺键点名、Bearer / 引号剥离；两处变异（去掉别名、去掉大小写归一）各转红。
+
 ## v2.0.1
 
 ### 修复：证书卡片没有自己的保存入口（DNS-01 设置根本存不下来）
