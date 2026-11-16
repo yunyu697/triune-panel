@@ -21,6 +21,11 @@ import (
 	"triune/internal/store"
 )
 
+// 采样间隔。30s 会让存活不足一个周期的短连接流量完全丢失（clash_api 的
+// /connections 只返回当前存活连接）；缩短到 5s 可挽回绝大多数浏览/API 请求。
+// 仍无法做到 100%（连接可能在两次采样之间建立并关闭），见 README 已知限制。
+const sampleInterval = 5 * time.Second
+
 type Collector struct {
 	Store    *store.Store
 	Pipe     *core.PipelineManager
@@ -29,29 +34,31 @@ type Collector struct {
 	// 用户用量越过告警阈值/配额时触发；nil 表示不告警。
 	Alert func(subject, body string)
 
-	mu       sync.Mutex
-	connLast map[string][2]int64       // clash 连接计数基线: connID -> [up,down]
-	userLast map[string]map[string]int // xray 计数基线: core -> "name:dir" -> total
-	disabled map[int64]bool            // 本轮已处理，避免重复
-	notified map[int64]int             // clientID -> 已告警级别（0 无 / 1 阈值 / 2 超额）
-	tickUp   int64                     // 本采样周期累计上行增量（实时速率用）
-	tickDown int64                     // 本采样周期累计下行增量
-	liveUp   float64                   // 实时上行速率（字节/秒）
-	liveDown float64                   // 实时下行速率（字节/秒）
-	liveAt   time.Time                 // 最近一次速率更新时间
-	stopCh   chan struct{}
+	mu        sync.Mutex
+	connLast  map[string][2]int64       // clash 连接计数基线: connID -> [up,down]
+	userLast  map[string]map[string]int // xray 计数基线: core -> "name:dir" -> total
+	totalLast map[string][2]int64       // clash 全局累计基线: core -> [up,down]（实时速率用）
+	disabled  map[int64]bool            // 本轮已处理，避免重复
+	notified  map[int64]int             // clientID -> 已告警级别（0 无 / 1 阈值 / 2 超额）
+	tickUp    int64                     // 本采样周期累计上行增量（实时速率用）
+	tickDown  int64                     // 本采样周期累计下行增量
+	liveUp    float64                   // 实时上行速率（字节/秒）
+	liveDown  float64                   // 实时下行速率（字节/秒）
+	liveAt    time.Time                 // 最近一次速率更新时间
+	stopCh    chan struct{}
 }
 
 func NewCollector(st *store.Store, pipe *core.PipelineManager) *Collector {
 	return &Collector{
-		Store:    st,
-		Pipe:     pipe,
-		Interval: 30 * time.Second,
-		connLast: map[string][2]int64{},
-		userLast: map[string]map[string]int{},
-		disabled: map[int64]bool{},
-		notified: map[int64]int{},
-		stopCh:   make(chan struct{}),
+		Store:     st,
+		Pipe:      pipe,
+		Interval:  sampleInterval,
+		connLast:  map[string][2]int64{},
+		userLast:  map[string]map[string]int{},
+		totalLast: map[string][2]int64{},
+		disabled:  map[int64]bool{},
+		notified:  map[int64]int{},
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -89,6 +96,7 @@ func (c *Collector) sampleAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	nameMap := c.nameToClient()
+	tagMap := c.tagToUser()
 
 	// ---- sing-box / mihomo: clash 兼容 /connections ----
 	for _, name := range []string{model.CoreSingBox, model.CoreMihomo} {
@@ -105,8 +113,17 @@ func (c *Collector) sampleAll() {
 		if en != "1" {
 			continue
 		}
-		if deltas, err := c.sampleClash(name, port, secret); err == nil {
+		if deltas, total, err := c.sampleClash(name, port, secret, tagMap); err == nil {
 			c.recordDeltas(deltas, nameMap)
+			// 实时速率用内核全局累计差值：不受「短连接已被 /connections 移除」
+			// 影响，比按连接增量更接近真实吞吐。每用户入库仍走 recordDeltas。
+			if last, ok := c.totalLast[name]; ok {
+				if total[0] >= last[0] && total[1] >= last[1] {
+					c.tickUp += total[0] - last[0]
+					c.tickDown += total[1] - last[1]
+				}
+			}
+			c.totalLast[name] = total
 		}
 	}
 
@@ -150,30 +167,87 @@ type clashConn struct {
 		InboundUser string `json:"inboundUser"`
 		User        string `json:"user"`
 		InboundName string `json:"inboundName"`
+		Type        string `json:"type"` // sing-box: "socks/in-3"，末段是入站 tag
 	} `json:"metadata"`
 }
 
-func (c *Collector) sampleClash(coreName, port, secret string) (map[string][2]int64, error) {
+// clashTotal /connections 的全局累计计数（不随连接关闭消失）。
+type clashTotal [2]int64 // [up, down]
+
+// tagToUser 建立「内核入站 tag → 用户名」映射，供 sing-box 归属用。
+//
+// sing-box 官方内核的 clash_api /connections metadata **不输出 user/inboundUser**
+// （已实测 1.14/1.15：MarshalJSON 只写 network/type/sourceIP/...），但 type 字段
+// 形如 "socks/in-3"，末段是入站 tag。面板的 tag 由 core.TagOf 生成（in-<id> 或
+// 自定义 tag），因此可据此反查入站。
+//
+// 只映射「恰好关联一个用户」的入站：多用户共享入站时无法从 clash API 区分是谁的
+// 流量，宁可不计入任何用户（流量仍进全局速率），也不臆造归属。
+func (c *Collector) tagToUser() map[string]string {
+	out := map[string]string{}
+	ins, err := c.Store.ListInbounds("")
+	if err != nil {
+		return out
+	}
+	for _, in := range ins {
+		if !in.Enabled || in.Draft {
+			continue
+		}
+		ids, err := c.Store.InboundClientIDs(in.ID)
+		if err != nil || len(ids) != 1 {
+			continue
+		}
+		cl, err := c.Store.GetClient(ids[0])
+		if err != nil || cl == nil || !cl.Enabled {
+			continue
+		}
+		// 复用渲染器的 tag 推导，保证与内核配置里的 type 末段完全一致
+		out[core.TagOf(in)] = cl.Name
+	}
+	return out
+}
+
+// clashUser 从一条 clash 连接解析归属用户名。
+// 优先级：mihomo 的 inboundUser/user > sing-box 的 type=协议/tag 反查。
+func clashUser(metaUser, metaInboundUser, metaType string, tagMap map[string]string) string {
+	if u := metaInboundUser; u != "" {
+		return u
+	}
+	if u := metaUser; u != "" {
+		return u
+	}
+	if metaType == "" {
+		return ""
+	}
+	// type = "socks/in-3" / "vless/in-7"，末段为入站 tag
+	tag := metaType
+	if i := strings.LastIndex(tag, "/"); i >= 0 {
+		tag = tag[i+1:]
+	}
+	return tagMap[tag]
+}
+
+func (c *Collector) sampleClash(coreName, port, secret string, tagMap map[string]string) (map[string][2]int64, clashTotal, error) {
 	body, err := httpGet(fmt.Sprintf("http://127.0.0.1:%s/connections", port), secret)
 	if err != nil {
-		return nil, err
+		return nil, clashTotal{}, err
 	}
 	var resp struct {
-		Connections []clashConn `json:"connections"`
+		Connections   []clashConn `json:"connections"`
+		UploadTotal   int64       `json:"uploadTotal"`
+		DownloadTotal int64       `json:"downloadTotal"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
+		return nil, clashTotal{}, err
 	}
+	total := clashTotal{resp.UploadTotal, resp.DownloadTotal}
 	seen := map[string]bool{}
 	deltas := map[string][2]int64{}
 	for _, conn := range resp.Connections {
 		seen[conn.ID] = true
-		user := conn.Metadata.InboundUser
+		user := clashUser(conn.Metadata.User, conn.Metadata.InboundUser, conn.Metadata.Type, tagMap)
 		if user == "" {
-			user = conn.Metadata.User
-		}
-		if user == "" {
-			continue // 无用户归属（如 mixed 匿名连接）计入 total
+			continue // 无用户归属（匿名 / 多用户共享入站）：只计入全局速率
 		}
 		last, ok := c.connLast[coreName+"/"+conn.ID]
 		var du, dd int64
@@ -195,7 +269,7 @@ func (c *Collector) sampleClash(coreName, port, secret string) (map[string][2]in
 			delete(c.connLast, key)
 		}
 	}
-	return deltas, nil
+	return deltas, total, nil
 }
 
 func (c *Collector) sampleXray() (map[string][2]int64, error) {
