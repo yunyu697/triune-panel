@@ -8,6 +8,44 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.0.5
+
+### 修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效
+
+用户反馈「生成的配置苹果和微软相关服务经常出问题，苹果无法检查更新、OneDrive 登录不上」。
+定位到三个叠加缺陷，全在客户端规则生成器 `genconfig.go`：
+
+- **苹果更新域名没有任何直连规则**：`ruleCatalog` 里根本没有 `geosite-apple`，苹果更新
+  （`mesu` / `swscan` / `swdist` / `updates*.cdn-apple.com`）、激活和 Apple ID 登录域名
+  最终落到 `MATCH,PROXY` / `final:PROXY`，经代理后因出口地域判定、QUIC、证书固定而失败。
+- **OneDrive / 微软登录被 PROXY 规则集抢先**：办公 / 视频会议场景把 `geosite-microsoft`
+  和 `geosite-onedrive` 设成 PROXY，而规则排序是 `REJECT > PROXY > DIRECT`——登录域名
+  `login.microsoftonline.com` 之类先命中 PROXY，经代理出口 IP 触发风控。用户手动把
+  Microsoft 改成 DIRECT 也救不回来，因为 OneDrive 的 PROXY 规则排在前面。
+- **fake-ip 误伤**：`fakeIPFilter` 只排除了连通性检测和 NTP，未排除这些域名；TUN + fake-ip
+  下它们拿到 `198.18.x.x` 假 IP，依赖证书固定的客户端直接握手失败，规则写得再对也连不上。
+
+修法（不依赖用户勾选任何规则集，无条件生效）：
+
+- **内置精确域名「系统关键服务强制直连」清单**（`systemDirectRules`，取自 v2fly
+  `domain-list-community` 的 `apple-update` / `microsoft` / `onedrive` 分类），在 mihomo 与
+  sing-box 两套渲染器里都排在**所有规则集之前**、用户自定义规则之后——既压过 PROXY
+  规则集，又保留用户显式覆盖的能力。刻意收窄到「系统服务 / 认证 / 更新」，**不含
+  App Store / Apple Music / Apple TV+ / Xbox 等内容服务**（那些是否代理是用户的选择）。
+- **DNS 侧对齐**：mihomo 的 `fake-ip-filter` 从同一份清单派生（避免两处漂移），sing-box
+  的 `dns.rules` 把这些域名交给 `local` 解析，杜绝「DNS 走代理、流量直连」的死锁。
+  openwrt-momo 目标因复用 `genSingbox` 自动继承。
+- **规则目录补 `geosite-apple`**（默认 DIRECT）：想代理苹果内容服务的用户有了正规入口；
+  因内置直连在前，即使把它改成 PROXY 也不会波及系统更新与登录域名。
+
+验证：新增 `genconfig_system_test.go` 6 项（两套渲染器的直连规则存在且排在规则集之前、
+用户自定义规则仍优先、sing-box DNS 走 local、momo 继承、fake-ip 派生一致）+ 目录断言；
+两处变异（断开 fake-ip 派生、删掉 mihomo 直连规则）分别转红后恢复；修正了
+`TestMihomoWithoutBypassKeepsOldRules` 里「凡 `DOMAIN,` 前缀即判为 bypass 规则」的过宽断言。
+`go vet` + 全量 `go test ./...` 绿；生成配置喂真实 mihomo 1.19.33 `-t` 校验通过（33 条
+关键域名规则全部被内核接受）；**sing-box 真机 `check` 本轮未做**（环境无 sing-box 二进制），
+其正确性由结构断言与既有 `genmomo_test.go` 覆盖。
+
 ## v2.0.4
 
 ### 修复流量统计：sing-box 每用户计数恒为 0、短连接漏计

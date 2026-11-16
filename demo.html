@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.4 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.5 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1795,7 +1795,8 @@ canvas{display:block;width:100%}
           <input id="gen_set_search" class="input" style="width:180px;min-width:0;max-width:100%;flex:0 1 180px;padding:5px 10px;font-size:12.5px"
                  placeholder="搜索规则集…" data-act="filterSets">
         </h3>
-        <p class="muted" style="margin-bottom:12px">勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
+        <p class="muted" style="margin-bottom:12px">苹果系统更新 / Apple ID 登录、Microsoft / OneDrive 登录、Windows 更新等<b>关键服务域名始终强制直连</b>，不受这里的策略影响——它们走代理会导致更新失败或账号登录异常；想代理 App Store / Apple Music 等内容服务可勾选「Apple 服务」。
+           勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
            <b>默认策略按规则集推荐值带出</b>：国内站点 / 私有网络 DIRECT、广告与追踪 REJECT、境外服务 PROXY，勾选后仍可逐条改。
            每个分组标题右侧有本组「全选 / 清空」；顶部的「全选 / 清空」作用于当前搜索结果。
            两者都会自动跳过本内核不可用的规则集——标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>

@@ -147,6 +147,11 @@ var ruleCatalog = []ruleSetDef{
 	{ID: "geosite-zoom", Name: "Zoom 会议", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-onedrive", Name: "OneDrive", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-icloud", Name: "iCloud", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both", Policy: "DIRECT"},
+	// Apple 生态内容服务（App Store / Apple Music / Apple TV+ 等）的可选规则集。
+	// 系统更新 / 激活 / 登录等关键域名已由 systemDirectRules 无条件直连且在规则集
+	// 之前，所以这里即便被用户改成 PROXY，也不会把 mesu.apple.com / appleid 之类
+	// 吸进代理——只影响真正的内容服务。默认 DIRECT 与 iCloud / Microsoft 口径一致。
+	{ID: "geosite-apple", Name: "Apple 服务", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both", Policy: "DIRECT"},
 	{ID: "geosite-category-companies", Name: "大型企业站点", Dir: "geosite", Behavior: "domain", Group: "办公云服务", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-category-scholar-cn", Name: "国内学术资源", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both", Policy: "DIRECT"},
 	{ID: "geosite-category-scholar-!cn", Name: "海外学术资源", Dir: "geosite", Behavior: "domain", Group: "教育科研", Cores: "both", Policy: "PROXY"},
@@ -1035,6 +1040,82 @@ var fakeIPFilter = []string{
 	"xbox.*.microsoft.com", "+.xboxlive.com", "time.*.com", "ntp.*.com",
 }
 
+// systemDirectRules 是「走代理就会坏」的系统关键服务域名，无条件直连。
+//
+// 这些服务依赖出口 IP 地域判定、QUIC，或做了 TLS 证书固定（certificate pinning）：
+// 经代理后苹果更新检查转圈、OneDrive / Microsoft 账号登录触发风控或校验失败。
+// 之所以内置成硬编码规则而不是让用户勾选规则集：
+//   - 上游 geosite-apple / geosite-microsoft 这类**大类**会连带把 App Store、
+//     Apple Music、Xbox 等也纳入，而这些恰恰是用户想代理的内容服务，不能一刀切直连；
+//   - 用户没勾任何规则集时，这些域名会落到 MATCH,PROXY / final:PROXY，照样坏掉。
+//
+// 只收「系统服务 / 认证 / 更新」这类必须直连的精确域名，取自权威的 v2fly
+// domain-list-community：apple-update、microsoft、onedrive 三个分类。
+// 每条是 clash 语法（DOMAIN / DOMAIN-SUFFIX,值,DIRECT），与自定义规则共用
+// parseCustomRule，故 mihomo 与 sing-box 两套渲染器共用这一份。
+var systemDirectRules = []string{
+	// Apple 系统更新 / 激活 / 设备管理（apple-update + Apple ID 激活）
+	"DOMAIN,mesu.apple.com,DIRECT",
+	"DOMAIN,swscan.apple.com,DIRECT",
+	"DOMAIN,swdist.apple.com,DIRECT",
+	"DOMAIN,swdownload.apple.com,DIRECT",
+	"DOMAIN,appldnld.apple.com,DIRECT",
+	"DOMAIN,updates-http.cdn-apple.com,DIRECT",
+	"DOMAIN,updates.cdn-apple.com,DIRECT",
+	"DOMAIN,oscdn.apple.com,DIRECT",
+	"DOMAIN,osrecovery.apple.com,DIRECT",
+	"DOMAIN,gdmf.apple.com,DIRECT",
+	"DOMAIN,gs.apple.com,DIRECT",
+	"DOMAIN,configuration.apple.com,DIRECT",
+	"DOMAIN,xp.apple.com,DIRECT",
+	"DOMAIN,captive.apple.com,DIRECT", // Wi-Fi 热点 / 网络接入检测
+	// Apple ID 登录与激活（登录走代理会被判异地、触发二次验证或 pinning 失败）
+	"DOMAIN,appleid.apple.com,DIRECT",
+	"DOMAIN-SUFFIX,appleid.cdn-apple.com,DIRECT",
+	"DOMAIN,idmsa.apple.com,DIRECT",
+	"DOMAIN,amp-api.apps.apple.com,DIRECT",
+
+	// Microsoft 账号登录 / 认证（OneDrive / Office / Windows 登录都走这里）
+	"DOMAIN,login.microsoftonline.com,DIRECT",
+	"DOMAIN,login.live.com,DIRECT",
+	"DOMAIN,login.microsoft.com,DIRECT",
+	"DOMAIN,login.windows.net,DIRECT",
+	"DOMAIN,account.live.com,DIRECT",
+	"DOMAIN,account.microsoft.com,DIRECT",
+	"DOMAIN-SUFFIX,msftauth.net,DIRECT", // 登录页静态资源 CDN
+	"DOMAIN-SUFFIX,msauth.net,DIRECT",
+	"DOMAIN-SUFFIX,microsoftonline.com,DIRECT",
+	// OneDrive 登录与文件同步端点（登录域名已在上，这里是同步 API 与存储）
+	"DOMAIN,onedrive.live.com,DIRECT",
+	"DOMAIN,storage.live.com,DIRECT",
+	"DOMAIN,api.onedrive.com,DIRECT",
+	"DOMAIN-SUFFIX,1drv.ms,DIRECT",
+
+	// 系统连通性检测：走代理会被误判「无网络」，进而反复重连 / 弹网络异常
+	"DOMAIN,www.msftconnecttest.com,DIRECT",
+	"DOMAIN,www.msftncsi.com,DIRECT",
+}
+
+// systemDirectFakeIPFilter 是 systemDirectRules 在 mihomo fake-ip-filter 里的对应写法。
+// TUN + fake-ip 下若不排除，这些域名会拿到 198.18.x.x 假 IP，依赖证书固定的
+// 客户端（App Store / OneDrive / Microsoft 账号）握手失败——规则再对也连不上。
+// 由 systemDirectRules 派生而非另写一份，避免两处清单漂移。
+func systemDirectFakeIPFilter() []string {
+	out := make([]string, 0, len(systemDirectRules))
+	for _, line := range systemDirectRules {
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		v := parts[1]
+		if parts[0] == "DOMAIN-SUFFIX" {
+			v = "+." + v
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
 // mihomoMixedPort 客户端配置里的默认混合端口（HTTP/SOCKS 同端口）。
 // 注意这只是「文件里写的值」：Clash Verge 默认 7897、FlClash 也有自己的端口设置，
 // 客户端会用自身设置覆盖它，所以头注释必须提醒，见 genMihomo。
@@ -1097,6 +1178,16 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		}
 		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
 	}
+	// 系统关键服务强制直连：必须在所有规则集之前——geosite-microsoft / onedrive
+	// 被设成 PROXY 时，若不前置，登录域名会先被 PROXY 规则吃掉（用户反馈的
+	// OneDrive 登录不上）。放在自定义规则之后，保留用户显式覆盖的能力。
+	for _, line := range systemDirectRules {
+		typ, val, pol, ok := parseCustomRule(line)
+		if !ok {
+			continue // 内置清单是我们自己写的，解析失败只可能是代码 bug，跳过不污染配置
+		}
+		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
+	}
 	for _, s := range sets {
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", s.Tag, s.Policy))
 	}
@@ -1151,6 +1242,7 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	// 客户端拿到的是真实 IP，直连规则与连接目标才对得上。先复制一份：
 	// 直接 append 到全局 fakeIPFilter 的别名上会污染后续所有配置。
 	filter := append([]string{}, fakeIPFilter...)
+	filter = append(filter, systemDirectFakeIPFilter()...)
 	filter = append(filter, bypass.Domains...)
 	dns := map[string]any{
 		"enable":             true,
@@ -1312,6 +1404,20 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{"geosite-" + val}}, pol))
 		}
 	}
+	// 系统关键服务强制直连：与 mihomo 同一份清单、同一位置（规则集之前）。
+	// 复用上面自定义规则的 typ→rule 映射，避免两套写法漂移。
+	for _, line := range systemDirectRules {
+		typ, val, pol, ok := parseCustomRule(line)
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "DOMAIN":
+			routeRules = append(routeRules, setOut(map[string]any{"domain": []any{val}}, pol))
+		case "DOMAIN-SUFFIX":
+			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
+		}
+	}
 	for _, s := range sets {
 		routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{s.Tag}}, s.Policy))
 	}
@@ -1332,6 +1438,28 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	if len(bypass.Domains) > 0 {
 		dnsRules = append(dnsRules,
 			map[string]any{"domain": toAnySlice(bypass.Domains), "server": "local"})
+	}
+	// 系统关键服务用本地 DNS 解析：它们是直连流量，若落到 final:remote（经代理的
+	// DoH）会拿到与直连出口不匹配的 IP，且 DoH 本身依赖代理先连通——形成死锁。
+	// 与 mihomo 的 fake-ip-filter 对应，同一份 systemDirectRules 派生。
+	sysDomains, sysSuffixes := []string{}, []string{}
+	for _, line := range systemDirectRules {
+		typ, val, _, ok := parseCustomRule(line)
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "DOMAIN":
+			sysDomains = append(sysDomains, val)
+		case "DOMAIN-SUFFIX":
+			sysSuffixes = append(sysSuffixes, val)
+		}
+	}
+	if len(sysDomains) > 0 {
+		dnsRules = append(dnsRules, map[string]any{"domain": toAnySlice(sysDomains), "server": "local"})
+	}
+	if len(sysSuffixes) > 0 {
+		dnsRules = append(dnsRules, map[string]any{"domain_suffix": toAnySlice(sysSuffixes), "server": "local"})
 	}
 	dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-cn"}, "server": "local"})
 	if hasSet(sets, "geosite-private") {

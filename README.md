@@ -1048,7 +1048,7 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 
 规则集目录（`/api/export/catalog`）里每条都带一个 `policy`，勾选时按它起手：
 **国内站点与私有网络 DIRECT，广告 / 追踪 / 遥测 / IP 归属探测 REJECT，其余 PROXY**。
-107 条里 30 条 DIRECT、8 条 REJECT、69 条 PROXY。
+108 条里 31 条 DIRECT、8 条 REJECT、69 条 PROXY。
 
 这样勾「中国大陆域名」「拼多多」不会再把国内流量塞进代理，勾「广告域名」也真的是
 拦截而不是转发。推荐值只放在后端目录一处，是唯一事实源，前端不自己编。
@@ -1059,6 +1059,32 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 
 > **升级提示**：保存过的配置里记的是当时的策略，**重新生成不会自动套用新的推荐值**。
 > 想让老配置用上新策略，回配置生成页把规则集重新勾一遍再保存。
+
+### 系统关键服务强制直连（不受策略影响）
+
+有一类域名**走代理就会坏**，与你想让哪些流量走代理无关：
+
+- **苹果**：系统更新（`mesu` / `swscan` / `swdist` / `updates*.cdn-apple.com` 等）、
+  Apple ID 登录与设备激活（`appleid.apple.com` / `idmsa.apple.com` / `gs.apple.com`）、
+  Wi-Fi 接入检测（`captive.apple.com`）。经代理后更新检查转圈、登录被判异地或触发
+  证书固定校验失败。
+- **微软**：账号登录（`login.microsoftonline.com` / `login.live.com` /
+  `account.live.com` / `*.msftauth.net`）、OneDrive 同步（`onedrive.live.com` /
+  `storage.live.com`）、Windows Update，以及连通性检测（`msftconnecttest.com`）。
+  经代理出口 IP 频繁变化会触发风控 → OneDrive / Office 登录不上。
+
+这些域名在生成的配置里被写成**无条件 DIRECT**，排在所有规则集之前——即便你在上面
+把 `geosite-microsoft` / `geosite-onedrive` 设成 PROXY，登录域名也先命中直连，不会被
+规则集抢走。同时它们进了 mihomo 的 `fake-ip-filter`、sing-box 的 `dns.rules → local`，
+避免 TUN 模式下拿到假 IP 或「DNS 靠代理、流量直连」的死锁。
+
+这是刻意收窄的精确域名清单（取自 v2fly `domain-list-community` 的 `apple-update` /
+`microsoft` / `onedrive` 分类），**不含 App Store / Apple Music / Apple TV+ / Xbox 等
+内容服务**——那些走不走代理是你的选择。目录里另有可选的「Apple 服务」（`geosite-apple`，
+默认 DIRECT），想代理苹果内容服务可单独勾选它。用户自定义规则仍排在这些直连规则之前，
+保留显式覆盖的能力。
+
+> xray 内核的客户端配置不经过本生成器（走分享链接 / 订阅），不受此影响。
 
 ### 规则集下载源（国内网络的关键一环）
 
@@ -1920,6 +1946,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.0.5 | **修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效**。苹果更新域名原先没有任何直连规则（`ruleCatalog` 无 `geosite-apple`），落到兜底 PROXY 后因出口地域判定、QUIC、证书固定而更新失败；OneDrive / 微软登录域名则被办公场景里的 `geosite-onedrive` / `geosite-microsoft` PROXY 规则抢先命中（PROXY 排在 DIRECT 前），经代理出口 IP 触发风控登录不上；fake-ip 又让这些域名拿到假 IP，证书固定客户端直接握手失败。现在内置一份精确域名「系统关键服务强制直连」清单（取自 v2fly `apple-update` / `microsoft` / `onedrive` 分类），在 mihomo / sing-box 两套渲染器里排在所有规则集之前、自定义规则之后，刻意不含 App Store / Apple Music / 游戏等内容服务；mihomo 的 `fake-ip-filter` 与 sing-box 的 `dns.rules → local` 从同一份清单派生（momo 自动继承），避免假 IP 与「DNS 靠代理、流量直连」死锁。规则目录补可选的「Apple 服务」（默认 DIRECT）。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)。 |
 | v2.0.4 | **修复流量统计：sing-box 每用户计数恒为 0**。官方 sing-box 的 clash API `/connections` 不输出用户字段，采样器取到空就跳过，导致每个人流量永远是 0；短连接又因 30 秒采样间隔整个丢失。现在按入站 tag 反查归属（仅单用户入站准确，多用户不臆造）、采样缩到 5 秒、实时速率改取内核全局累计差值；UI 与已知限制第 5 条如实写明精确到什么程度。xray 内核不受影响。不换内核、不影响组件更新。 |
 | v2.0.3 | **配置生成新增 OpenWrt-momo 目标**。产出可直接贴进 LuCI → Momo 的完整 sing-box `config.json`：自带 `dns-in` / `redirect-in` / `tproxy-in` / `tun-in`（`auto_route:false`）与 `fake-ip-dns-server`，DNS 的 A/AAAA 走 fakeip、首条路由 `sniff`；选中该目标时强制 sing-box 且版本 ≥ 1.12。用 sing-box 1.12.25 跑过 `check` 与 `format -w`，真机 OpenWrt 链路未验证（见已知限制）。 |
 | v2.0.2 | **修 DNS-01 凭据校验的自相矛盾**。面板一边说接受 `CLOUDFLARE_` / `CF_` 前缀，一边又要求必须出现 `CLOUDFLARE_DNS_API_TOKEN`：填 `CF_DNS_API_TOKEN=…` 得到「缺少 CLOUDFLARE_DNS_API_TOKEN」；全小写的键被判成「不是以 CLOUDFLARE_ 开头」；而 `CLOUDFLARE_API_TOKEN`（Cloudflare 文档最常见、lego 不读）却因前缀对而放行，只在签发时炸。现在改成「名字白名单 + 分组」：组内任写一个、组间都要有（Cloudflare 认 DNS / ZONE token 与「邮箱 + Global Key」共 8 个名字），键统一归一大写，拼错直接说该写哪个名字；值两端的引号与 `Bearer ` 前缀自动剥掉（从 curl 示例复制时最常见）。题外：`cfut_` 开头的令牌是 Cloudflare 新的用户级 API Token 格式，正常 |。DNS-01 的验证方式与凭据在「运维」分组的证书卡里，而唯一能提交它们的「保存设置」在「常用」分组，底部常驻保存条停在证书卡时整条收起、改这些字段也不点亮「未保存」——切成 DNS-01、贴完凭据，眼前没有任何按钮可按，用户以为存上了，实际库里仍是 HTTP-01，直到签发报「泛域名只能用 DNS-01」。现在证书卡自带「保存证书设置」并登记进常驻条与脏点表，保存后凭据框回显 `********`；「一键启用 HTTPS」补上验证方式与凭据（原来只提交三个键，界面切了也写不进库）；「立即签发 / 续期检查」在有未保存改动时先提示它读的是库里的值。e2e `acme-dns.js` 23 → 35 项，变异把证书卡从两张表摘掉会转红 5 条 |

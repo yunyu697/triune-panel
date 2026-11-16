@@ -14,15 +14,15 @@ import (
 
 func TestNormalizeNodeHost(t *testing.T) {
 	cases := map[string]string{
-		"1.2.3.4":             "1.2.3.4",
-		"1.2.3.4:443":         "1.2.3.4",
-		"[2001:db8::1]:443":   "2001:db8::1",
-		"[2001:db8::1]":       "2001:db8::1",
-		"2001:db8::1":         "2001:db8::1", // 裸 IPv6 的冒号不是端口
-		"Node.Example.COM.":   "node.example.com",
-		"  example.com  ":     "example.com",
-		"":                    "",
-		"   ":                 "",
+		"1.2.3.4":           "1.2.3.4",
+		"1.2.3.4:443":       "1.2.3.4",
+		"[2001:db8::1]:443": "2001:db8::1",
+		"[2001:db8::1]":     "2001:db8::1",
+		"2001:db8::1":       "2001:db8::1", // 裸 IPv6 的冒号不是端口
+		"Node.Example.COM.": "node.example.com",
+		"  example.com  ":   "example.com",
+		"":                  "",
+		"   ":               "",
 	}
 	for in, want := range cases {
 		if got := normalizeNodeHost(in); got != want {
@@ -106,9 +106,13 @@ func TestMihomoWithoutBypassKeepsOldRules(t *testing.T) {
 	warns := new([]string)
 	g := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
 	rules := g.doc["rules"].([]any)
+	// 只检查「节点地址」有没有被写进直连规则（bypass 开关的本意）。
+	// 不能用泛泛的 DOMAIN, 前缀判断——系统关键服务的内置直连规则同样是
+	// DOMAIN,xxx,DIRECT，但那与 bypass 开关无关，必须允许其存在。
+	nodeIP := testNodes()[0].Host + "/32"
 	for _, r := range rules {
 		s, _ := r.(string)
-		if strings.HasPrefix(s, "DOMAIN,") || strings.HasPrefix(s, "IP-CIDR,") && strings.Contains(s, "/32") {
+		if strings.Contains(s, "203.0.113.7") || s == "IP-CIDR,"+nodeIP+",DIRECT,no-resolve" {
 			t.Errorf("未开启开关却生成了节点直连规则: %s", s)
 		}
 	}
