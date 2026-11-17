@@ -14,6 +14,11 @@
 # 元数据/资产请求在有 gh token 时用认证额度（匿名 60 次/小时很容易耗尽）；
 # 匿名版本索引必须保持匿名，因为面板更新检查走的就是这条。
 #
+# 退出码（限流不能被当成发布事故，但也不能被当成通过）：
+#   0  全部直证通过
+#   1  有真失败，需要处理
+#   2  有限流导致的未验证项（SKIP），过一会儿重跑即可；发布产物本身未必有问题
+#
 # 前置：刚跑完 release.sh，dist/ 或 deploy/ 里还留着那批二进制。
 # 选项：
 #   --repo O/R        仓库（默认从 git remote origin 推出来）
@@ -33,8 +38,12 @@ say() { printf '%s\n' "$*"; }
 step() { printf '\n\033[1m→ %s\033[0m\n' "$*"; }
 PASS=0
 FAIL=0
+# 因限流无法验证的项。既不算通过（假绿），也不算失败（会把一次正常发布误判成事故），
+# 单独计数并让退出码变成 2，调用方据此决定「稍后重跑」而不是「去修发布」。
+DEGRADED=0
 ok() { printf '  \033[32mPASS\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad() { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$*"; DEGRADED=$((DEGRADED + 1)); }
 ck() {
   local name="$1" want="$2" got="$3"
   if [[ "$want" == "$got" ]]; then ok "$name"; else bad "$name  期望=[${want}] 实际=[${got}]"; fi
@@ -50,6 +59,8 @@ usage() {
   -h, --help        显示这段说明
 
 示例: ${PROG} v1.3.1
+
+退出码: 0 全部通过 / 1 有真失败 / 2 有因匿名限流未能验证的项（稍后重跑即可）
 USAGE
   exit "${1:-0}"
 }
@@ -119,8 +130,32 @@ get() {
 }
 get_anon() { curl "${CURL_OPTS[@]}" "$@"; }
 
+# 区分「被限流」与「真故障」。只认响应头 x-ratelimit-remaining: 0：
+# 403/429 也可能是代理或权限问题，拿状态码当限流会让真故障被降级放过，
+# 这正是「skip 等于假绿」的老路。`/rate_limit` 端点自身不消耗配额。
+# 结果缓存一次，避免多处调用重复探测。
+RATE_PROBE=""
+rate_limited() {
+  if [[ -z "$RATE_PROBE" ]]; then
+    local hdr rem
+    # 不用 CURL_OPTS：里面的 -f 会在 4xx 时不吐响应头，正好丢掉的就是要看的东西。
+    hdr="$(curl -sS -D - -o /dev/null --connect-timeout 15 --max-time 30 -A "$UA" \
+      "https://api.github.com/rate_limit" 2>/dev/null || true)"
+    rem="$(printf '%s' "$hdr" | tr -d '\r' | awk 'tolower($1)=="x-ratelimit-remaining:"{print $2; exit}')"
+    if [[ "$rem" == "0" ]]; then RATE_PROBE=yes; else RATE_PROBE=no; fi
+  fi
+  [[ "$RATE_PROBE" == "yes" ]]
+}
+
 step "Release 元数据"
 if ! META="$(get "$API/releases/tags/$VER" 2>/dev/null)"; then
+  # 连元数据都拿不到时没法往下走，但要分清「限流」与「真是草的」——
+  # 前者稍后重跑就好，后者才需要补 Release。混在一起会让人去修一个不存在的问题。
+  if rate_limited; then
+    bad "拿不到 ${VER} 的 Release，且 API 配额已耗尽（remaining=0）：无法判断是草稿还是限流"
+    printf '  配额重置后重跑本脚本即可。查配额：curl -s https://api.github.com/rate_limit\n' >&2
+    exit 2
+  fi
   bad "拿不到 ${VER} 的 Release"
   cat >&2 <<HINT
   /releases/tags/<tag> 对草稿返 404 —— 很可能是上一轮 gh release create
@@ -166,13 +201,25 @@ fi
 ck "所有资产都是 uploaded 且非空" "" "$BAD_ASSETS"
 
 step "匿名版本索引（面板更新检查走的就是这条）"
-# 匿名 403 是限流，不是发布失败：记一条 FAIL 但继续把后面的资产校验跑完。
-# 不能用 die 掐断整份校验，也不能拿带 token 的结果冒充「匿名可见」。
+# 匿名 403 是限流，不是发布失败。以前记 FAIL：结果是一次正常发布会因为「配额用完了」
+# 报 5 项失败 + 退出码 1，被当成发布事故去查（2026-11-18 实际发生）。
+# 但也不能记 PASS —— 面板更新走这条，没验就是没验。所以记 SKIP 并让退出码变 2。
+# 更不能拿带 token 的结果冒充「匿名可见」：那会掩盖 v1.2.9 那种
+# 「鉴权接口全正常、匿名列表整条漏掉」的真实故障。
+IDX_DEGRADED=0
 if ! IDX="$(get_anon "$API/releases?per_page=30" 2>/dev/null)"; then
-  bad "匿名版本列表不可读（匿名 API 403/限流 60 次每小时，或网络故障；不是发布失败）"
+  if rate_limited; then
+    skip "匿名版本列表不可读：匿名 API 已限流（x-ratelimit-remaining: 0），匿名可见性本轮未证"
+    IDX_DEGRADED=1
+  else
+    bad "匿名版本列表不可读，且不是限流（网络或仓库状态问题，需要排查）"
+  fi
   IDX="[]"
 fi
-IDX_INFO="$(printf '%s' "$IDX" | python3 -c '
+if [[ $IDX_DEGRADED -eq 1 ]]; then
+  skip "匿名列表第一条 / 不为空 / 无残留草稿：因限流未验"
+else
+  IDX_INFO="$(printf '%s' "$IDX" | python3 -c '
 import json, sys
 rs = json.load(sys.stdin)
 vis = [r["tag_name"] for r in rs if not r.get("draft")]
@@ -186,14 +233,23 @@ ck "匿名列表第一条就是 ${VER}" "$VER" "$FIRST"
 if [[ "$N_VIS" -gt 0 ]]; then IDX_OK=true; else IDX_OK=false; fi
 ck "匿名列表不为空" "true" "$IDX_OK"
 ck "没有残留的草稿 Release" "" "$DRAFTS"
+fi
+LATEST_DEGRADED=0
 if ! LATEST_JSON="$(get_anon "$API/releases/latest" 2>/dev/null)"; then
-  bad "/releases/latest 不可读（匿名限流或网络故障；不是发布失败）"
+  if rate_limited; then
+    skip "/releases/latest 不可读：匿名 API 已限流，未证"
+    LATEST_DEGRADED=1
+  else
+    bad "/releases/latest 不可读，且不是限流（需要排查）"
+  fi
   LATEST=""
 else
   LATEST="$(printf '%s' "$LATEST_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))')" \
     || die "解析 /releases/latest 失败"
 fi
-ck "/releases/latest 指向 ${VER}" "$VER" "$LATEST"
+if [[ $LATEST_DEGRADED -eq 0 ]]; then
+  ck "/releases/latest 指向 ${VER}" "$VER" "$LATEST"
+fi
 
 step "tag 与提交"
 # 发版后 main 继续往前走是常态；重跑历史版本的校验不该因为 HEAD != tag 就假红。
@@ -309,7 +365,7 @@ else
   ok "工作区干净"
 fi
 
-printf '\n%d 项通过，%d 项失败\n' "$PASS" "$FAIL"
+printf '\n%d 项通过，%d 项失败，%d 项因限流未验\n' "$PASS" "$FAIL" "$DEGRADED"
 if [[ "$FAIL" -gt 0 ]]; then
   cat >&2 <<HINT
 注意：GitHub 报 422/500/EOF 时，那次请求可能已经生效了一部分。
@@ -319,4 +375,15 @@ PATCH draft=false，还是补建 Release —— 盲目重跑 release.sh 会撞�
 资产本身；单条通道异常通常是 CDN 抽风，换网络或稍后重试即可，不是发布失败。
 HINT
   exit 1
+fi
+if [[ "$DEGRADED" -gt 0 ]]; then
+  cat >&2 <<HINT
+有 ${DEGRADED} 项因匿名 API 限流未验（通常是匿名版本索引与 /releases/latest）。
+**这不是发布失败**：认证通道的元数据与资产逐字节比对已经通过。
+但面板更新检查走匿名接口，「匿名可见性」确实还没证，别当成已验过。
+配额重置后重跑即可：
+  ./deploy/verify-release.sh ${VER}
+查配额：curl -s https://api.github.com/rate_limit | grep -A2 '"core"'
+HINT
+  exit 2
 fi

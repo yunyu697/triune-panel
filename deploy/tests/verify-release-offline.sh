@@ -2,12 +2,15 @@
 # verify-release.sh 的完全离线回归：桩掉 curl 和 git，自己造一个假仓库 + 假 dist。
 # 不联网、不耗 GitHub API 配额、不需要真实 tag 或发布产物，因此可以直接进 CI。
 #
-# 钉住五件事：
+# 钉住七件事：
 #   A 公开下载 504 → 5 次 API 回退，校验全绿
 #   E 公开下载正常 → 一次都不回退
 #   B 回退通道返回坏字节 → 5 项「字节不一致」（回退不等于放宽校验）
 #   C 去掉回退的变异版 → 5 项「下载失败」（回滚修复必须转红）
 #   D 匿名版本索引被改成带 token → 桩直接拒绝（面板更新检查必须匿名）
+#   F 匿名配额耗尽（remaining=0）→ 记 SKIP、退出码 2，不能报 5 项失败
+#   G 索引读不到但配额没耗尽（真故障）→ 照样 5 项失败、退出码 1
+#     （G 是给 F 上的锁：限流降级不能把真故障一起放过）
 set -euo pipefail
 SELF_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -P "$SELF_DIR/../.." && pwd -P)"
@@ -19,7 +22,7 @@ cp "$ROOT/deploy/verify-release.sh" "$ROOT/deploy/release.sh" "$ROOT/deploy/chec
 export STUB_DIR="$TMP"
 export STUB_SHA="1111111111111111111111111111111111111111"
 # 这两个要 export：桩 curl 是被校验脚本拉起的子进程，普通赋值传不进去
-export STUB_PUBLIC_OK=0 STUB_BAD=0
+export STUB_PUBLIC_OK=0 STUB_BAD=0 STUB_RATE_LIMIT=0
 VER="v9.9.9"
 
 # 造 4 份假二进制 + sha256sums.txt + 固定 API 响应，asset id 由脚本生成，
@@ -66,6 +69,7 @@ for a in "$@"; do
     */releases/tags/*) kind="meta" ;;
     *per_page=30*) kind="idx" ;;
     */releases/latest) kind="latest" ;;
+    */rate_limit) kind="rlimit" ;;
   esac
 done
 emit() { if [[ -n "$out" ]]; then cat "$1" > "$out"; else cat "$1"; fi; }
@@ -77,8 +81,28 @@ if [[ "$kind" == "idx" || "$kind" == "latest" ]] && [[ "$has_auth" -eq 1 ]]; the
 fi
 case "$kind" in
   meta)   emit "$STUB_DIR/meta.json"; exit 0 ;;
-  idx)    emit "$STUB_DIR/index.json"; exit 0 ;;
-  latest) emit "$STUB_DIR/latest.json"; exit 0 ;;
+  # 只吐响应头：脚本用 curl -D - -o /dev/null 探配额。
+  # STUB_RATE_LIMIT=1 表示真的耗尽；2 表示「接口读不到但配额没耗尽」，即真故障。
+  rlimit)
+    if [[ "${STUB_RATE_LIMIT:-0}" == "1" ]]; then
+      printf 'x-ratelimit-remaining: 0\r\n'
+    else
+      printf 'x-ratelimit-remaining: 42\r\n'
+    fi
+    exit 0
+    ;;
+  idx)
+    if [[ "${STUB_RATE_LIMIT:-0}" != "0" ]]; then
+      printf 'curl: (22) The requested URL returned error: 403\n' >&2
+      exit 22
+    fi
+    emit "$STUB_DIR/index.json"; exit 0 ;;
+  latest)
+    if [[ "${STUB_RATE_LIMIT:-0}" != "0" ]]; then
+      printf 'curl: (22) The requested URL returned error: 403\n' >&2
+      exit 22
+    fi
+    emit "$STUB_DIR/latest.json"; exit 0 ;;
   public)
     name="${url##*/}"
     if [[ "${STUB_PUBLIC_OK:-0}" == "1" ]]; then
@@ -139,10 +163,10 @@ ck() {
     printf '  FAIL %s  期望=[%s] 实际=[%s]\n' "$1" "$2" "$3"
   fi
 }
-run_case() { # <标签> <脚本> <期望失败数> <期望回退次数> [额外关键字] [期望出现次数]
-  local label="$1" script="$2" want_fail="$3" want_fb="$4" extra="${5:-}" want_extra="${6:-0}"
-  local out="$TMP/out.txt" got_fail got_fb got_extra
-  PATH="$TMP/bin:$PATH" bash "$script" "$VER" > "$out" 2>&1 || true
+run_case() { # <标签> <脚本> <期望失败数> <期望回退次数> [额外关键字] [期望出现次数] [期望退出码]
+  local label="$1" script="$2" want_fail="$3" want_fb="$4" extra="${5:-}" want_extra="${6:-0}" want_rc="${7:-}"
+  local out="$TMP/out.txt" got_fail got_fb got_extra rc=0
+  PATH="$TMP/bin:$PATH" bash "$script" "$VER" > "$out" 2>&1 || rc=$?
   got_fail="$(sed -n -E 's/.*，([0-9]+) 项失败.*/\1/p' "$out" | tail -1)"
   got_fb="$(grep -c '已改走匿名 API 通道' "$out" || true)"
   ck "${label}：失败数" "$want_fail" "${got_fail:-<none>}"
@@ -150,6 +174,10 @@ run_case() { # <标签> <脚本> <期望失败数> <期望回退次数> [额外�
   if [[ -n "$extra" ]]; then
     got_extra="$(grep -c "$extra" "$out" || true)"
     ck "${label}：${extra}" "$want_extra" "${got_extra:-0}"
+  fi
+  # 退出码是 F/G 的核心判据：限流必须是 2（稍后重跑），真故障必须是 1（去修）。
+  if [[ -n "$want_rc" ]]; then
+    ck "${label}：退出码" "$want_rc" "$rc"
   fi
 }
 
@@ -182,6 +210,14 @@ run_case "C 变异：禁用回退" "$REPO/deploy/mutant-no-fallback.sh" 5 0 "：
 rm -f "$TMP/auth_leak"
 run_case "D 变异：索引带 token" "$REPO/deploy/mutant-idx-token.sh" 3 5 "" 
 ck "D：匿名索引守卫确实拦截" "1" "$(if [[ -f "$TMP/auth_leak" ]]; then printf '1'; else printf '0'; fi)"
+
+# F/G 是同一现象（索引读不到）的两种成因，结论相反。只做 F 不做 G，
+# 等于给「限流降级」开了个可以吞掉真故障的口子。
+STUB_PUBLIC_OK=1 STUB_RATE_LIMIT=1
+run_case "F 限流降级不报失败" "$ORIG" 0 0 "SKIP" 3 2
+STUB_RATE_LIMIT=2
+run_case "G 非限流故障仍报失败" "$ORIG" 5 0 "" 0 1
+STUB_RATE_LIMIT=0
 
 printf '\n%s：%d 项通过，%d 项失败\n' "$(basename "$0")" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
