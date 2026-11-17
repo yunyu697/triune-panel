@@ -10,14 +10,23 @@
 package livecheck
 
 import (
+	"bytes"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"triune/internal/core"
 	"triune/internal/core/singbox"
@@ -47,9 +56,7 @@ func TestXrayRendersValidConfig(t *testing.T) {
 	if bin == "" {
 		t.Skip("未设置 TRINE_XRAY_BIN，跳过真机校验")
 	}
-	if _, err := os.Stat(testCert); err != nil {
-		t.Skip("缺少测试证书 /tmp/test-cert.pem")
-	}
+	ensureTLSCert(t)
 	wgKey, wgPub := wgKeypair(t)
 	tls := `{"server_name":"example.com","certificate_path":"` + testCert + `","key_path":"` + testKey + `","alpn":"h2,http/1.1"}`
 
@@ -158,9 +165,7 @@ func TestSingboxRendersValidConfig(t *testing.T) {
 	if bin == "" {
 		t.Skip("未设置 TRINE_SINGBOX_BIN，跳过真机校验")
 	}
-	if _, err := os.Stat(testCert); err != nil {
-		t.Skip("缺少测试证书 /tmp/test-cert.pem")
-	}
+	ensureTLSCert(t)
 	tlsSettings := `{"server_name":"example.com","certificate_path":"` + testCert + `","key_path":"` + testKey + `"`
 
 	cases := []liveCase{
@@ -328,4 +333,128 @@ func convertedGlobal(t *testing.T) core.RenderOpts {
 	dj, _ := json.Marshal(dns)
 	rj, _ := json.Marshal(route)
 	return core.RenderOpts{DNSJSON: string(dj), RouteJSON: string(rj)}
+}
+
+// 与 api.TestSingboxClientConfigStarts 同理：`run -test` 只校验配置结构，
+// 端口被占、证书读不了、启动即退出这些只有真跑才看得见（v2.1.0 的教训）。
+// 设 TRINE_XRAY_BIN 才跑；用例选能独立启动的两种：无证书的 socks、
+// 带 TLS 的 reality（证书由 testCert/testKey 提供）。
+func TestXrayConfigStarts(t *testing.T) {
+	bin := os.Getenv("TRINE_XRAY_BIN")
+	if bin == "" {
+		t.Skip("未设置 TRINE_XRAY_BIN，跳过真机启动校验")
+	}
+	ensureTLSCert(t)
+	tls := `{"server_name":"example.com","certificate_path":"` + testCert + `","key_path":"` + testKey + `","alpn":"h2,http/1.1"}`
+
+	cases := []liveCase{
+		{
+			name:    "socks-password",
+			inbound: &model.Inbound{Name: "s", Core: "xray", Protocol: "socks", Port: 0, Transport: "tcp", TLS: "none", Settings: `{"account_auth":"password","udp":true}`},
+			clients: []*model.Client{client("u1", "u1:p1")},
+		},
+		{
+			name:    "vless-reality",
+			inbound: &model.Inbound{Name: "r", Core: "xray", Protocol: "vless", Port: 0, Transport: "tcp", TLS: "reality", Settings: `{"private_key":"` + realityPriv(t) + `","handshake_server":"www.apple.com","handshake_port":443,"server_names":"www.apple.com","short_ids":["ab12",""],"flow":"xtls-rprx-vision"}`},
+			clients: []*model.Client{client("alice", "11111111-2222-3333-4444-555555555555")},
+		},
+		{
+			name:    "vmess-ws-tls",
+			inbound: &model.Inbound{Name: "w", Core: "xray", Protocol: "vmess", Port: 0, Transport: "ws", TLS: "tls", Settings: `{"path":"/ray","ws_host":"example.com",` + strings.TrimPrefix(tls, "{")},
+			clients: []*model.Client{client("bob", "99999999-8888-7777-6666-555555555555")},
+		},
+	}
+
+	x := &xray.Xray{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// 端口必须每次换：固定 24443 与本机已有实例冲突时，报错会是
+			// "address already in use"，看起来像产物有问题。
+			c.inbound.Port = freePort(t)
+			out, err := x.Render([]core.InboundWithClients{{Inbound: c.inbound, Clients: c.clients}}, c.opts)
+			if err != nil {
+				t.Fatalf("渲染失败: %v", err)
+			}
+			file := writeCfg(t, "xray-start", out)
+
+			var buf bytes.Buffer
+			cmd := exec.Command(bin, "run", "-c", file)
+			cmd.Stdout = &buf
+			cmd.Stderr = &buf
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("启动 xray 失败: %v", err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case err := <-done:
+				t.Fatalf("xray 启动即退出（%v）：\n%s", err, buf.String())
+			case <-time.After(2 * time.Second):
+				_ = cmd.Process.Kill()
+				<-done
+			}
+		})
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("取空闲端口失败: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+var (
+	certOnce sync.Once
+	certErr  error
+)
+
+// ensureTLSCert 保证 /tmp/test-cert.pem 与 test-key.pem 存在，缺了现场生成自签证书。
+//
+// 刻意不 skip：preflight 把真内核启动当发布门禁，环境里少一份证书就跳过，
+// 等于门禁假绿——v2.1.0 的教训正是「没验到」被当成「验过了」。
+// 路径沿用既有约定（用例里的 certificate_path 写死 testCert/testKey）。
+func ensureTLSCert(t *testing.T) {
+	t.Helper()
+	certOnce.Do(func() {
+		if _, err := os.Stat(testCert); err == nil {
+			if _, err := os.Stat(testKey); err == nil {
+				return
+			}
+		}
+		priv, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			certErr = err
+			return
+		}
+		tmpl := &x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject:      pkix.Name{CommonName: "example.com"},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().Add(24 * 365 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			DNSNames:     []string{"example.com"},
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+		if err != nil {
+			certErr = err
+			return
+		}
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+		if err := os.WriteFile(testCert, certPEM, 0o600); err != nil {
+			certErr = err
+			return
+		}
+		if err := os.WriteFile(testKey, keyPEM, 0o600); err != nil {
+			certErr = err
+		}
+	})
+	if certErr != nil {
+		t.Fatalf("生成测试证书失败: %v", certErr)
+	}
 }

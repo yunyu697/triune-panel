@@ -35,3 +35,7 @@ design-preview/
 !.e2e/theme-contrast.js
 !.e2e/view-restore.js
 !.e2e/workbench-command.js
+
+# Python 字节码（deploy 下的辅助脚本）
+__pycache__/
+*.pyc

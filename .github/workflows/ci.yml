@@ -82,7 +82,8 @@ jobs:
           # SC2206：ver_lt 里故意用 IFS=. 做数组拆分，属预期用法
           shellcheck -S warning -e SC2206 \
             deploy/install.sh deploy/uninstall.sh deploy/check-version.sh \
-            deploy/release.sh deploy/verify-release.sh deploy/tests/*.sh
+            deploy/release.sh deploy/verify-release.sh deploy/preflight.sh \
+            deploy/tests/*.sh
 
       - name: 中文标点紧跟变量（$VAR，）
         run: |
