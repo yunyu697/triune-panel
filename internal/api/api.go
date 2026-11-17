@@ -145,6 +145,11 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/export/check-mirror", a.write(a.handleCheckMirror))
 	// 自检会调用本机内核二进制，属于「能让服务器跑东西」的接口，按 write 档
 	mux.HandleFunc("POST /api/export/verify", a.write(a.handleExportVerify))
+	// 规则体检脚本：纯文本，不含任何本机信息（探针清单是编译期常量），
+	// 但仍然只给能看生成页的角色——它会把面板的规则策略暴露出去。
+	mux.HandleFunc("GET /api/export/healthcheck", a.write(a.handleHealthCheckScript))
+	// 诊断摘要含路径与版本，报障用；只读账号够了
+	mux.HandleFunc("GET /api/diagnose/summary", a.auth(a.handleDiagnoseSummary))
 
 	// 保存的客户端配置：内容含节点凭据，整组按 write 档
 	mux.HandleFunc("GET /api/configs", a.write(a.handleConfigsList))
@@ -153,6 +158,8 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/configs/{id}", a.write(a.handleConfigUpdate))
 	mux.HandleFunc("DELETE /api/configs/{id}", a.write(a.handleConfigDelete))
 	mux.HandleFunc("GET /api/configs/{id}/download", a.write(a.handleConfigDownload))
+	// 规则漂移明细：这份配置生成之后，内置规则又变了几条
+	mux.HandleFunc("GET /api/configs/{id}/drift", a.write(a.handleConfigDrift))
 	// 批量：选中一批一次删掉 / 一次打包带走。路径比 {id} 更具体，
 	// Go 1.22 的 mux 按具体度优先，不会把 batch-delete 当成一个 id。
 	mux.HandleFunc("POST /api/configs/batch-delete", a.write(a.handleConfigBatchDelete))

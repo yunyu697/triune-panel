@@ -19,41 +19,24 @@ import (
 //
 // 上面那些用例遍历的是「清单里现有什么」，因此整类被删掉时它们照样绿。
 // 这条用例按**类别**守住下限：谁把一整类删了，立刻红。
+// 每个关键类别至少要有一条规则留在清单里。
+//
+// 断言表来自 systemClasses（与体检脚本、界面覆盖提示同源）：另抄一份清单
+// 就意味着「删了规则却忘了改测试」迟早发生，而那正是这套不变量要防的事。
 func TestSystemDirectCoversEachCriticalClass(t *testing.T) {
-	has := func(vals ...string) bool {
-		for _, line := range systemDirectRules {
-			_, val, _, ok := parseCustomRule(line)
-			if !ok {
-				continue
-			}
-			for _, v := range vals {
-				if val == v {
-					return true
-				}
+	for _, c := range systemClasses {
+		if c.Expect != "direct" {
+			continue
+		}
+		hit := false
+		for _, p := range c.Probes {
+			if ruleListMatches(systemDirectRules, "DIRECT", p) {
+				hit = true
+				break
 			}
 		}
-		return false
-	}
-	classes := []struct {
-		name string
-		vals []string
-	}{
-		{"Apple 系统更新", []string{"mesu.apple.com", "swscan.apple.com", "swcdn.apple.com"}},
-		{"Apple ID 登录", []string{"appleid.apple.com", "idmsa.apple.com"}},
-		// 装 App / 跑更新都要过 OCSP；走代理时节点一抖就报「无法验证」。
-		{"OCSP 证书校验", []string{"ocsp.apple.com", "ocsp2.apple.com"}},
-		// 定位走代理会漂到节点所在国，连带时区与区域判定一起错。
-		{"定位与区域判定", []string{"gs-loc.apple.com", "ls.apple.com"}},
-		{"Microsoft 账号登录", []string{"login.microsoftonline.com", "login.live.com"}},
-		{"Microsoft 认证资源", []string{"msftauth.net", "msauth.net"}},
-		{"Windows 更新", []string{"windowsupdate.com", "update.microsoft.com"}},
-		{"Windows 激活/授权", []string{"activation.sls.microsoft.com", "licensing.mp.microsoft.com"}},
-		{"系统连通性检测", []string{"msftconnecttest.com", "msftncsi.com", "captive.apple.com"}},
-		{"用户指定直连（MediaFire）", []string{"mediafire.com"}},
-	}
-	for _, c := range classes {
-		if !has(c.vals...) {
-			t.Errorf("「%s」整类缺失：期望至少包含 %v 中的一条", c.name, c.vals)
+		if !hit {
+			t.Errorf("「%s」整类缺失：探针 %v 一条都没命中强制直连清单", c.Name, c.Probes)
 		}
 	}
 }

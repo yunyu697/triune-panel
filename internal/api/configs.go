@@ -76,10 +76,36 @@ func (a *Server) handleConfigsList(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	if cs == nil {
-		cs = []*store.SavedConfig{}
+	// 顺手算出每份配置的规则漂移：快照只有几十条字符串，200 份也就是
+	// 万级比较，比让前端为每一行再发一次请求省得多。
+	type row struct {
+		*store.SavedConfig
+		Drift *configDriftView `json:"drift,omitempty"`
 	}
-	writeJSON(w, 200, cs)
+	out := make([]row, 0, len(cs))
+	for _, c := range cs {
+		d := driftOf(c.RuleSnapshot)
+		d.PanelVersion = c.PanelVersion
+		v := configDriftView(d.configDriftView)
+		out = append(out, row{SavedConfig: c, Drift: &v})
+	}
+	writeJSON(w, 200, out)
+}
+
+// GET /api/configs/{id}/drift：某份配置相对当前版本的规则差异明细。
+func (a *Server) handleConfigDrift(w http.ResponseWriter, r *http.Request) {
+	c, err := a.Store.GetSavedConfig(pathID(r))
+	if err != nil {
+		if store.ErrNotFound(err) {
+			fail(w, 404, "配置不存在")
+			return
+		}
+		fail(w, 500, err.Error())
+		return
+	}
+	d := driftOf(c.RuleSnapshot)
+	d.PanelVersion = c.PanelVersion
+	writeJSON(w, 200, d)
 }
 
 type saveConfigReq struct {
@@ -133,7 +159,11 @@ func (a *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		Name: q.Name, Core: q.Core, CoreVersion: q.CoreVersion,
 		Target: q.Target, Scenario: q.Scenario, Note: strings.TrimSpace(q.Note),
 		Params: q.Params, Content: q.Content, Hash: contentHash(q.Content),
-		CreatedBy: a.actorName(r),
+		// 记下「谁生成的」：升到新版本后，内置规则可能多了几条，
+		// 老配置不会自动获得，界面要能提示用户重新生成。
+		PanelVersion: Version,
+		RuleSnapshot: systemRuleSnapshotJSON(),
+		CreatedBy:    a.actorName(r),
 	}
 	if err := a.Store.CreateSavedConfig(c); err != nil {
 		fail(w, 500, err.Error())
@@ -225,6 +255,10 @@ func (a *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.Content != "" {
 		c.Hash = contentHash(c.Content)
+		// 覆盖内容意味着「按当前版本重新生成过了」，漂移要跟着清零，
+		// 否则界面会一直挂着「落后 N 条」的旧提示。
+		c.PanelVersion = Version
+		c.RuleSnapshot = systemRuleSnapshotJSON()
 	}
 	if err := a.Store.UpdateSavedConfig(c); err != nil {
 		fail(w, 500, err.Error())

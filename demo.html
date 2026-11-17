@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.8 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.9 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1836,6 +1836,9 @@ canvas{display:block;width:100%}
            所以「Microsoft 设 DIRECT、OneDrive 设 PROXY」时重叠部分走的是 PROXY；想让某站直连，得把覆盖它的规则集都改成 DIRECT，或用上面的自定义规则显式覆盖。
            每个分组标题右侧有本组「全选 / 清空」；顶部的「全选 / 清空」作用于当前搜索结果。
            两者都会自动跳过本内核不可用的规则集——标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
+        <!-- 覆盖提示：把「勾了哪些规则集」翻译成「哪一类服务有保障」。
+             只显示一行一个类别，不占版面；没有勾任何相关规则集时整块隐藏。 -->
+        <div id="gen_cover" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px"></div>
         <div class="mirror-bar">
           <span class="muted" style="font-size:12.5px;white-space:nowrap">下载源</span>
           <select id="gen_mirror" class="input" style="width:auto" data-act="genMirrorSet" data-el="value"></select>
@@ -1861,6 +1864,8 @@ canvas{display:block;width:100%}
           <button class="btn" id="gen_dl" data-act="genDownload" disabled>下载文件</button>
           <button class="btn" id="gen_verify" data-act="genVerify" disabled
                   title="用面板上装的内核跑一次官方 check，验证这份配置能不能被加载">用本机内核校验</button>
+          <button class="btn" data-act="downloadCheckScript"
+                  title="下载一个脚本，在跑这份配置的设备上执行：逐类检查域名落到直连还是代理。内核校验只证明「能加载」，不证明「分流对」">下载体检脚本</button>
           <button class="btn" id="gen_save" data-act="openSaveConfig" disabled
                   title="保存到「配置管理」，随时可以再下载">保存配置</button>
           <span class="muted" id="gen_fn"></span>
@@ -2231,6 +2236,24 @@ canvas{display:block;width:100%}
         <span class="spacer"></span>
         <button class="btn" data-act="loadPanelBackups">查看历史备份</button>
       </div>
+      <div class="card" id="set_card_diag">
+        <h3>排障：诊断摘要与规则体检<span class="spacer"></span>
+          <button class="btn sm" data-act="copyDiagSummary">复制诊断摘要</button>
+        </h3>
+        <p class="muted" style="margin-bottom:10px">某个服务连不上时，先把这两样拿出来，能省掉好几轮「你什么版本、勾了哪些规则」。</p>
+        <p class="muted" style="margin-bottom:10px">
+          <b>诊断摘要</b>是面板侧的事实：版本、内核与配置文件路径、内置规则条数、有没有配置落后。<br>
+          <b>规则体检脚本</b>要在<b>跑这份配置的那台设备上</b>执行（旁路由或本机），它按类别解析域名、看落到直连还是代理——
+          「用本机内核校验」只证明配置能被加载，不证明分流是对的，这两件事不同。<br>
+          OpenWrt 上若提示找不到 dig，先 <code>opkg update &amp;&amp; opkg install bind-dig</code>；脚本没装 curl 会自动退回 wget。
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn" data-act="downloadCheckScript">下载规则体检脚本</button>
+          <span class="muted" id="diag_msg" style="font-size:12.5px"></span>
+        </div>
+        <pre class="log hide" id="diag_out" style="max-height:340px;overflow:auto;margin-top:12px"></pre>
+      </div>
+
       <div class="card" id="set_card_update" data-sect="maintain">
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
@@ -2658,6 +2681,18 @@ canvas{display:block;width:100%}
     <div class="foot">
       <button class="btn" data-act="checkInboundRun">重新检测</button>
       <button class="btn primary" data-act="closeModal" data-args='["mCheck"]'>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 规则漂移：这份配置生成之后，面板内置的强制直连 / 代理清单又变了哪些。
+     只列规则行原文，不做逐行 diff——用户要看的是「我少了哪几条」。 -->
+<div class="overlay" id="mDrift" data-act="closeModal" data-args='["mDrift"]' data-self="1">
+  <div class="modal" style="max-width:640px">
+    <h3>规则漂移 <span id="dr_name" style="font-weight:600"></span></h3>
+    <div id="dr_body" style="min-height:60px;font-size:13.5px"><span class="muted">加载中…</span></div>
+    <div class="foot">
+      <button class="btn primary" data-act="closeModal" data-args='["mDrift"]'>关闭</button>
     </div>
   </div>
 </div>
@@ -6111,6 +6146,61 @@ async function req(path, opts = {}) {
   return j;
 }
 
+/* 取纯文本接口（体检脚本、诊断摘要）。req() 一律按 JSON 解析，
+   这两处返回的是给人看的文本，走同一条路会解析失败。 */
+async function fetchText(path) {
+  if (DEMO) return demoText(path);
+  const r = await fetch(path, { headers: { Authorization: "Bearer " + TOKEN } });
+  if (r.status === 401) { dropSession(); showLogin(); throw new Error("登录已过期"); }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error || ("HTTP " + r.status));
+  }
+  return await r.text();
+}
+
+/* 演示模式下的两段样例文本：让离线 demo 也能点通这两个按钮，
+   而不是弹「演示模式不支持」。真实内容由面板按当前规则生成。 */
+function demoText(path) {
+  if (path.startsWith("/api/diagnose")) {
+    return [
+      "triune-panel 诊断摘要",
+      "生成时间   2026-11-17 18:20:31 +0800",
+      "面板版本   v2.0.9-demo",
+      "运行平台   linux/amd64（go1.26.0）",
+      "数据目录   /opt/triune-panel/data",
+      "",
+      "本次请求",
+      "  访问地址   demo.local:8080",
+      "  客户端 IP  10.1.1.23",
+      "  登录角色   owner",
+      "",
+      "内核",
+      "  mihomo   运行中  v1.19.34  /usr/local/bin/mihomo",
+      "           配置 21876 字节 sha 9f3c1a02  /opt/triune-panel/config/mihomo/config.yaml",
+      "",
+      "内置系统规则",
+      "  强制直连       62 条",
+      "  强制代理域名   7 条",
+      "  强制代理 IP 段 7 条",
+      "  直连端口       123",
+      "  私网/特殊段    11 条",
+      "",
+      "保存的配置 3 份（其中 1 份落后于当前版本，建议重新生成）",
+      "",
+      "如果某个服务不通，把这段连同体检脚本的输出一起发出来。"
+    ].join("\n") + "\n";
+  }
+  return [
+    "#!/bin/sh",
+    "# 演示模式：这是样例脚本，真实脚本由面板按你的规则清单生成",
+    "# 在跑配置的设备上执行：sh tp-check.sh 10.1.1.1",
+    "echo 演示模式：真实体检请部署面板后下载",
+    ""
+  ].join("\n");
+}
+
+
 /* -------- 演示模式 mock 数据 -------- */
 let MDB, REV_N = 3;
 if (DEMO) {
@@ -6130,7 +6220,7 @@ if (DEMO) {
   }));
   MDB = {
     // 演示页的顶栏版本号。跟着发布号走，免得预览页显示的版本比真实版本落后一大截。
-    version:"v2.0.8-demo",
+    version:"v2.0.9-demo",
     // 演示用的规则标签与已保存配置：让「点标签套用」「保存后下载」这条链路
     // 在离线演示页里也能完整走一遍
     ruleTags:[
@@ -6144,6 +6234,9 @@ if (DEMO) {
     savedConfigs:[
       {id:2,name:"主路由-singbox1.14",note:"改端口前的备份",core:"singbox",core_version:"1.14",
        target:"main-router",scenario:"balanced",size:3184,hash:"d3m0b2",created_by:"admin",
+       panel_version:"v2.0.7",
+       drift:{stale:true,unknown:false,panel_version:"v2.0.7",current_version:"v2.0.9",
+              added_count:2,removed_count:0},
        params:'{"core":"singbox","core_version":"1.14","target":"main-router","inbound_ids":[1,2],"scenario":"balanced"}',
        created_at:"2026-10-30 21:40:00",updated_at:"2026-10-30 21:40:00"},
       {id:1,name:"家里电视-mihomo",note:"",core:"mihomo",core_version:"",
@@ -8442,6 +8535,13 @@ const DEMO_CATALOG = {
       "policy": "DIRECT"
     },
     {
+      "id": "geosite-apple",
+      "name": "Apple 服务",
+      "group": "办公云服务",
+      "cores": "both",
+      "policy": "DIRECT"
+    },
+    {
       "id": "geosite-google",
       "name": "Google",
       "group": "办公云服务",
@@ -9540,6 +9640,21 @@ const DEMO_CATALOG = {
   ]
 };
 
+/* 演示模式的类别表：真实内容由后端 /api/export/catalog 下发（见 systemClasses）。
+   这里只是让离线 demo 的覆盖提示与体检脚本点得通，探针与 URL 不参与演示。 */
+DEMO_CATALOG.classes = [
+  { key:"apple-update", name:"Apple 系统更新 / 恢复", expect:"direct", sets:["geosite-apple"], hint:"检查更新会一直转圈，或下到一半校验失败" },
+  { key:"apple-ocsp", name:"Apple 证书校验", expect:"direct", sets:["geosite-apple"], hint:"装 App / 跑更新卡在「正在验证」" },
+  { key:"apple-loc", name:"Apple 定位与区域判定", expect:"direct", sets:["geosite-apple"], hint:"定位漂到国外，时区与区域判定跟着错" },
+  { key:"apple-id", name:"Apple ID 登录", expect:"direct", sets:["geosite-apple"], hint:"登录被判异地，触发二次验证" },
+  { key:"ms-login", name:"Microsoft 账号登录", expect:"direct", sets:["geosite-microsoft","geosite-onedrive"], hint:"OneDrive / Office / Teams 登不上" },
+  { key:"win-update", name:"Windows 更新 / 激活", expect:"direct", sets:["geosite-microsoft"], hint:"更新龟速或报 0x8024402c" },
+  { key:"connectivity", name:"系统连通性检测", expect:"direct", sets:[], hint:"被误判「无网络」，反复重连" },
+  { key:"mediafire", name:"MediaFire", expect:"direct", sets:[], hint:"站点与下载节点都内置直连" },
+  { key:"github", name:"GitHub 全系", expect:"proxy", sets:[], hint:"直连必然握手超时" },
+  { key:"ntp", name:"时间同步", expect:"port", sets:[], hint:"时间漂移会让证书校验随机失败" }
+];
+
 function coreHasSet(def) {
   if (!def || !def.cores || def.cores === "both") return true;
   return def.cores === genCore;
@@ -9714,6 +9829,33 @@ function renderSets() {
   }).join("");
   const picked = Object.keys(genChecked).filter(k => genChecked[k]).length;
   $("gen_sets_count").textContent = `已选 ${picked} / ${(genCatalog.sets||[]).length}`;
+  renderCoverage();
+}
+
+/* 覆盖提示：把「勾了哪些规则集」翻译成「哪一类关键服务有保障」。
+   类别表来自后端（与体检脚本、不变量测试同源），前端只做匹配——
+   自己再维护一份，改了清单忘了改前端，提示就会撒谎。
+   没有 sets 的类别（连通性检测、MediaFire、GitHub）由内置规则兜底，
+   勾不勾规则集都不影响，标成灰色的「内置」而不是「未勾」。 */
+function renderCoverage() {
+  const box = $("gen_cover");
+  if (!box) return;
+  const classes = ((genCatalog && genCatalog.classes) || []).filter(c => c.expect !== "port");
+  if (!classes.length) { box.innerHTML = ""; return; }
+  const chips = classes.map(c => {
+    const sets = c.sets || [];
+    if (!sets.length) {
+      return `<span class="chip ghost" title="${escHtml(c.hint || "")}">${escHtml(c.name)} · 内置</span>`;
+    }
+    const hit = sets.filter(id => genChecked[id]);
+    if (hit.length) {
+      return `<span class="chip ok" title="由 ${escHtml(hit.join("、"))} 覆盖；${escHtml(c.hint || "")}">${escHtml(c.name)} · ${escHtml(hit.join("、"))}</span>`;
+    }
+    // 未勾时只标两个字：九个类别全写成「未勾，仅内置兜底」会把这一行撑成三排，
+    // 反而看不清哪几个真缺。完整解释放 title 里。
+    return `<span class="chip warn" title="没勾覆盖这一类的规则集，只剩系统内置直连兜底；${escHtml(c.hint || "")}">${escHtml(c.name)} · 未勾</span>`;
+  });
+  box.innerHTML = `<span class="muted" style="font-size:12.5px;white-space:nowrap">关键服务保障</span>` + chips.join("");
 }
 
 /* 分组全选 / 清空：只作用于本组内「当前搜索可见 + 本内核可用」的规则集，
@@ -10057,6 +10199,46 @@ function genDownload() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
+/* 下载规则体检脚本。
+   与「用本机内核校验」不是一回事：那个跑的是内核的 -t，只证明配置能被加载；
+   这个要在设备上跑，验证的是「这类域名到底走直连还是代理」。 */
+async function downloadCheckScript() {
+  try {
+    const txt = await fetchText("/api/export/healthcheck");
+    saveTextFile("tp-check.sh", txt);
+  } catch (e) {
+    alert("下载体检脚本失败：" + e.message);
+  }
+}
+
+/* 诊断摘要：先贴到页面上，再尝试写剪贴板。
+   面板常用明文 HTTP，navigator.clipboard 在非安全上下文里直接不可用，
+   所以「复制不了」不是失败——文本已经展开在下面，用户可以手动全选。 */
+async function copyDiagSummary() {
+  const out = $("diag_out"), msg = $("diag_msg");
+  try {
+    const txt = await fetchText("/api/diagnose/summary");
+    out.textContent = txt;
+    out.classList.remove("hide");
+    let ok = false;
+    try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) { ok = false; }
+    msg.textContent = ok
+      ? "已复制到剪贴板（下面这份内容相同，方便核对）"
+      : "已展开在下方：浏览器没给剪贴板权限，请手动全选复制";
+  } catch (e) {
+    msg.textContent = "取诊断摘要失败：" + e.message;
+  }
+}
+
+function saveTextFile(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
 function demoGenConfig(core, target, ver, bypass) {
   // 不传时读当前开关：离线演示里「下载已保存配置」也走这里，而它保存时
   // 的开关状态未必等于页面当前状态，所以下面两处调用会显式传值。
@@ -10395,7 +10577,7 @@ function renderSavedConfigs() {
     return `<tr>
       <td class="ta-c"><input type="checkbox" data-act="cfgToggle" data-el="checked" data-args="${escJson([c.id])}"
             ${CFG_SEL.has(c.id) ? "checked " : ""}aria-label="选择 ${escHtml(c.name)}"></td>
-      <td><b>${escHtml(c.name)}</b>${c.note ? `<div class="muted" style="font-size:12px">${escHtml(c.note)}</div>` : ""}</td>
+      <td><b>${escHtml(c.name)}</b>${driftChipHTML(c)}${c.note ? `<div class="muted" style="font-size:12px">${escHtml(c.note)}</div>` : ""}</td>
       <td>${kern}</td>
       <td>${escHtml(TARGET_LABEL[c.target] || c.target || "—")}</td>
       <td class="mono">${fmtBytes(c.size)}</td>
@@ -10423,6 +10605,62 @@ function renderSavedConfigs() {
   $("cfg_count").textContent = SAVED_CFGS.length
     ? `共 ${SAVED_CFGS.length} 份${q ? `，匹配 ${list.length} 份` : ""}（上限 200 份）`
     : "";
+}
+
+/* 漂移徽标：这份配置生成之后，面板内置的强制直连 / 代理清单又变了。
+   不标出来，用户会一直用着缺规则的旧配置，还以为是「规则没用」。
+   unknown = 加字段之前存的记录（没有快照可比），不假装它是最新的。 */
+function driftChipHTML(c) {
+  const d = c.drift;
+  if (!d || !d.stale) return "";
+  const txt = d.unknown
+    ? "旧版本生成"
+    : (d.added_count ? `落后 ${d.added_count} 条` : `少 ${d.removed_count} 条`);
+  const tip = d.unknown
+    ? "这份配置保存时还没记录规则快照，无法判断差在哪，建议重新生成"
+    : "点开看多了 / 少了哪几条内置规则";
+  return ` <button class="chip warn" style="border:0;cursor:pointer;vertical-align:middle"
+      data-act="showDrift" data-args="${escJson([c.id, c.name])}" title="${escHtml(tip)}">${escHtml(txt)}</button>`;
+}
+
+/* 点开看明细。列表里只带计数（快照几十条 × 200 份会把列表撑大），
+   具体规则行按需拉一次。 */
+async function showDrift(id, name) {
+  const body = $("dr_body");
+  $("dr_name").textContent = name || "";
+  body.innerHTML = `<span class="muted">加载中…</span>`;
+  openModal("mDrift");
+  try {
+    const d = DEMO ? demoDrift() : await req(`/api/configs/${id}/drift`);
+    const rows = arr => arr.map(r => `<div class="mono" style="font-size:12px;padding:2px 0">${escHtml(r)}</div>`).join("");
+    let html = `<p class="muted" style="margin-bottom:10px">生成于 <b>${escHtml(d.panel_version || "未知版本")}</b>，当前面板 <b>${escHtml(d.current_version || "")}</b>。</p>`;
+    if (d.unknown) {
+      html += `<p>这份配置保存时还没有规则快照（旧版本存的），因此无法列出差异。<br>
+        建议直接用「重新生成」拿到当前版本的规则——不会动你的入站与规则集选择。</p>`;
+    } else if (!d.stale) {
+      html += `<p class="muted">内置规则与当前版本一致，没有需要补的条目。</p>`;
+    } else {
+      if ((d.added || []).length) {
+        html += `<h4 style="margin:12px 0 6px;font-size:13.5px">当前版本新增 ${d.added.length} 条（你的配置里没有）</h4>${rows(d.added)}`;
+      }
+      if ((d.removed || []).length) {
+        html += `<h4 style="margin:12px 0 6px;font-size:13.5px">当前版本已移除 ${d.removed.length} 条（你的配置里还留着）</h4>${rows(d.removed)}`;
+      }
+      html += `<p class="muted" style="margin-top:12px">点「重新生成」会用保存时的参数重跑一遍，覆盖后这套漂移立刻清零。</p>`;
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<p class="muted">取漂移失败：${escHtml(e.message)}</p>`;
+  }
+}
+
+function demoDrift() {
+  return {
+    panel_version: "v2.0.7", current_version: "v2.0.9",
+    stale: true, unknown: false, added_count: 2, removed_count: 0,
+    added: ["DOMAIN,ocsp.apple.com,DIRECT", "DOMAIN-SUFFIX,ls.apple.com,DIRECT"],
+    removed: []
+  };
 }
 
 // 表头复选框：只对当前筛选结果生效，语义与「全选」按钮一致。

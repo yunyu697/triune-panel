@@ -188,6 +188,19 @@ var migrations = []string{
 	`
 	ALTER TABLE inbounds ADD COLUMN node_host TEXT NOT NULL DEFAULT '';
 	`,
+	// v7: 保存的配置记住「生成时的面板版本」与「当时的系统规则清单」
+	//
+	// 没有这两样，升级后面板无法回答「我手上这份是不是已经落后」：v2.0.8 加了
+	// 5 条强制直连，v2.0.7 生成的配置不会自动获得，用户也看不出来。只存 hash
+	// 只能判断「内容变过」，说不清多了哪几条。
+	//
+	// rule_snapshot 是 JSON 数组（规则行原文，约 5KB/份），列表接口不返回，
+	// 只在算漂移时读。老库升级后是空串 = 未知，界面按「建议重新生成」处理，
+	// 不假装它是新的。
+	`
+	ALTER TABLE saved_configs ADD COLUMN panel_version TEXT NOT NULL DEFAULT '';
+	ALTER TABLE saved_configs ADD COLUMN rule_snapshot TEXT NOT NULL DEFAULT '';
+	`,
 }
 
 func Open(dataDir string) (*Store, error) {

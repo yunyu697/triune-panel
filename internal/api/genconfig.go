@@ -578,6 +578,10 @@ func (a *Server) handleExportCatalog(w http.ResponseWriter, r *http.Request) {
 		"scenarios": scenarioPresets,
 		"mirrors":   ruleMirrors,
 		"mirror":    map[string]string{"id": defMirror, "prefix": defPrefix},
+		// classes 是「哪类关键服务、由哪些规则集覆盖」的对照表。前端拿它把
+		// 用户勾选的规则集翻译成「这一类的保障来自哪」——少勾一个 geosite-apple
+		// 时，界面要能说清苹果那一类现在只剩系统清单兜底。
+		"classes": systemClasses,
 	})
 }
 

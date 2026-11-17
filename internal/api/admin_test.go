@@ -79,6 +79,12 @@ func TestRoleMatrix(t *testing.T) {
 		{name: "设置", method: "GET", path: "/api/settings", denied: []string{"guest"}},
 		{name: "审计", method: "GET", path: "/api/audit", denied: []string{"guest"}},
 		{name: "导出目录", method: "GET", path: "/api/export/catalog", denied: []string{"guest"}},
+		// 体检脚本会把内置规则策略整份吐出来，与「导出目录」同档
+		{name: "体检脚本", method: "GET", path: "/api/export/healthcheck", denied: []string{"guest"}},
+		// 诊断摘要只有版本与路径，报障用，只读账号也该能拿到
+		{name: "诊断摘要", method: "GET", path: "/api/diagnose/summary"},
+		// 配置内容含节点凭据，整组按 write 档
+		{name: "规则漂移", method: "GET", path: "/api/configs/1/drift", denied: []string{"guest"}},
 		{name: "管理员列表", method: "GET", path: "/api/admins", denied: []string{"guest", "op"}},
 		{name: "新建管理员", method: "POST", path: "/api/admins", body: map[string]any{}, denied: []string{"guest", "op"}},
 		{name: "清空审计", method: "DELETE", path: "/api/audit", denied: []string{"guest", "op"}},

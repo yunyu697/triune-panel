@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.8 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.9 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1727,6 +1727,9 @@ canvas{display:block;width:100%}
            所以「Microsoft 设 DIRECT、OneDrive 设 PROXY」时重叠部分走的是 PROXY；想让某站直连，得把覆盖它的规则集都改成 DIRECT，或用上面的自定义规则显式覆盖。
            每个分组标题右侧有本组「全选 / 清空」；顶部的「全选 / 清空」作用于当前搜索结果。
            两者都会自动跳过本内核不可用的规则集——标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
+        <!-- 覆盖提示：把「勾了哪些规则集」翻译成「哪一类服务有保障」。
+             只显示一行一个类别，不占版面；没有勾任何相关规则集时整块隐藏。 -->
+        <div id="gen_cover" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px"></div>
         <div class="mirror-bar">
           <span class="muted" style="font-size:12.5px;white-space:nowrap">下载源</span>
           <select id="gen_mirror" class="input" style="width:auto" data-act="genMirrorSet" data-el="value"></select>
@@ -1752,6 +1755,8 @@ canvas{display:block;width:100%}
           <button class="btn" id="gen_dl" data-act="genDownload" disabled>下载文件</button>
           <button class="btn" id="gen_verify" data-act="genVerify" disabled
                   title="用面板上装的内核跑一次官方 check，验证这份配置能不能被加载">用本机内核校验</button>
+          <button class="btn" data-act="downloadCheckScript"
+                  title="下载一个脚本，在跑这份配置的设备上执行：逐类检查域名落到直连还是代理。内核校验只证明「能加载」，不证明「分流对」">下载体检脚本</button>
           <button class="btn" id="gen_save" data-act="openSaveConfig" disabled
                   title="保存到「配置管理」，随时可以再下载">保存配置</button>
           <span class="muted" id="gen_fn"></span>
@@ -2122,6 +2127,24 @@ canvas{display:block;width:100%}
         <span class="spacer"></span>
         <button class="btn" data-act="loadPanelBackups">查看历史备份</button>
       </div>
+      <div class="card" id="set_card_diag">
+        <h3>排障：诊断摘要与规则体检<span class="spacer"></span>
+          <button class="btn sm" data-act="copyDiagSummary">复制诊断摘要</button>
+        </h3>
+        <p class="muted" style="margin-bottom:10px">某个服务连不上时，先把这两样拿出来，能省掉好几轮「你什么版本、勾了哪些规则」。</p>
+        <p class="muted" style="margin-bottom:10px">
+          <b>诊断摘要</b>是面板侧的事实：版本、内核与配置文件路径、内置规则条数、有没有配置落后。<br>
+          <b>规则体检脚本</b>要在<b>跑这份配置的那台设备上</b>执行（旁路由或本机），它按类别解析域名、看落到直连还是代理——
+          「用本机内核校验」只证明配置能被加载，不证明分流是对的，这两件事不同。<br>
+          OpenWrt 上若提示找不到 dig，先 <code>opkg update &amp;&amp; opkg install bind-dig</code>；脚本没装 curl 会自动退回 wget。
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn" data-act="downloadCheckScript">下载规则体检脚本</button>
+          <span class="muted" id="diag_msg" style="font-size:12.5px"></span>
+        </div>
+        <pre class="log hide" id="diag_out" style="max-height:340px;overflow:auto;margin-top:12px"></pre>
+      </div>
+
       <div class="card" id="set_card_update" data-sect="maintain">
         <h3>组件更新与版本管理</h3>
         <p class="muted" style="margin-bottom:12px">面板与三个内核均可更新/降级到<b>任意版本</b>。每一步都有安全保护：新二进制可执行验证 → 用它校验当前配置 → 备份旧版本 → 原子替换 → 重启 + 健康检查，任一环节失败<b>自动回滚</b>，服务不中断。</p>
@@ -2549,6 +2572,18 @@ canvas{display:block;width:100%}
     <div class="foot">
       <button class="btn" data-act="checkInboundRun">重新检测</button>
       <button class="btn primary" data-act="closeModal" data-args='["mCheck"]'>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 规则漂移：这份配置生成之后，面板内置的强制直连 / 代理清单又变了哪些。
+     只列规则行原文，不做逐行 diff——用户要看的是「我少了哪几条」。 -->
+<div class="overlay" id="mDrift" data-act="closeModal" data-args='["mDrift"]' data-self="1">
+  <div class="modal" style="max-width:640px">
+    <h3>规则漂移 <span id="dr_name" style="font-weight:600"></span></h3>
+    <div id="dr_body" style="min-height:60px;font-size:13.5px"><span class="muted">加载中…</span></div>
+    <div class="foot">
+      <button class="btn primary" data-act="closeModal" data-args='["mDrift"]'>关闭</button>
     </div>
   </div>
 </div>

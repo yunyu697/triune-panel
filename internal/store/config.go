@@ -26,9 +26,14 @@ type SavedConfig struct {
 	Content     string `json:"content"` // 列表接口不返回，避免一次拉几 MB
 	Size        int    `json:"size"`
 	Hash        string `json:"hash"` // 内容 sha256 前 16 位，用于判断重新生成后是否变了
-	CreatedBy   string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	// PanelVersion / RuleSnapshot 记录「这份配置是谁生成的」：前者是面板版本，
+	// 后者是生成时系统内置规则的清单（JSON 数组）。两者一起才能算出漂移——
+	// 升级后新增的强制直连不会自动进入老配置，光比内容 hash 说不清差在哪。
+	PanelVersion string `json:"panel_version"`
+	RuleSnapshot string `json:"-"` // 只在算漂移时读，不进列表也不进详情
+	CreatedBy    string `json:"created_by"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // ErrConfigNameTaken 同一内核下重名。不禁止跨内核同名（mihomo 与 sing-box
@@ -39,12 +44,13 @@ var ErrConfigNameTaken = errors.New("同名配置已存在")
 var ErrTagNameTaken = errors.New("同名标签已存在")
 
 // savedConfigCols 与 scanSavedConfig 顺序耦合，改一处必须改另一处。
-const savedConfigCols = `id,name,core,core_version,target,scenario,note,params,content,size,hash,created_by,created_at,updated_at`
+const savedConfigCols = `id,name,core,core_version,target,scenario,note,params,content,size,hash,panel_version,rule_snapshot,created_by,created_at,updated_at`
 
 func scanSavedConfig(sc interface{ Scan(...any) error }) (*SavedConfig, error) {
 	var c SavedConfig
 	err := sc.Scan(&c.ID, &c.Name, &c.Core, &c.CoreVersion, &c.Target, &c.Scenario,
 		&c.Note, &c.Params, &c.Content, &c.Size, &c.Hash,
+		&c.PanelVersion, &c.RuleSnapshot,
 		&c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -89,10 +95,11 @@ func (s *Store) CreateSavedConfig(c *SavedConfig) error {
 	now := time.Now().Format(AuditTimeLayout)
 	c.CreatedAt, c.UpdatedAt = now, now
 	res, err := s.db.Exec(`INSERT INTO saved_configs
-		(name,core,core_version,target,scenario,note,params,content,size,hash,created_by,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(name,core,core_version,target,scenario,note,params,content,size,hash,panel_version,rule_snapshot,created_by,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.Name, c.Core, c.CoreVersion, c.Target, c.Scenario, c.Note,
-		c.Params, c.Content, len(c.Content), c.Hash, c.CreatedBy, c.CreatedAt, c.UpdatedAt)
+		c.Params, c.Content, len(c.Content), c.Hash, c.PanelVersion, c.RuleSnapshot,
+		c.CreatedBy, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -116,6 +123,8 @@ func (s *Store) UpdateSavedConfig(c *SavedConfig) error {
 		hash=CASE WHEN ?='' THEN hash ELSE ? END,
 		core_version=CASE WHEN ?='' THEN core_version ELSE ? END,
 		params=CASE WHEN ?='' THEN params ELSE ? END,
+		panel_version=CASE WHEN ?='' THEN panel_version ELSE ? END,
+		rule_snapshot=CASE WHEN ?='' THEN rule_snapshot ELSE ? END,
 		updated_at=?
 		WHERE id=?`,
 		c.Name, c.Note,
@@ -123,6 +132,8 @@ func (s *Store) UpdateSavedConfig(c *SavedConfig) error {
 		c.Hash, c.Hash,
 		c.CoreVersion, c.CoreVersion,
 		c.Params, c.Params,
+		c.PanelVersion, c.PanelVersion,
+		c.RuleSnapshot, c.RuleSnapshot,
 		c.UpdatedAt, c.ID)
 	return err
 }
