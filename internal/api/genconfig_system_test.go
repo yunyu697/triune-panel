@@ -196,11 +196,20 @@ func TestSystemDirectFakeIPFilterDerived(t *testing.T) {
 			t.Errorf("filter[%d]=%q，期望 %q", i, filter[i], want)
 		}
 	}
-	// 关键域名必须在 mihomo 的 fake-ip-filter 里出现
+	// 关键域名必须在 mihomo 的 fake-ip-filter 里出现。每个「类」各取一条，
+	// 避免下次只改一类就以为全好了。
 	warns := new([]string)
 	g := genMihomo("main-router", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
 	got := g.doc["dns"].(map[string]any)["fake-ip-filter"].([]any)
-	for _, want := range []string{"mesu.apple.com", "login.microsoftonline.com", "+.msftauth.net", "onedrive.live.com"} {
+	for _, want := range []string{
+		"mesu.apple.com",            // 类 1 Apple 更新
+		"swcdn.apple.com",           // 类 1 Apple 更新（此前漏收）
+		"+.cdn-apple.com",           // 类 1 Apple 更新 CDN 后缀
+		"login.microsoftonline.com", // 类 3 微软登录
+		"+.windowsupdate.com",       // 类 4 Windows 更新
+		"+.msftauth.net",            // 类 3 登录页资源
+		"+.msftconnecttest.com",     // 类 5 连通性检测
+	} {
 		ok := false
 		for _, v := range got {
 			if v == want {

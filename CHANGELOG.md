@@ -8,6 +8,65 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.0.7
+
+### 规则体系整体排查：把「逐个补域名」换成「按类修 + 不变量守住」
+
+连续三版都是「发现一个补一个」——苹果更新、微软登录、GitHub、MTU、MediaFire。这次把
+配置生成里的规则体系整体过了一遍，修的是**类别**，不是单点。
+
+**一、消除「改了一边、另一边静默失效」**
+
+sing-box 的规则注入原先各自写了 `switch`，只认 `DOMAIN` / `DOMAIN-SUFFIX`；往清单里加
+`DOMAIN-KEYWORD` / `IP-CIDR` 时 mihomo 生效、sing-box 静默丢弃——配置合法、内核不报错，
+属于最难查的一类缺陷。现在自定义规则与两份内置清单共用同一个 `sbRuleBody` 转换函数，
+无法表达的类型会明确告警而不是当作没事。
+
+顺带修掉一个真 Bug：自定义 `GEOIP` 规则在 sing-box 里固定拼成 `geosite-<val>`，而 provider
+建出来的 tag 是 `geoip-<val>`。规则集里恰好有同名 geosite 时**静默用错集合**，没有时
+sing-box 启动直接 FATAL。
+
+**二、强制直连清单按类别补齐并收窄**
+
+- Apple 系统更新按 `apple-update` 全量补齐（21 条 → 现 18 条精确 + `*.cdn-apple.com` 后缀），
+  此前漏了 `swcdn` / `gg` / `gsra` / `ig` / `skl` / `gdmf-ados` / `wkms-public` /
+  `fcs-keys-pub-prod`——这些正是「检查更新失败」的常见落点。
+- 新增 Windows 更新 / 激活 / 授权类别：`*.windowsupdate.com`、`*.update.microsoft.com`、
+  `activation.sls.microsoft.com`、`licensing.mp.microsoft.com`。此前办公 / 视频会议场景把
+  `geosite-microsoft` 设成 PROXY 时，Windows 更新会被一起代理，表现为龟速或
+  `0x8024402c` 一类报错。
+- 连通性检测从 `www.` 精确域名改为后缀，覆盖各地区变体与 IPv6 端点。
+- **收窄 OneDrive**：此前把 `onedrive.live.com` / `storage.live.com` / `api.onedrive.com` /
+  `1drv.ms` 一并强制直连，属于越权——文件同步走代理只是慢，不是坏。现在只强制直连
+  登录 / 认证，数据面回归用户勾选的规则集。这是「只收走代理会失效的」这条判据的落实。
+
+**三、补两类拿不到域名的流量**
+
+- **NTP（UDP 123）**：没有 SNI，域名规则永远匹配不到，落进 `MATCH,PROXY`；代理节点基本
+  不转发 UDP 123 → 系统时间漂移 → **TLS 证书校验随机失败**。两套渲染器现在都按端口直连。
+- **私有网段**补 `100.64.0.0/10`（CGNAT，Tailscale / ZeroTier 打洞）、`224.0.0.0/4` 与
+  `ff00::/8`（组播，mDNS / SSDP / 投屏 / 打印机 / 智能家居发现）、`255.255.255.255/32`。
+  漏组播的典型症状是「设备发现时好时坏」。
+
+**四、用不变量测试替代「逐个断言」**
+
+新增 `genconfig_invariants_test.go`，断言的是机制而非域名：清单类型受限、直连与代理无交集、
+每条直连规则必须同时落到「mihomo 路由 + mihomo fake-ip-filter + sing-box 路由 + sing-box
+DNS」四处、NTP 双内核直连、`privateCIDRs` 覆盖 CGNAT 与组播、`systemProxyCIDRs` 单条不得
+宽于 `/20`（防止误伤整片共享 CDN）、每个关键类别至少一条代表条目（整类被删会红）。
+以后加域名只需往数组加一行，漏改任何一处测试都会拦住。
+
+**验证**：新增 9 项不变量测试；做 7 组变异（断开 fake-ip 派生、删 sing-box DNS 本地解析、
+把直连挪到规则集之后、删 NTP 规则、把 GitHub 段放宽成 `/8`、删 CGNAT 段、整类删 Windows
+更新）**全部转红后恢复**。`go vet` 干净，`go test ./...` 全绿；生成配置过**真机 mihomo
+1.19.33 `-t`** 校验通过，规则顺序核对为「自定义 → 系统直连 → 系统代理 → 规则集 → IP 兜底
+→ 私网 → MATCH」。sing-box 真机 `check` 仍未做（本机无该二进制，README 已标注）。
+
+**行为变化（升级需知）**：OneDrive 数据面不再强制直连。如果你之前依赖「OneDrive 怎么设都
+直连」，请在规则集里把 `geosite-onedrive` 设为 DIRECT（或加自定义规则）。
+
+---
+
 ## v2.0.6
 
 ### 修复 GitHub 偶发打不开 / git 推不上去；MediaFire 全站改为直连

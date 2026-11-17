@@ -1029,9 +1029,22 @@ func geoProviderFor(core, typ, val, pol string, sets *[]normSet, mir ruleMirrorS
 	*sets = append(*sets, s)
 }
 
+// privateCIDRs 本机 / 局域网 / 特殊用途网段，一律直连。
+//
+// 除 RFC1918 外还刻意收了四类最容易漏、症状又最难归因的：
+//   - 100.64.0.0/10：CGNAT 段。Tailscale / ZeroTier 的虚拟内网与部分运营商
+//     内网都在这里，漏了它打洞流量会被塞进代理隧道，表现为「Tailscale 时通时断」；
+//   - 224.0.0.0/4 + ff00::/8：组播。mDNS（隔空投送 / 打印机 / 智能家居）、
+//     SSDP（Chromecast / DLNA）全靠组播，漏了它设备发现会时好时坏；
+//   - 255.255.255.255/32：DHCP 与有限广播；
+//   - fe80::/10 + fc00::/7：IPv6 链路本地与唯一本地地址。
+//
+// 这些网段直连不会有任何副作用：它们本来就不可能出现在公网代理出口上。
 var privateCIDRs = []string{
 	"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12",
-	"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+	"127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10",
+	"224.0.0.0/4", "255.255.255.255/32",
+	"::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
 }
 
 var fakeIPFilter = []string{
@@ -1040,68 +1053,103 @@ var fakeIPFilter = []string{
 	"xbox.*.microsoft.com", "+.xboxlive.com", "time.*.com", "ntp.*.com",
 }
 
-// systemDirectRules 是「走代理就会坏」的系统关键服务域名，无条件直连。
+// systemDirectRules 是「走代理就会功能失效」的域名，无条件直连。
 //
-// 这些服务依赖出口 IP 地域判定、QUIC，或做了 TLS 证书固定（certificate pinning）：
-// 经代理后苹果更新检查转圈、OneDrive / Microsoft 账号登录触发风控或校验失败。
-// 之所以内置成硬编码规则而不是让用户勾选规则集：
-//   - 上游 geosite-apple / geosite-microsoft 这类**大类**会连带把 App Store、
-//     Apple Music、Xbox 等也纳入，而这些恰恰是用户想代理的内容服务，不能一刀切直连；
-//   - 用户没勾任何规则集时，这些域名会落到 MATCH,PROXY / final:PROXY，照样坏掉。
+// ── 准入判据（新增条目必须同时满足，缺一条就不该放进来）──
+//  1. 走代理后服务**功能失效或必然失败**，而不是「只是慢一点」；
+//  2. 失效原因是出口 IP 地域判定、TLS 证书固定（pinning）、QUIC，或该服务只认本地网络；
+//  3. 只收「系统 / 更新 / 激活 / 认证」这类基础服务，**不收内容服务**——
+//     App Store 下载、Apple Music、Office 内容、OneDrive 文件同步、Windows Store
+//     应用内容都不属于「走代理必坏」，内容走不走代理是用户的选择，强制直连属越权。
 //
-// 只收「系统服务 / 认证 / 更新」这类必须直连的精确域名，取自权威的 v2fly
-// domain-list-community：apple-update、microsoft、onedrive 三个分类。
-// 每条是 clash 语法（DOMAIN / DOMAIN-SUFFIX,值,DIRECT），与自定义规则共用
-// parseCustomRule，故 mihomo 与 sing-box 两套渲染器共用这一份。
+// 之所以内置成硬编码而不是让用户勾规则集：
+//   - 上游 geosite-apple / geosite-microsoft 是**大类**，会连带把内容服务一起直连；
+//   - 用户什么规则集都不勾时，这些域名会落到 MATCH,PROXY / final:PROXY，照样坏。
+//
+// 清单来源：v2fly/domain-list-community 的 apple-update / microsoft / onedrive
+// 三个分类，逐条核对过原文，不是凭记忆写的。
+//
+// 每条是 clash 语法（TYPE,VALUE,POLICY），mihomo 与 sing-box 共用 parseCustomRule。
+// **只允许 DOMAIN / DOMAIN-SUFFIX**：DNS 与 fake-ip 的派生只认这两种类型，
+// 写别的类型会在 sing-box 侧静默失效（有 TestSystemListsUseSupportedRuleTypes 兜着）。
 var systemDirectRules = []string{
-	// Apple 系统更新 / 激活 / 设备管理（apple-update + Apple ID 激活）
+	// ── 类 1：Apple 系统更新 / 恢复 / 激活 ──
+	// 全量取自 apple-update 分类（21 条，见 https://support.apple.com/HT210060）。
+	// 走代理后按出口地域取 CDN，更新会「转圈」或下到一半校验失败；软恢复直接不可用。
 	"DOMAIN,mesu.apple.com,DIRECT",
 	"DOMAIN,swscan.apple.com,DIRECT",
 	"DOMAIN,swdist.apple.com,DIRECT",
 	"DOMAIN,swdownload.apple.com,DIRECT",
+	"DOMAIN,swcdn.apple.com,DIRECT",
 	"DOMAIN,appldnld.apple.com,DIRECT",
-	"DOMAIN,updates-http.cdn-apple.com,DIRECT",
-	"DOMAIN,updates.cdn-apple.com,DIRECT",
 	"DOMAIN,oscdn.apple.com,DIRECT",
 	"DOMAIN,osrecovery.apple.com,DIRECT",
 	"DOMAIN,gdmf.apple.com,DIRECT",
+	"DOMAIN,gdmf-ados.apple.com,DIRECT",
 	"DOMAIN,gs.apple.com,DIRECT",
+	"DOMAIN,gsra.apple.com,DIRECT",
+	"DOMAIN,gg.apple.com,DIRECT",
+	"DOMAIN,ig.apple.com,DIRECT",
+	"DOMAIN,skl.apple.com,DIRECT",
+	"DOMAIN,wkms-public.apple.com,DIRECT",
 	"DOMAIN,configuration.apple.com,DIRECT",
 	"DOMAIN,xp.apple.com,DIRECT",
 	"DOMAIN,captive.apple.com,DIRECT", // Wi-Fi 热点 / 网络接入检测
-	// Apple ID 登录与激活（登录走代理会被判异地、触发二次验证或 pinning 失败）
+	// 更新与 Apple ID 共用的 CDN（updates / updates-http / fcs-keys-pub-prod /
+	// appleid.cdn-apple 全在这条后缀下）。上游新增 CDN 主机名时无需再逐条补。
+	"DOMAIN-SUFFIX,cdn-apple.com,DIRECT",
+
+	// ── 类 2：Apple ID 登录与激活 ──
+	// 登录走代理会被判异地 → 二次验证 / 锁账号；页面资源还做了证书固定。
 	"DOMAIN,appleid.apple.com,DIRECT",
-	"DOMAIN-SUFFIX,appleid.cdn-apple.com,DIRECT",
 	"DOMAIN,idmsa.apple.com,DIRECT",
 	"DOMAIN,amp-api.apps.apple.com,DIRECT",
 
-	// Microsoft 账号登录 / 认证（OneDrive / Office / Windows 登录都走这里）
+	// ── 类 3：Microsoft 账号登录与认证 ──
+	// OneDrive / Office / Windows / Teams 的登录都过这条链路；走代理出口 IP 触发风控。
 	"DOMAIN,login.microsoftonline.com,DIRECT",
 	"DOMAIN,login.live.com,DIRECT",
 	"DOMAIN,login.microsoft.com,DIRECT",
 	"DOMAIN,login.windows.net,DIRECT",
 	"DOMAIN,account.live.com,DIRECT",
 	"DOMAIN,account.microsoft.com,DIRECT",
-	"DOMAIN-SUFFIX,msftauth.net,DIRECT", // 登录页静态资源 CDN
+	"DOMAIN-SUFFIX,microsoftonline.com,DIRECT", // 各国后缀与 -p 变体
+	"DOMAIN-SUFFIX,msftauth.net,DIRECT",        // 登录页脚本与资源 CDN
 	"DOMAIN-SUFFIX,msauth.net,DIRECT",
-	"DOMAIN-SUFFIX,microsoftonline.com,DIRECT",
-	// OneDrive 登录与文件同步端点（登录域名已在上，这里是同步 API 与存储）
-	"DOMAIN,onedrive.live.com,DIRECT",
-	"DOMAIN,storage.live.com,DIRECT",
-	"DOMAIN,api.onedrive.com,DIRECT",
-	"DOMAIN-SUFFIX,1drv.ms,DIRECT",
+	"DOMAIN-SUFFIX,msftauthimages.net,DIRECT", // 登录页图形验证码
 
-	// 系统连通性检测：走代理会被误判「无网络」，进而反复重连 / 弹网络异常
-	"DOMAIN,www.msftconnecttest.com,DIRECT",
-	"DOMAIN,www.msftncsi.com,DIRECT",
+	// ── 类 4：Windows 更新 / 激活 / 授权 ──
+	// 更新由 Microsoft CDN 按地域就近下发，走代理等于绕到远端节点再回源，
+	// 轻则龟速、重则 0x8024402c 一类报错；激活与授权走代理会被判「异常环境」。
+	// 注意：**不含** mp.microsoft.com 的应用内容分发（Store 应用下载属于内容服务，
+	// 由用户勾选的规则集决定），只收操作系统更新与激活。
+	"DOMAIN-SUFFIX,windowsupdate.com,DIRECT",            // download./ctldl./au.download. 全在内
+	"DOMAIN-SUFFIX,update.microsoft.com,DIRECT",         // 旧版更新端点
+	"DOMAIN-SUFFIX,activation.sls.microsoft.com,DIRECT", // 激活
+	"DOMAIN-SUFFIX,licensing.mp.microsoft.com,DIRECT",   // 授权
 
-	// MediaFire：站点与下载节点都在 mediafire.com 后缀下（下载是
-	// download####.mediafire.com），一条后缀规则即可全覆盖。
+	// ── 类 5：系统连通性检测（NCSI / 热点探测）──
+	// 走代理一旦节点抖一下，系统就判定「无网络」，随后反复重连、弹网络异常、
+	// 甚至把 Wi-Fi 标记为「已连接但无法访问 Internet」。
+	"DOMAIN-SUFFIX,msftconnecttest.com,DIRECT",
+	"DOMAIN-SUFFIX,msftncsi.com,DIRECT",
+
+	// ── 类 6：明确要求直连的站点（用户指定）──
+	// MediaFire：站点与下载节点都在 mediafire.com 后缀下（download####.mediafire.com）。
 	// 刻意不加 IP 规则：它全站挂在 Cloudflare 共享段上（实测
 	// download.mediafire.com → 104.18.213.225 / 104.18.214.225），
 	// 按 IP 放行会把同一片 CF 上的成千上万个站点一起拉成直连。
 	"DOMAIN-SUFFIX,mediafire.com,DIRECT",
 }
+
+// systemDirectPorts 是「按端口判断、拿不到域名」的必须直连流量。
+//
+// 目前只有 NTP：它通常是客户端直接向 IP 发 UDP 123，没有 SNI、没有域名，
+// 任何域名规则都匹配不到，于是落进 MATCH,PROXY。而代理节点几乎都不转发
+// UDP 123 → 系统时间慢慢漂移 → **TLS 证书校验开始随机失败**，症状是
+// 「浏览器时不时报证书错误 / 证书过期」，极难归因到代理上。
+// 时间同步必须走本地网络，这里按端口兜底，不依赖域名嗅探。
+var systemDirectPorts = []int{123}
 
 // systemProxyDomains / systemProxyCIDRs 是「走直连必然不稳」的境外关键服务，
 // 无条件走代理——与 systemDirectRules 正好相反：那份是「走代理会坏」，这份是
@@ -1136,6 +1184,30 @@ var systemProxyCIDRs = []string{
 	"20.6.7.16/28",      // 实测：github.com 当前解析到 20.6.7.17
 	"20.205.243.160/28", // meta 里的 api/git 端点（.161 / .166 / .168）
 	"57.155.223.240/28", // 实测：codeload.github.com 解析到 57.155.223.241
+}
+
+// sbRuleBody 把 clash 风格的规则类型/值转成 sing-box 的规则匹配体（不含 outbound）。
+//
+// 抽出来是为了**只有一处**知道「哪种类型怎么表达」：自定义规则与两份内置清单
+// 共用它。此前内置清单各自写了 switch，只认 DOMAIN / DOMAIN-SUFFIX，
+// 于是往清单里加一条 DOMAIN-KEYWORD 时 mihomo 生效、sing-box 静默不生效——
+// 内核不报错、配置也合法，是最难查的一类缺陷。返回 nil 表示确实无法表达，
+// 调用方必须告警而不是当作没事（见 warnUnsupportedRule）。
+func sbRuleBody(typ, val string) map[string]any {
+	switch typ {
+	case "DOMAIN":
+		return map[string]any{"domain": []any{val}}
+	case "DOMAIN-SUFFIX":
+		return map[string]any{"domain_suffix": []any{val}}
+	case "DOMAIN-KEYWORD":
+		return map[string]any{"domain_keyword": []any{val}}
+	case "IP-CIDR", "IP-CIDR6":
+		if !strings.Contains(val, "/") {
+			val += map[bool]string{true: "/128", false: "/32"}[strings.Contains(val, ":")]
+		}
+		return map[string]any{"ip_cidr": []any{val}}
+	}
+	return nil
 }
 
 // systemDirectFakeIPFilter 是 systemDirectRules 在 mihomo fake-ip-filter 里的对应写法。
@@ -1241,6 +1313,11 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 			continue
 		}
 		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
+	}
+	// NTP：UDP 123 没有域名、没有 SNI，域名规则永远匹配不到，会落进 MATCH,PROXY。
+	// 代理节点基本不转发 UDP 123，时间一漂 TLS 证书就开始随机报错，且没人会想到是代理。
+	for _, p := range systemDirectPorts {
+		rules = append(rules, fmt.Sprintf("DST-PORT,%d,DIRECT", p))
 	}
 	for _, s := range sets {
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", s.Tag, s.Policy))
@@ -1451,49 +1528,42 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 			*warns = append(*warns, "无法解析的自定义规则已跳过: "+line)
 			continue
 		}
-		switch typ {
-		case "DOMAIN":
-			routeRules = append(routeRules, setOut(map[string]any{"domain": []any{val}}, pol))
-		case "DOMAIN-SUFFIX":
-			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
-		case "DOMAIN-KEYWORD":
-			routeRules = append(routeRules, setOut(map[string]any{"domain_keyword": []any{val}}, pol))
-		case "IP-CIDR", "IP-CIDR6":
-			if !strings.Contains(val, "/") {
-				val += map[bool]string{true: "/128", false: "/32"}[strings.Contains(val, ":")]
-			}
-			routeRules = append(routeRules, setOut(map[string]any{"ip_cidr": []any{val}}, pol))
-		case "GEOSITE", "GEOIP":
+		if typ == "GEOSITE" || typ == "GEOIP" {
 			geoProviderFor("singbox", typ, val, pol, &sets, mir)
-			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{"geosite-" + val}}, pol))
-		}
-	}
-	// 系统关键服务强制直连：与 mihomo 同一份清单、同一位置（规则集之前）。
-	// 复用上面自定义规则的 typ→rule 映射，避免两套写法漂移。
-	for _, line := range systemDirectRules {
-		typ, val, pol, ok := parseCustomRule(line)
-		if !ok {
+			// 引用的 tag 必须与 geoProviderFor 建出来的一致（geoip-* / geosite-*）。
+			// 此前这里对 GEOIP 也拼成 geosite-<val>：规则集里恰好有同名 geosite
+			// 时静默用错集合，没有时 sing-box 启动 FATAL。
+			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{strings.ToLower(typ) + "-" + val}}, pol))
 			continue
 		}
-		switch typ {
-		case "DOMAIN":
-			routeRules = append(routeRules, setOut(map[string]any{"domain": []any{val}}, pol))
-		case "DOMAIN-SUFFIX":
-			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
-		}
-	}
-	// 境外关键服务强制代理：与 mihomo 同一份清单、同一位置（规则集之前）。
-	for _, line := range systemProxyDomains {
-		typ, val, pol, ok := parseCustomRule(line)
-		if !ok {
+		body := sbRuleBody(typ, val)
+		if body == nil {
+			*warns = append(*warns, "自定义规则类型 "+typ+" 无法在 sing-box 表达，已跳过: "+line)
 			continue
 		}
-		switch typ {
-		case "DOMAIN":
-			routeRules = append(routeRules, setOut(map[string]any{"domain": []any{val}}, pol))
-		case "DOMAIN-SUFFIX":
-			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
+		routeRules = append(routeRules, setOut(body, pol))
+	}
+	// 内置清单：与 mihomo 同一份数据、同一位置（自定义之后、规则集之前）。
+	// 走同一条转换路径，新增规则类型时两边不会漂移。
+	applyBuiltin := func(lines []string) {
+		for _, line := range lines {
+			typ, val, pol, ok := parseCustomRule(line)
+			if !ok {
+				continue // 清单是我们自己写的；解析失败只能是代码 bug，由单测兜住
+			}
+			body := sbRuleBody(typ, val)
+			if body == nil {
+				*warns = append(*warns, "内置规则类型 "+typ+" 无法在 sing-box 表达: "+line)
+				continue
+			}
+			routeRules = append(routeRules, setOut(body, pol))
 		}
+	}
+	applyBuiltin(systemDirectRules)
+	applyBuiltin(systemProxyDomains)
+	// NTP 等按端口识别的流量：没有域名、没有 SNI，只能按端口兜底。
+	for _, p := range systemDirectPorts {
+		routeRules = append(routeRules, map[string]any{"port": []any{p}, "outbound": "direct"})
 	}
 	for _, s := range sets {
 		routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{s.Tag}}, s.Policy))

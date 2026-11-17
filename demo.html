@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.0.6 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.0.7 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1795,11 +1795,16 @@ canvas{display:block;width:100%}
           <input id="gen_set_search" class="input" style="width:180px;min-width:0;max-width:100%;flex:0 1 180px;padding:5px 10px;font-size:12.5px"
                  placeholder="搜索规则集…" data-act="filterSets">
         </h3>
-        <p class="muted" style="margin-bottom:12px">苹果系统更新 / Apple ID 登录、Microsoft / OneDrive 登录、Windows 更新等<b>关键服务域名始终强制直连</b>，不受这里的策略影响——它们走代理会导致更新失败或账号登录异常；想代理 App Store / Apple Music 等内容服务可勾选「Apple 服务」。
+        <p class="muted" style="margin-bottom:12px">苹果系统更新 / Apple ID 登录、Microsoft 账号登录、Windows 更新与激活、系统连通性检测等<b>关键服务域名始终强制直连</b>，不受这里的策略影响——它们走代理会导致更新失败、登录被判异地或系统误判「无网络」。
+           OneDrive <b>只强制直连登录 / 认证</b>，文件同步仍按你勾选的规则集走（勾 OneDrive = 代理就是代理，这是刻意的分寸：同步走代理只是慢，不是坏）。
+           想代理 App Store / Apple Music 等内容服务可勾选「Apple 服务」。
+           另外 <b>NTP（时间同步）与局域网 / 组播流量也按类别直连</b>——前者走代理会让系统时间漂移、TLS 证书随机报错，后者关系到投屏 / 打印机 / 智能家居的设备发现。
           反过来也有<b>始终强制走代理</b>的：GitHub 全系（含 raw / objects / githubassets，以及 SSH 走的 IP 段）直连必然握手超时，所以即使你把这里的 GitHub 规则集改成「直连」也不会生效。
           另外 <b>MediaFire 全站已内置直连</b>（含 download 下载节点），勾「海外 CDN = 代理」也照样直连。
            勾选需要的规则集并指定策略（DIRECT 直连 / PROXY 代理 / REJECT 拦截）。
            <b>默认策略按规则集推荐值带出</b>：国内站点 / 私有网络 DIRECT、广告与追踪 REJECT、境外服务 PROXY，勾选后仍可逐条改。
+           <b>同名域名被多条规则集覆盖时，按 REJECT → PROXY → DIRECT 的固定顺序命中，不按勾选先后</b>——
+           所以「Microsoft 设 DIRECT、OneDrive 设 PROXY」时重叠部分走的是 PROXY；想让某站直连，得把覆盖它的规则集都改成 DIRECT，或用下面的自定义规则显式覆盖。
            每个分组标题右侧有本组「全选 / 清空」；顶部的「全选 / 清空」作用于当前搜索结果。
            两者都会自动跳过本内核不可用的规则集——标记「仅 mihomo」「仅 singbox」的规则集在另一内核的上游并不存在，切换内核时会自动置灰。</p>
         <div class="mirror-bar">

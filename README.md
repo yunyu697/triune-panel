@@ -1060,29 +1060,77 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 > **升级提示**：保存过的配置里记的是当时的策略，**重新生成不会自动套用新的推荐值**。
 > 想让老配置用上新策略，回配置生成页把规则集重新勾一遍再保存。
 
+### 规则集的排序语义（容易踩的坑）
+
+同一台设备可以勾选多条规则集，它们的域名必然会有重叠（比如「Microsoft」和「OneDrive」、
+「中国大陆域名」和「国内影音」）。**命中顺序不是按你勾选的先后，而是按策略固定排序**：
+
+`REJECT` → `PROXY` → `DIRECT`
+
+也就是说：某个域名同时被一条 REJECT 规则集和一条 PROXY 规则集覆盖时，走 REJECT；
+同时被 PROXY 和 DIRECT 覆盖时，**走 PROXY**。这是刻意的（拦截与代理优先于直连，
+避免「勾了拦截却被直连规则放过去」），但它意味着：
+
+> 你把 `geosite-microsoft` 设成 DIRECT、`geosite-onedrive` 设成 PROXY 时，
+> 重叠部分走的是 **PROXY**。想让某个域名直连，得把所有覆盖它的规则集都改成 DIRECT，
+> 或者用自定义规则显式覆盖（自定义规则排在最前，优先级最高）。
+
 ### 系统关键服务强制直连（不受策略影响）
 
-有一类域名**走代理就会坏**，与你想让哪些流量走代理无关：
+有一类域名**走代理就会功能失效**，与你想让哪些流量走代理无关。它们被写成
+**无条件 DIRECT**，排在所有规则集之前——即便你把 `geosite-microsoft` / `geosite-onedrive`
+设成 PROXY，登录域名也先命中直连。
 
-- **苹果**：系统更新（`mesu` / `swscan` / `swdist` / `updates*.cdn-apple.com` 等）、
-  Apple ID 登录与设备激活（`appleid.apple.com` / `idmsa.apple.com` / `gs.apple.com`）、
-  Wi-Fi 接入检测（`captive.apple.com`）。经代理后更新检查转圈、登录被判异地或触发
-  证书固定校验失败。
-- **微软**：账号登录（`login.microsoftonline.com` / `login.live.com` /
-  `account.live.com` / `*.msftauth.net`）、OneDrive 同步（`onedrive.live.com` /
-  `storage.live.com`）、Windows Update，以及连通性检测（`msftconnecttest.com`）。
-  经代理出口 IP 频繁变化会触发风控 → OneDrive / Office 登录不上。
+按类别组织（每一类都有单测守着，见下）：
 
-这些域名在生成的配置里被写成**无条件 DIRECT**，排在所有规则集之前——即便你在上面
-把 `geosite-microsoft` / `geosite-onedrive` 设成 PROXY，登录域名也先命中直连，不会被
-规则集抢走。同时它们进了 mihomo 的 `fake-ip-filter`、sing-box 的 `dns.rules → local`，
-避免 TUN 模式下拿到假 IP 或「DNS 靠代理、流量直连」的死锁。
+| 类别 | 代表域名 | 走代理的后果 |
+|---|---|---|
+| Apple 系统更新 / 恢复 | `mesu` `swscan` `swdist` `swcdn` `swdownload` `oscdn` `gdmf` `gsra` `*.cdn-apple.com` 等（`apple-update` 全量 21 条） | 检查更新转圈、更新下到一半校验失败、软恢复不可用 |
+| Apple ID 登录 / 激活 | `appleid.apple.com` `idmsa.apple.com` `amp-api.apps.apple.com` | 判异地 → 二次验证 / 锁账号；页面做了证书固定 |
+| Microsoft 账号登录 | `login.microsoftonline.com` `login.live.com` `login.windows.net` `*.msftauth.net` `*.msauth.net` `*.msftauthimages.net` | 出口 IP 触发风控 → OneDrive / Office / Teams 登录不上 |
+| Windows 更新 / 激活 / 授权 | `*.windowsupdate.com` `*.update.microsoft.com` `activation.sls.microsoft.com` `licensing.mp.microsoft.com` | 更新由 CDN 按地域就近下发，绕道代理即龟速或 `0x8024402c` 一类报错；激活判「异常环境」 |
+| 系统连通性检测 | `*.msftconnecttest.com` `*.msftncsi.com` `captive.apple.com` | 系统误判「无网络」→ 反复重连、弹网络异常、Wi-Fi 标记「无法访问 Internet」 |
+| 用户指定直连 | `*.mediafire.com` | 见 [MediaFire 全站直连](#mediafire-全站直连) |
 
-这是刻意收窄的精确域名清单（取自 v2fly `domain-list-community` 的 `apple-update` /
-`microsoft` / `onedrive` 分类），**不含 App Store / Apple Music / Apple TV+ / Xbox 等
-内容服务**——那些走不走代理是你的选择。目录里另有可选的「Apple 服务」（`geosite-apple`，
-默认 DIRECT），想代理苹果内容服务可单独勾选它。用户自定义规则仍排在这些直连规则之前，
-保留显式覆盖的能力。
+除域名外还有两类**拿不到域名**的流量，同样按类兜底：
+
+- **NTP（UDP 123）**：客户端通常直接向 IP 发包，没有 SNI，域名规则永远匹配不到，
+  会落进 `MATCH,PROXY`；而代理节点基本不转发 UDP 123 → 系统时间漂移 →
+  **TLS 证书校验开始随机失败**（浏览器时不时报证书错误，没人会想到是代理）。
+  现在两套渲染器都按端口强制直连。
+- **局域网 / 特殊用途网段**：除 RFC1918 外还收了 `100.64.0.0/10`（CGNAT，
+  Tailscale / ZeroTier 打洞）、`224.0.0.0/4` 与 `ff00::/8`（组播，mDNS / SSDP /
+  投屏 / 打印机 / 智能家居发现）、`255.255.255.255/32`（DHCP 广播）。
+  漏掉组播的典型症状就是「设备发现时好时坏」。
+
+> **准入判据（往清单里加东西之前先看这三条）**
+>
+> 1. 走代理后服务**功能失效或必然失败**，而不是「只是慢一点」；
+> 2. 失效原因是出口 IP 地域判定、TLS 证书固定、QUIC，或该服务只认本地网络；
+> 3. 只收「系统 / 更新 / 激活 / 认证」这类基础服务，**不收内容服务**——
+>    App Store 下载、Apple Music、Office 内容、OneDrive 文件同步、Store 应用内容
+>    都不属于「走代理必坏」，它们走不走代理是你的选择，强制直连属于越权。
+>
+> 因此 OneDrive **只强制直连登录/认证**，文件同步按你勾选的规则集走（勾了
+> `geosite-onedrive = PROXY` 就是代理，不勾则走兜底）。这是刻意的分寸。
+
+这些域名同时进了 mihomo 的 `fake-ip-filter`、sing-box 的 `dns.rules → local`，
+避免 TUN 模式下拿到假 IP，或「DNS 靠代理、流量直连」的死锁——三处都是从**同一份清单派生**的。
+
+> **维护方式（重要）**：`internal/api/genconfig_invariants_test.go` 里有一组**按类别**写的
+> 不变量测试，不针对具体域名：
+>
+> - 清单里每条规则必须能被两套渲染器都表达（只允许 `DOMAIN` / `DOMAIN-SUFFIX`，
+>   其它类型会在 sing-box 侧静默失效）；
+> - 每条直连规则必须同时出现在 mihomo 路由、mihomo `fake-ip-filter`、sing-box 路由与 DNS；
+> - 直连与代理清单不得有域名或后缀交集；
+> - `privateCIDRs` 必须覆盖 RFC1918 + CGNAT + 组播；`systemProxyCIDRs` 单条不得宽于 `/20`；
+> - 每个关键类别至少有一条代表条目（整类被删会立刻红）。
+>
+> 所以给清单加域名时，**只需往数组里加一行**，位置、DNS、fake-ip、momo 继承都由生成器
+> 统一处理，漏改任何一处测试都会拦住。这套机制就是为避免「发现一个补一个」。
+
+用户自定义规则仍排在这些直连规则之前，保留显式覆盖的能力。
 
 > xray 内核的客户端配置不经过本生成器（走分享链接 / 订阅），不受此影响。
 
@@ -1992,6 +2040,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.0.7 | **规则体系整体排查：按类修，不再逐个补域名**。① 消除单侧静默丢弃：sing-box 的规则注入原先只认 `DOMAIN` / `DOMAIN-SUFFIX`，加别的类型时 mihomo 生效、sing-box 静默不生效；现在自定义规则与两份内置清单共用同一转换函数，无法表达会明确告警。顺带修掉自定义 `GEOIP` 在 sing-box 里拼成 `geosite-<val>` 的真 Bug（provider tag 实为 `geoip-<val>`，有同名 geosite 时静默用错集合、没有时启动 FATAL）。② 直连清单按类补齐：Apple 更新按 `apple-update` 全量 21 条（补上此前漏的 `swcdn` / `gg` / `gsra` / `ig` / `skl` / `gdmf-ados` / `wkms-public`）、新增 Windows 更新/激活/授权（`*.windowsupdate.com` / `activation.sls.microsoft.com` / `licensing.mp.microsoft.com`）、连通性检测改后缀；同时**收窄 OneDrive**——数据面走代理只是慢不是坏，强制直连属越权，现在只强制直连登录/认证。③ 补两类拿不到域名的流量：NTP（UDP 123，没有 SNI，走代理会让系统时间漂移 → TLS 证书随机报错）按端口直连；私有网段补 CGNAT `100.64.0.0/10`（Tailscale 打洞）与组播 `224.0.0.0/4` / `ff00::/8`（mDNS / SSDP / 投屏 / 智能家居发现）。④ 用 `genconfig_invariants_test.go` 把机制钉住：每条直连规则必须同时落到四个位置、直连与代理无交集、`systemProxyCIDRs` 单条不得宽于 `/20`、每个关键类别至少一条（整类被删会红）——以后加域名只需加一行。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)与[规则集的排序语义](#规则集的排序语义容易踩的坑)。 |
 | v2.0.6 | **修复 GitHub 偶发打不开 / `git push` 连不上；MediaFire 改直连**。三层原因：① mihomo / sing-box 的 TUN 段没写 `mtu`，取默认 9000，真实链路 1500 下大包被丢且收不到 ICMP 分片通知（PMTU 黑洞），症状正是「网页能开、`git push` / 大文件下载卡死」——现在显式设 1500，momo 取 1420；② `git@github.com` 走 SSH 22 端口、没有 SNI，域名规则对它无效，原先也没有任何 GitHub IP 段，现在补上官方 `meta` 的 git 段（只取 GitHub 自有/独占段，外加实测的 `20.6.7.16/28` 等），放在规则集之后只兜无域名流量；③ GitHub 域名原先只靠勾选 `geosite-github` 或落 `MATCH,PROXY`，用户改成 DIRECT 就直连被墙——新增「境外关键服务强制代理」清单前置在所有规则集之前，覆盖 `github.com` / `githubusercontent.com` / `githubassets.com` / `github.io` / `ghcr.io` 等。MediaFire 加 `DOMAIN-SUFFIX,mediafire.com,DIRECT` 一条后缀全站直连（含 `download####` 下载节点），**不加 IP**：实测它全站在 Cloudflare 共享段 `104.18.213.225` / `104.18.214.225` 上，按 IP 放行会连带把大量 CF 站点直连。实测背景：直连 `github.com` 握手 5 s 无响应，而同时刻 `raw.githubusercontent.com` 可达。详见[已知限制](#已知限制与未验证项)第 1 条。 |
 | v2.0.5 | **修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效**。苹果更新域名原先没有任何直连规则（`ruleCatalog` 无 `geosite-apple`），落到兜底 PROXY 后因出口地域判定、QUIC、证书固定而更新失败；OneDrive / 微软登录域名则被办公场景里的 `geosite-onedrive` / `geosite-microsoft` PROXY 规则抢先命中（PROXY 排在 DIRECT 前），经代理出口 IP 触发风控登录不上；fake-ip 又让这些域名拿到假 IP，证书固定客户端直接握手失败。现在内置一份精确域名「系统关键服务强制直连」清单（取自 v2fly `apple-update` / `microsoft` / `onedrive` 分类），在 mihomo / sing-box 两套渲染器里排在所有规则集之前、自定义规则之后，刻意不含 App Store / Apple Music / 游戏等内容服务；mihomo 的 `fake-ip-filter` 与 sing-box 的 `dns.rules → local` 从同一份清单派生（momo 自动继承），避免假 IP 与「DNS 靠代理、流量直连」死锁。规则目录补可选的「Apple 服务」（默认 DIRECT）。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)。 |
 | v2.0.4 | **修复流量统计：sing-box 每用户计数恒为 0**。官方 sing-box 的 clash API `/connections` 不输出用户字段，采样器取到空就跳过，导致每个人流量永远是 0；短连接又因 30 秒采样间隔整个丢失。现在按入站 tag 反查归属（仅单用户入站准确，多用户不臆造）、采样缩到 5 秒、实时速率改取内核全局累计差值；UI 与已知限制第 5 条如实写明精确到什么程度。xray 内核不受影响。不换内核、不影响组件更新。 |
