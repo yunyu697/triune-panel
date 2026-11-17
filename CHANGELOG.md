@@ -8,6 +8,51 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.0.6
+
+### 修复 GitHub 偶发打不开 / git 推不上去；MediaFire 全站改为直连
+
+用户反馈「GitHub 有时打不开，推 git 有时连不上」，以及「希望 MediaFire 所有域名和 IP 都直连」。
+排查后确认**不是单纯的域名分流问题**，而是三层原因叠加，前两层是配置生成器的真实缺陷：
+
+- **TUN 的 MTU 没写，落到内核默认 9000**。mihomo 与 sing-box 的 TUN 段都没有 `mtu` 字段，
+  取各自的默认值 9000。真实链路是 1500，TUN 交给内核的 MSS 远超路径 MTU，大包被丢弃又收不到
+  ICMP「需要分片」通知（PMTU 黑洞）。症状高度特征化：**小请求能通（网页首屏能开）、大传输卡死
+  （`git push` / `git clone` / 大文件下载转圈后超时）**——正好对应「有时能开、有时连不上」。
+- **GitHub 的裸 TCP 没有规则兜底**。`git@github.com:…` 走 SSH 22 端口，没有 SNI，按域名写的
+  规则对它完全无效，只能按目标 IP 匹配；而原来的规则里没有任何 GitHub IP 段。
+- **强制兜底靠不住**。GitHub 域名原先只靠用户勾选 `geosite-github`（默认 PROXY）或落
+  `MATCH,PROXY`；一旦用户把 GitHub 相关规则集改成 DIRECT，连接就被留在大陆网络上。
+
+实测依据（2026-11-17，广州联通）：直连 `https://github.com` 握手阶段无任何响应（5 s 超时），
+而同一时刻 `raw.githubusercontent.com` 可达；`github.com` 已解析到 `20.6.7.17`，**不在** GitHub
+传统四大段（`192.30.252.0/22`、`185.199.108.0/22`、`140.82.112.0/20`、`143.55.64.0/20`）内。
+
+修法：
+
+- **三处 TUN 显式设 MTU**：mihomo 与 sing-box 客户端取 `1500`（标准以太网），openwrt-momo 取
+  `1420`（路由器上 PPPoE 1492 更常见，留封装余量）。注释写明「PPPoE 仍偶发大包卡顿可再降」。
+- **新增「境外关键服务强制代理」清单**（`systemProxyDomains` / `systemProxyCIDRs`），与上一版的
+  「强制直连」相对称：域名部分在**所有规则集之前**（用户即使把 GitHub 设成 DIRECT 也压得住），
+  IP 部分在**规则集之后、私有网段之前**（只有无域名的裸 TCP 会走到这里，不拖慢域名连接）。
+  域名覆盖 `github.com` / `githubusercontent.com`（raw / objects / avatars / camo / user-images）/
+  `githubassets.com` / `github.io` / `github.dev` / `ghcr.io` / `githubapp.com`；IP 段取自官方
+  `api.github.com/meta` 的 git 列表，只保留 GitHub 自有/独占段，另补三个实测量到的端点段
+  （`20.6.7.16/28`、`20.205.243.160/28`、`57.155.223.240/28`），不取大块 Azure 段以免误伤。
+- **MediaFire 全站直连**：`DOMAIN-SUFFIX,mediafire.com,DIRECT`，一条后缀覆盖站点与
+  `download####.mediafire.com` 下载节点。**刻意不加 IP 规则**：实测它全站在 Cloudflare 共享段上
+  （`download.mediafire.com` → `104.18.213.225` / `104.18.214.225`），按 IP 放行会把同一片 CF 上
+  的成千上万个站点一起拉成直连，包括本来需要代理的。客户端总是按域名连接，域名后缀规则已覆盖
+  全部访问路径，效果等同「所有 MediaFire 都直连」。DNS 侧自动跟随（`fake-ip-filter` 与
+  `dns.rules → local` 由同一份清单派生），不会出现「DNS 走代理、流量直连」的 IP 不匹配。
+
+验证：新增 6 项回归测试（GitHub 域名/IP 在两套渲染器的位置与策略、MediaFire 直连与 DNS 派生、
+三处 TUN 的 MTU）；做 4 处变异（删 mihomo 代理插入、删 mediafire 规则、删 mihomo mtu、删
+sing-box mtu）确认全部转红后恢复。生成配置过**真机 mihomo 1.19.33 `-t`** 校验；momo 一并继承。
+sing-box 侧仅做结构与位置断言，**未跑真机 `check`**（本机无 sing-box 二进制）。
+
+---
+
 ## v2.0.5
 
 ### 修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效

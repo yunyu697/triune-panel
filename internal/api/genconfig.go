@@ -1094,6 +1094,48 @@ var systemDirectRules = []string{
 	// 系统连通性检测：走代理会被误判「无网络」，进而反复重连 / 弹网络异常
 	"DOMAIN,www.msftconnecttest.com,DIRECT",
 	"DOMAIN,www.msftncsi.com,DIRECT",
+
+	// MediaFire：站点与下载节点都在 mediafire.com 后缀下（下载是
+	// download####.mediafire.com），一条后缀规则即可全覆盖。
+	// 刻意不加 IP 规则：它全站挂在 Cloudflare 共享段上（实测
+	// download.mediafire.com → 104.18.213.225 / 104.18.214.225），
+	// 按 IP 放行会把同一片 CF 上的成千上万个站点一起拉成直连。
+	"DOMAIN-SUFFIX,mediafire.com,DIRECT",
+}
+
+// systemProxyDomains / systemProxyCIDRs 是「走直连必然不稳」的境外关键服务，
+// 无条件走代理——与 systemDirectRules 正好相反：那份是「走代理会坏」，这份是
+// 「直连会坏」。
+//
+// 为什么必须做（2026-11-17 实测，广州联通千兆）：直连 https://github.com
+// 握手阶段就超时（5s 无任何响应），而 raw.githubusercontent.com 同刻可达。
+// 也就是说 GitHub 的可达性是「按端点/按时间抖动」的，靠兜底规则碰运气不行。
+//
+// 域名部分覆盖 HTTPS（按 SNI 嗅探出的域名匹配）；IP 段覆盖没有域名的裸 TCP，
+// 主要是 git over SSH——SSH 走 22 端口、没有 SNI，域名规则对它完全无效，
+// 只能按目标 IP 匹配。IP 段取自 GitHub 官方 https://api.github.com/meta
+// 的 git 列表，只保留 GitHub 自有/独占段，不取大块 Azure 段（会误伤同机房服务）。
+var systemProxyDomains = []string{
+	// 主站 / gist / api / codeload / ssh.github.com 全在这条后缀下
+	"DOMAIN-SUFFIX,github.com,PROXY",
+	// raw / objects / avatars / camo / user-images / private-user-images
+	"DOMAIN-SUFFIX,githubusercontent.com,PROXY",
+	// github.githubassets.com：页面 CSS/JS，掉它就白屏
+	"DOMAIN-SUFFIX,githubassets.com,PROXY",
+	"DOMAIN-SUFFIX,github.io,PROXY",  // Pages
+	"DOMAIN-SUFFIX,github.dev,PROXY", // 网页版 VSCode
+	"DOMAIN-SUFFIX,ghcr.io,PROXY",    // 容器镜像
+	"DOMAIN-SUFFIX,githubapp.com,PROXY",
+}
+
+var systemProxyCIDRs = []string{
+	"192.30.252.0/22",   // GitHub 传统段（web/git/api/pages/hooks 都有）
+	"185.199.108.0/22",  // Pages / raw / githubassets 的 CDN 段
+	"140.82.112.0/20",   // git 主力段，SSH 最常落在这里
+	"143.55.64.0/20",    // git 备用段
+	"20.6.7.16/28",      // 实测：github.com 当前解析到 20.6.7.17
+	"20.205.243.160/28", // meta 里的 api/git 端点（.161 / .166 / .168）
+	"57.155.223.240/28", // 实测：codeload.github.com 解析到 57.155.223.241
 }
 
 // systemDirectFakeIPFilter 是 systemDirectRules 在 mihomo fake-ip-filter 里的对应写法。
@@ -1107,11 +1149,14 @@ func systemDirectFakeIPFilter() []string {
 		if len(parts) < 2 {
 			continue
 		}
-		v := parts[1]
-		if parts[0] == "DOMAIN-SUFFIX" {
-			v = "+." + v
+		switch parts[0] {
+		case "DOMAIN":
+			out = append(out, parts[1])
+		case "DOMAIN-SUFFIX":
+			out = append(out, "+."+parts[1])
 		}
-		out = append(out, v)
+		// 其它类型（IP-CIDR 等）与域名过滤无关，跳过——把 IP 字符串写进
+		// fake-ip-filter 不报错但毫无作用，留着只会让人误以为已处理。
 	}
 	return out
 }
@@ -1188,8 +1233,22 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		}
 		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
 	}
+	// 境外关键服务强制代理（GitHub 等）：同样必须在规则集之前——用户把
+	// GitHub 相关规则集设成 DIRECT 时，不能让连接被留在大陆网络上。
+	for _, line := range systemProxyDomains {
+		typ, val, pol, ok := parseCustomRule(line)
+		if !ok {
+			continue
+		}
+		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
+	}
 	for _, s := range sets {
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", s.Tag, s.Policy))
+	}
+	// 裸 TCP 兜底：git over SSH 走 22 端口、没有 SNI，上面的域名规则对它无效。
+	// 放在规则集之后——有域名的连接早已按域名命中，这里只接无域名的 IP 连接。
+	for _, c := range systemProxyCIDRs {
+		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,PROXY,no-resolve", c))
 	}
 	for _, c := range privateCIDRs {
 		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,DIRECT,no-resolve", c))
@@ -1231,6 +1290,11 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	tun := map[string]any{"enable": false}
 	if router {
 		tun = map[string]any{
+			// 必须显式写 mtu：mihomo 默认 9000，在真实链路（1500）上会让
+			// MSS 远超路径 MTU，大包被丢弃又收不到 ICMP 分片通知——现象就是
+			// 「网页能开、git push / 大文件下载卡死」。1500 是标准以太网值；
+			// 若线路是 PPPoE（1492）仍偶发大包卡顿，可降到 1420。
+			"mtu":    1500,
 			"enable": true, "stack": "mixed",
 			"auto-route": true, "auto-redirect": true,
 			"auto-detect-interface": true,
@@ -1418,8 +1482,26 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
 		}
 	}
+	// 境外关键服务强制代理：与 mihomo 同一份清单、同一位置（规则集之前）。
+	for _, line := range systemProxyDomains {
+		typ, val, pol, ok := parseCustomRule(line)
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "DOMAIN":
+			routeRules = append(routeRules, setOut(map[string]any{"domain": []any{val}}, pol))
+		case "DOMAIN-SUFFIX":
+			routeRules = append(routeRules, setOut(map[string]any{"domain_suffix": []any{val}}, pol))
+		}
+	}
 	for _, s := range sets {
 		routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{s.Tag}}, s.Policy))
+	}
+	// 裸 TCP 兜底（git over SSH 这类无 SNI 的连接），放规则集之后。
+	// sing-box 没有 no-resolve 开关，但域名连接已在上面按域名命中，不会解析。
+	if len(systemProxyCIDRs) > 0 {
+		routeRules = append(routeRules, setOut(map[string]any{"ip_cidr": toAnySlice(systemProxyCIDRs)}, "PROXY"))
 	}
 	routeRules = append(routeRules, map[string]any{"ip_cidr": toAnySlice(privateCIDRs), "outbound": "direct"})
 
@@ -1475,7 +1557,11 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	if router {
 		tun := map[string]any{
 			"type": "tun", "tag": "tun-in",
-			"address":      []any{"172.19.0.1/30"},
+			"address": []any{"172.19.0.1/30"},
+			// 与 mihomo 同理：sing-box 默认 mtu 9000，不显式压到 1500 会在
+			// 真实链路（1500）上丢大包，表现为大传输卡死、小请求正常。
+			// 链路是 PPPoE（1492）时可降到 1420。
+			"mtu":          1500,
 			"auto_route":   true,
 			"strict_route": true,
 		}

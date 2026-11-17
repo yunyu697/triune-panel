@@ -59,6 +59,10 @@ func momoInbounds(caps sbCaps) []any {
 		"tag":            "tun-in",
 		"interface_name": "momo",
 		"address":        []any{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
+		// OpenWrt 上 PPPoE（1492）远比以太网直连常见，且 tun-in 只承接
+		// udp_mode=tun 那部分流量，所以这里取 1420 而不是 1500：比 PPPoE 的
+		// 1492 再留出封装余量，宁可少 5% 吞吐也不要大包黑洞。
+		"mtu": 1420,
 		// momo 自己铺 ip rule / route table；这里打开会和它抢路由。
 		"auto_route": false,
 	}

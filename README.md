@@ -1086,6 +1086,52 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 
 > xray 内核的客户端配置不经过本生成器（走分享链接 / 订阅），不受此影响。
 
+### 境外关键服务强制代理（GitHub 等，不受策略影响）
+
+与上一节正好相反：有一类境外服务**走直连必然不稳**，同样与你的策略选择无关。
+
+- **GitHub**：`github.com`（含 gist / api / codeload / `ssh.github.com`）、
+  `githubusercontent.com`（`raw.` / `objects.` / `avatars.` / `camo.` / `user-images.`）、
+  `githubassets.com`（页面 CSS/JS）、`github.io`、`github.dev`、`ghcr.io`、`githubapp.com`。
+- **IP 段**：取自官方 <https://api.github.com/meta> 的 `git` 列表，只保留 GitHub 自有或
+  独占的段（`192.30.252.0/22`、`185.199.108.0/22`、`140.82.112.0/20`、`143.55.64.0/20`），
+  外加三个实测命中的端点段（`20.6.7.16/28`、`20.205.243.160/28`、`57.155.223.240/28`）。
+  不取大块 Azure 段——那会误伤同机房里的其它服务。
+
+实测依据（广州联通，2026-11-17）：直连 `https://github.com` 握手阶段 5 秒无任何响应，
+而同一时刻 `raw.githubusercontent.com` 可达；`github.com` 已解析到 `20.6.7.17`，不在
+上面那四个传统段里。可达性按端点、按时间抖动，靠兜底规则碰运气不行。
+
+**域名部分排在所有规则集之前**，所以即使你把 `geosite-github` 改成 DIRECT，连接也不会被
+留在大陆网络上。**IP 段排在规则集之后、私有网段之前**：有域名的连接早已按域名命中，这里
+只接没有 SNI 的裸 TCP——主要是 `git@github.com` 的 SSH。
+
+> **`git push` 还是连不上？** 多半是 SSH 走 22 端口被干扰。改用 HTTPS 远端，或把 SSH 指到
+> 443 端口：`~/.ssh/config` 里写 `Host github.com` / `HostName ssh.github.com` /
+> `Port 443` / `User git`。这两条路都在上面的规则覆盖范围内。
+
+### MediaFire 全站直连
+
+`DOMAIN-SUFFIX,mediafire.com,DIRECT` 一条后缀规则覆盖站点与所有下载节点
+（`download####.mediafire.com`），排在规则集之前，所以勾了「海外 CDN = PROXY」也照样直连。
+DNS 侧自动跟随（`fake-ip-filter` 与 `dns.rules → local` 同源派生），不会出现「DNS 走代理、
+流量直连」的 IP 不匹配。
+
+**为什么不加 IP 规则**：实测 `download.mediafire.com` 解析到 `104.18.213.225` /
+`104.18.214.225`，这是 **Cloudflare 的共享段**，同一批 IP 上还托管着成千上万个其它站点。
+按 IP 放行等于把所有那些站点（包括本来需要代理的）一起拉成直连。客户端总是按域名连接，
+域名后缀规则已经覆盖全部访问路径，效果与「所有 MediaFire 都直连」等价。
+
+### TUN 的 MTU（大传输卡顿的头号原因）
+
+mihomo / sing-box 的 TUN 默认 MTU 是 **9000**，而真实链路是 1500。内核按 9000 算出的 MSS
+远超路径 MTU，大包被丢弃、又收不到 ICMP「需要分片」通知（PMTU 黑洞）。症状非常特征化：
+**网页能开、`git push` / `git clone` / 大文件下载转圈后超时**。
+
+生成的配置里现在显式写死：客户端目标 `mtu: 1500`，openwrt-momo 目标 `mtu: 1420`
+（路由器上 PPPoE 的 1492 更常见，留出封装余量）。如果你的线路是 PPPoE 且仍偶发大包卡顿，
+把客户端目标的 `mtu` 再降到 `1420` 即可。
+
 ### 规则集下载源（国内网络的关键一环）
 
 规则集是**客户端**去下载的，不是面板替它下。而 `raw.githubusercontent.com` 在很多
@@ -1946,6 +1992,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.0.6 | **修复 GitHub 偶发打不开 / `git push` 连不上；MediaFire 改直连**。三层原因：① mihomo / sing-box 的 TUN 段没写 `mtu`，取默认 9000，真实链路 1500 下大包被丢且收不到 ICMP 分片通知（PMTU 黑洞），症状正是「网页能开、`git push` / 大文件下载卡死」——现在显式设 1500，momo 取 1420；② `git@github.com` 走 SSH 22 端口、没有 SNI，域名规则对它无效，原先也没有任何 GitHub IP 段，现在补上官方 `meta` 的 git 段（只取 GitHub 自有/独占段，外加实测的 `20.6.7.16/28` 等），放在规则集之后只兜无域名流量；③ GitHub 域名原先只靠勾选 `geosite-github` 或落 `MATCH,PROXY`，用户改成 DIRECT 就直连被墙——新增「境外关键服务强制代理」清单前置在所有规则集之前，覆盖 `github.com` / `githubusercontent.com` / `githubassets.com` / `github.io` / `ghcr.io` 等。MediaFire 加 `DOMAIN-SUFFIX,mediafire.com,DIRECT` 一条后缀全站直连（含 `download####` 下载节点），**不加 IP**：实测它全站在 Cloudflare 共享段 `104.18.213.225` / `104.18.214.225` 上，按 IP 放行会连带把大量 CF 站点直连。实测背景：直连 `github.com` 握手 5 s 无响应，而同时刻 `raw.githubusercontent.com` 可达。详见[已知限制](#已知限制与未验证项)第 1 条。 |
 | v2.0.5 | **修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效**。苹果更新域名原先没有任何直连规则（`ruleCatalog` 无 `geosite-apple`），落到兜底 PROXY 后因出口地域判定、QUIC、证书固定而更新失败；OneDrive / 微软登录域名则被办公场景里的 `geosite-onedrive` / `geosite-microsoft` PROXY 规则抢先命中（PROXY 排在 DIRECT 前），经代理出口 IP 触发风控登录不上；fake-ip 又让这些域名拿到假 IP，证书固定客户端直接握手失败。现在内置一份精确域名「系统关键服务强制直连」清单（取自 v2fly `apple-update` / `microsoft` / `onedrive` 分类），在 mihomo / sing-box 两套渲染器里排在所有规则集之前、自定义规则之后，刻意不含 App Store / Apple Music / 游戏等内容服务；mihomo 的 `fake-ip-filter` 与 sing-box 的 `dns.rules → local` 从同一份清单派生（momo 自动继承），避免假 IP 与「DNS 靠代理、流量直连」死锁。规则目录补可选的「Apple 服务」（默认 DIRECT）。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)。 |
 | v2.0.4 | **修复流量统计：sing-box 每用户计数恒为 0**。官方 sing-box 的 clash API `/connections` 不输出用户字段，采样器取到空就跳过，导致每个人流量永远是 0；短连接又因 30 秒采样间隔整个丢失。现在按入站 tag 反查归属（仅单用户入站准确，多用户不臆造）、采样缩到 5 秒、实时速率改取内核全局累计差值；UI 与已知限制第 5 条如实写明精确到什么程度。xray 内核不受影响。不换内核、不影响组件更新。 |
 | v2.0.3 | **配置生成新增 OpenWrt-momo 目标**。产出可直接贴进 LuCI → Momo 的完整 sing-box `config.json`：自带 `dns-in` / `redirect-in` / `tproxy-in` / `tun-in`（`auto_route:false`）与 `fake-ip-dns-server`，DNS 的 A/AAAA 走 fakeip、首条路由 `sniff`；选中该目标时强制 sing-box 且版本 ≥ 1.12。用 sing-box 1.12.25 跑过 `check` 与 `format -w`，真机 OpenWrt 链路未验证（见已知限制）。 |
