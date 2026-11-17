@@ -236,6 +236,59 @@ func TestSingboxRendersValidConfig(t *testing.T) {
 	}
 }
 
+// KL-08：服务端产物以前只过 `check`（见上面的 TestSingboxRendersValidConfig）。
+// check 不 bind 端口、不读证书、不初始化 DNS，所以「校验通过但起不来」的情况
+// 完全不在门禁视野里——v2.1.0 的 DNS detour 事故就是这个形状。
+// 这里用真内核 run + 判活补上，覆盖四类最容易在启动阶段炸的配置。
+func TestSingboxServerConfigStarts(t *testing.T) {
+	bin := os.Getenv("TRINE_SINGBOX_BIN")
+	if bin == "" {
+		t.Skip("未设置 TRINE_SINGBOX_BIN，跳过真机启动校验")
+	}
+	ensureTLSCert(t)
+	tlsOpt := `{"server_name":"example.com","certificate_path":"` + testCert + `","key_path":"` + testKey + `"`
+
+	cases := []liveCase{
+		{
+			name:    "socks-password",
+			inbound: &model.Inbound{Name: "s", Core: "singbox", Protocol: "socks", Port: 0, Transport: "tcp", TLS: "none", Settings: `{"account_auth":"password","udp":true}`},
+			clients: []*model.Client{client("u1", "u1:p1")},
+		},
+		{
+			name:    "vless-vision-tls",
+			inbound: &model.Inbound{Name: "v", Core: "singbox", Protocol: "vless", Port: 0, Transport: "tcp", TLS: "tls", Settings: tlsOpt + `,"flow":"xtls-rprx-vision"}`},
+			clients: []*model.Client{client("alice", "11111111-2222-3333-4444-555555555555")},
+		},
+		{
+			name:    "vless-reality",
+			inbound: &model.Inbound{Name: "r", Core: "singbox", Protocol: "vless", Port: 0, Transport: "tcp", TLS: "reality", Settings: `{"private_key":"` + realityPriv(t) + `","server_names":["www.apple.com"],"short_ids":["ab12"]}`},
+			clients: []*model.Client{client("erin", "44444444-5555-6666-7777-888888888888")},
+		},
+		{
+			// DNS / 路由段是从设置里注入的裸 JSON，写坏了只有启动时才会暴露
+			name:    "global-dns-route",
+			inbound: &model.Inbound{Name: "d", Core: "singbox", Protocol: "vless", Port: 0, Transport: "tcp", TLS: "none"},
+			clients: []*model.Client{client("c", "aaaaaaaa-bbbb-cccc-dddd-0000000000f4")},
+			opts: core.RenderOpts{
+				DNSJSON:   `{"servers":[{"type":"udp","tag":"dns-1-1-1-1","server":"1.1.1.1"}],"rules":[{"domain_suffix":["cn"],"server":"dns-1-1-1-1"}]}`,
+				RouteJSON: `{"rules":[{"ip_cidr":["10.0.0.0/8"],"action":"reject"}]}`,
+			},
+		},
+	}
+
+	sb := &singbox.SingBox{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.inbound.Port = freePort(t)
+			out, err := sb.Render([]core.InboundWithClients{{Inbound: c.inbound, Clients: c.clients}}, c.opts)
+			if err != nil {
+				t.Fatalf("渲染失败: %v", err)
+			}
+			runExpectAlive(t, bin, "run", "-c", writeCfg(t, "singbox-start", out))
+		})
+	}
+}
+
 // importedGlobalOpts 走一遍 importer 的真实转换路径产出 RenderOpts。
 //
 // 关键在 direct 规则：xray 拒绝没有 outboundTag 的规则，所以转换后必须
@@ -281,6 +334,32 @@ func runValidate(t *testing.T, bin string, args ...string) {
 	out, err := exec.Command(bin, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("内核校验失败: %v\n%s", err, out)
+	}
+}
+
+// runExpectAlive 启动内核并观察 3 秒：中途退出即判失败。
+//
+// 为什么必须是 run 而不是 check / -test：那两者只解析配置，不 bind 端口、
+// 不读证书、不初始化 DNS。端口被占、证书路径写错、启动即退出这些错误只在
+// start service 阶段报——v2.1.0 的 DNS detour 事故就是 check 全绿、客户端
+// 一导入就 FATAL。3 秒是折中：更短会漏掉「起来后立刻退」，更长拖慢发布门禁。
+func runExpectAlive(t *testing.T, bin string, args ...string) {
+	t.Helper()
+	var buf bytes.Buffer
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("启动即退出（%v）：\n%s", err, buf.String())
+	case <-time.After(3 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
 	}
 }
 
@@ -375,24 +454,7 @@ func TestXrayConfigStarts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("渲染失败: %v", err)
 			}
-			file := writeCfg(t, "xray-start", out)
-
-			var buf bytes.Buffer
-			cmd := exec.Command(bin, "run", "-c", file)
-			cmd.Stdout = &buf
-			cmd.Stderr = &buf
-			if err := cmd.Start(); err != nil {
-				t.Fatalf("启动 xray 失败: %v", err)
-			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			select {
-			case err := <-done:
-				t.Fatalf("xray 启动即退出（%v）：\n%s", err, buf.String())
-			case <-time.After(2 * time.Second):
-				_ = cmd.Process.Kill()
-				<-done
-			}
+			runExpectAlive(t, bin, "run", "-c", writeCfg(t, "xray-start", out))
 		})
 	}
 }

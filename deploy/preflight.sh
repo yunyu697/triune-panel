@@ -165,7 +165,9 @@ kernel_gate() {
 		fi
 		return
 	fi
-	if env "$envv=$bin" go test "./${pkg}/" -run "$pat" -count=1 >/tmp/preflight-kernel-${label}.log 2>&1; then
+	# 路径必须加引号：label 一旦含空格（如「sing-box 服务端」），未加引号的
+	# 重定向会被 bash 拆成两个词，报 ambiguous redirect 并让这一条恒失败。
+	if env "$envv=$bin" go test "./${pkg}/" -run "$pat" -count=1 >"/tmp/preflight-kernel-${label}.log" 2>&1; then
 		KERNEL_OK=$((KERNEL_OK + 1))
 		pass "${label} 启动判活通过"
 	else
@@ -175,7 +177,8 @@ kernel_gate() {
 	fi
 }
 
-kernel_gate "sing-box" TRINE_SINGBOX_BIN "sing-box" internal/api 'TestSingboxClientConfigStarts|TestMomoConfigPassesRealSingboxCheck'
+kernel_gate "sing-box 客户端" TRINE_SINGBOX_BIN "sing-box" internal/api 'TestSingboxClientConfigStarts|TestMomoConfigPassesRealSingboxCheck'
+kernel_gate "sing-box 服务端" TRINE_SINGBOX_BIN "sing-box" internal/livecheck 'TestSingboxServerConfigStarts'
 kernel_gate "mihomo" TRINE_MIHOMO_BIN "mihomo" internal/api 'TestMihomoClientConfigStarts'
 kernel_gate "xray" TRINE_XRAY_BIN "xray" internal/livecheck 'TestXrayConfigStarts'
 
