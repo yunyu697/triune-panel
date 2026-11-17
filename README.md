@@ -1075,6 +1075,9 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 > 重叠部分走的是 **PROXY**。想让某个域名直连，得把所有覆盖它的规则集都改成 DIRECT，
 > 或者用自定义规则显式覆盖（自定义规则排在最前，优先级最高）。
 
+生成页的区块顺序与生效顺序一致：**自定义规则在规则集之上**，写一条就能盖掉下面任何勾选。
+（中间还夹着内置的系统直连 / 强制代理清单，它们不受界面控制，见下一节。）
+
 ### 系统关键服务强制直连（不受策略影响）
 
 有一类域名**走代理就会功能失效**，与你想让哪些流量走代理无关。它们被写成
@@ -1086,6 +1089,8 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 | 类别 | 代表域名 | 走代理的后果 |
 |---|---|---|
 | Apple 系统更新 / 恢复 | `mesu` `swscan` `swdist` `swcdn` `swdownload` `oscdn` `gdmf` `gsra` `*.cdn-apple.com` 等（`apple-update` 全量 21 条） | 检查更新转圈、更新下到一半校验失败、软恢复不可用 |
+| Apple 证书校验（OCSP） | `ocsp.apple.com` `ocsp2.apple.com` | 装 App / 跑更新时卡在「正在验证」或报「无法验证」——节点一抖，系统就把证书当不可信 |
+| Apple 定位 / 区域判定 | `gs-loc.apple.com` `*.ls.apple.com` `*.ls-apple.com` | 「查找我的」定位漂到节点所在国、时区自动设置错乱、App Store 与 Apple ID 的区域判定跟着变 |
 | Apple ID 登录 / 激活 | `appleid.apple.com` `idmsa.apple.com` `amp-api.apps.apple.com` | 判异地 → 二次验证 / 锁账号；页面做了证书固定 |
 | Microsoft 账号登录 | `login.microsoftonline.com` `login.live.com` `login.windows.net` `*.msftauth.net` `*.msauth.net` `*.msftauthimages.net` | 出口 IP 触发风控 → OneDrive / Office / Teams 登录不上 |
 | Windows 更新 / 激活 / 授权 | `*.windowsupdate.com` `*.update.microsoft.com` `activation.sls.microsoft.com` `licensing.mp.microsoft.com` | 更新由 CDN 按地域就近下发，绕道代理即龟速或 `0x8024402c` 一类报错；激活判「异常环境」 |
@@ -1278,6 +1283,25 @@ sing-box 对未知字段是**严格校验**的：多一个字段就是 `FATAL` �
 
 只存 `content` 的话，一周后想加个用户就得从头再选一遍——「当时勾了哪些规则集」
 这件事在生成的文本里是拼不回来的。存了 `params`，**重新生成** 就能原样再来一次。
+
+### 多选与批量操作
+
+配置攒到几十份之后，逐条点「删除」纯粹是体力活。表格最左侧有复选框，
+勾中任意一条后，表格上方出现操作条：
+
+| 操作 | 说明 |
+|---|---|
+| 打包下载 | 后端打一个 zip 一次带走；同名条目自动补 `(2)` 后缀——同一份配置存好几版是正常用法，同名条目在 zip 里会互相覆盖，用户会以为都下来了 |
+| 删除选中 | 一次确认、一条汇总审计；确认框列出前五个名字，删的是什么都看得见 |
+| 取消选择 | 清空当前选择集 |
+
+**全选只作用于当前筛选结果**：搜「家宽」再点全选，勾的是这 2 份，不是被过滤掉的
+那 30 份。选择集存在内存里而不是复选框上，所以在搜索框里打字、表格重绘之后
+已选状态不会丢；已经被删掉的条目会自动移出选择集，不会出现「已选 5 份、
+其中 2 份其实不存在」。
+
+接口层对应 `POST /api/configs/batch-delete` 与 `POST /api/configs/batch-download`，
+一次最多 200 份（与总份数上限一致），漏掉的 id 会作为 `failed` 原样回给前端。
 
 ### 重新生成会先比差异
 
@@ -2040,6 +2064,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.0.8 | **补真机实测发现的两类漏项；配置管理支持多选批量**。在真机旁路由（OpenWrt + mihomo）上实测 2.0.7 产物：`softwareupdate -l` 查到更新、`git ls-remote` 5/5 成功、18MB Release 3.2MB/s 且字节数一致，主链路都对；测出两条该收未收的规则——① `ocsp.apple.com` / `ocsp2.apple.com` 走代理，装 App / 跑更新会卡「正在验证」或报「无法验证」；② 定位（`gs-loc.apple.com` / `*.ls.apple.com` / `*.ls-apple.com`）走代理会让「查找我的」漂到节点所在国、时区与区域判定跟着错。两类都补进强制直连并按类进不变量测试。配置管理新增复选框与批量操作条：打包下载（zip，同名补序号）、批量删除（一次确认、一条汇总审计、列出前五个名字）、取消选择；全选只作用于当前筛选结果，选择集存内存所以搜索重绘不丢。生成页把「自定义规则」挪到「规则集」之前，与产物顺序一致。验证：全量 `go test ./... -p 1` 绿、新增 `.e2e/configs-batch.js` 17 项零失败、真机 mihomo 1.19.34 `-t` 通过。 |
 | v2.0.7 | **规则体系整体排查：按类修，不再逐个补域名**。① 消除单侧静默丢弃：sing-box 的规则注入原先只认 `DOMAIN` / `DOMAIN-SUFFIX`，加别的类型时 mihomo 生效、sing-box 静默不生效；现在自定义规则与两份内置清单共用同一转换函数，无法表达会明确告警。顺带修掉自定义 `GEOIP` 在 sing-box 里拼成 `geosite-<val>` 的真 Bug（provider tag 实为 `geoip-<val>`，有同名 geosite 时静默用错集合、没有时启动 FATAL）。② 直连清单按类补齐：Apple 更新按 `apple-update` 全量 21 条（补上此前漏的 `swcdn` / `gg` / `gsra` / `ig` / `skl` / `gdmf-ados` / `wkms-public`）、新增 Windows 更新/激活/授权（`*.windowsupdate.com` / `activation.sls.microsoft.com` / `licensing.mp.microsoft.com`）、连通性检测改后缀；同时**收窄 OneDrive**——数据面走代理只是慢不是坏，强制直连属越权，现在只强制直连登录/认证。③ 补两类拿不到域名的流量：NTP（UDP 123，没有 SNI，走代理会让系统时间漂移 → TLS 证书随机报错）按端口直连；私有网段补 CGNAT `100.64.0.0/10`（Tailscale 打洞）与组播 `224.0.0.0/4` / `ff00::/8`（mDNS / SSDP / 投屏 / 智能家居发现）。④ 用 `genconfig_invariants_test.go` 把机制钉住：每条直连规则必须同时落到四个位置、直连与代理无交集、`systemProxyCIDRs` 单条不得宽于 `/20`、每个关键类别至少一条（整类被删会红）——以后加域名只需加一行。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)与[规则集的排序语义](#规则集的排序语义容易踩的坑)。 |
 | v2.0.6 | **修复 GitHub 偶发打不开 / `git push` 连不上；MediaFire 改直连**。三层原因：① mihomo / sing-box 的 TUN 段没写 `mtu`，取默认 9000，真实链路 1500 下大包被丢且收不到 ICMP 分片通知（PMTU 黑洞），症状正是「网页能开、`git push` / 大文件下载卡死」——现在显式设 1500，momo 取 1420；② `git@github.com` 走 SSH 22 端口、没有 SNI，域名规则对它无效，原先也没有任何 GitHub IP 段，现在补上官方 `meta` 的 git 段（只取 GitHub 自有/独占段，外加实测的 `20.6.7.16/28` 等），放在规则集之后只兜无域名流量；③ GitHub 域名原先只靠勾选 `geosite-github` 或落 `MATCH,PROXY`，用户改成 DIRECT 就直连被墙——新增「境外关键服务强制代理」清单前置在所有规则集之前，覆盖 `github.com` / `githubusercontent.com` / `githubassets.com` / `github.io` / `ghcr.io` 等。MediaFire 加 `DOMAIN-SUFFIX,mediafire.com,DIRECT` 一条后缀全站直连（含 `download####` 下载节点），**不加 IP**：实测它全站在 Cloudflare 共享段 `104.18.213.225` / `104.18.214.225` 上，按 IP 放行会连带把大量 CF 站点直连。实测背景：直连 `github.com` 握手 5 s 无响应，而同时刻 `raw.githubusercontent.com` 可达。详见[已知限制](#已知限制与未验证项)第 1 条。 |
 | v2.0.5 | **修复配置生成：苹果更新 / Microsoft / OneDrive 登录等系统关键服务走代理失效**。苹果更新域名原先没有任何直连规则（`ruleCatalog` 无 `geosite-apple`），落到兜底 PROXY 后因出口地域判定、QUIC、证书固定而更新失败；OneDrive / 微软登录域名则被办公场景里的 `geosite-onedrive` / `geosite-microsoft` PROXY 规则抢先命中（PROXY 排在 DIRECT 前），经代理出口 IP 触发风控登录不上；fake-ip 又让这些域名拿到假 IP，证书固定客户端直接握手失败。现在内置一份精确域名「系统关键服务强制直连」清单（取自 v2fly `apple-update` / `microsoft` / `onedrive` 分类），在 mihomo / sing-box 两套渲染器里排在所有规则集之前、自定义规则之后，刻意不含 App Store / Apple Music / 游戏等内容服务；mihomo 的 `fake-ip-filter` 与 sing-box 的 `dns.rules → local` 从同一份清单派生（momo 自动继承），避免假 IP 与「DNS 靠代理、流量直连」死锁。规则目录补可选的「Apple 服务」（默认 DIRECT）。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)。 |

@@ -971,7 +971,8 @@ if (DEMO) {
     down: Math.round(1.7e6 + 8e5 * Math.sin(i / 4.7 + 1) + Math.random() * 4e5)
   }));
   MDB = {
-    version:"v0.8.9-demo",
+    // 演示页的顶栏版本号。跟着发布号走，免得预览页显示的版本比真实版本落后一大截。
+    version:"v2.0.8-demo",
     // 演示用的规则标签与已保存配置：让「点标签套用」「保存后下载」这条链路
     // 在离线演示页里也能完整走一遍
     ruleTags:[
@@ -5200,15 +5201,42 @@ async function loadSavedConfigs() {
   renderSavedConfigs();
 }
 
+/* 选中的配置 id。放在模块级而不是 DOM 里：表格每次重绘都会重建 checkbox，
+   靠 DOM 记状态的话，「选中两份 → 在搜索框敲一个字」就全丢了。 */
+let CFG_SEL = new Set();
+
+function cfgFilter(q) {
+  return SAVED_CFGS.filter(c => !q ||
+    (c.name || "").toLowerCase().includes(q) || (c.note || "").toLowerCase().includes(q));
+}
+
+// 当前筛选条件下可见的配置。全选只作用于它——否则搜「家宽」后点全选，
+// 会把看不见的那几十份一起删掉。
+function cfgVisibleList() {
+  return cfgFilter(($("cfg_search").value || "").trim().toLowerCase());
+}
+
+function renderCfgBulk() {
+  const n = CFG_SEL.size;
+  $("cfg_bulk").classList.toggle("hide", n === 0);
+  $("cfg_bulk_n").textContent = `已选 ${n} 份`;
+}
+
 function renderSavedConfigs() {
   const q = ($("cfg_search").value || "").trim().toLowerCase();
-  const list = SAVED_CFGS.filter(c => !q ||
-    (c.name || "").toLowerCase().includes(q) || (c.note || "").toLowerCase().includes(q));
+  const list = cfgFilter(q);
+  // 已经不存在的 id 不能留在选择集里：否则「已选 5 份」里有两份其实早被删了，
+  // 批量删除时还要多报两条失败。
+  const alive = new Set(SAVED_CFGS.map(c => c.id));
+  for (const id of [...CFG_SEL]) if (!alive.has(id)) CFG_SEL.delete(id);
+
   $("cfgbody").innerHTML = list.map(c => {
     const kern = c.core === "singbox"
       ? "sing-box" + (c.core_version ? " " + escHtml(c.core_version) : "")
       : "mihomo";
     return `<tr>
+      <td class="ta-c"><input type="checkbox" data-act="cfgToggle" data-el="checked" data-args="${escJson([c.id])}"
+            ${CFG_SEL.has(c.id) ? "checked " : ""}aria-label="选择 ${escHtml(c.name)}"></td>
       <td><b>${escHtml(c.name)}</b>${c.note ? `<div class="muted" style="font-size:12px">${escHtml(c.note)}</div>` : ""}</td>
       <td>${kern}</td>
       <td>${escHtml(TARGET_LABEL[c.target] || c.target || "—")}</td>
@@ -5222,12 +5250,99 @@ function renderSavedConfigs() {
         <button class="btn sm" data-act="editConfig" data-args="${escJson([c.id])}">改名</button>
         <button class="btn sm danger" data-act="deleteConfig" data-args="${escJson([c.id])}">删除</button>
       </td></tr>`;
-  }).join("") || `<tr><td colspan="7" class="empty">还没有保存的配置。到「配置生成」页生成后点「保存配置」。</td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="empty">还没有保存的配置。到「配置生成」页生成后点「保存配置」。</td></tr>`;
+
+  const picked = list.filter(c => CFG_SEL.has(c.id)).length;
+  const all = $("cfg_all");
+  if (all) {
+    all.checked = list.length > 0 && picked === list.length;
+    // 部分选中时表头显示成「减号」：全空和全选都看不出来还有没选的
+    all.indeterminate = picked > 0 && picked < list.length;
+    all.disabled = list.length === 0;
+  }
+  renderCfgBulk();
 
   $("cfg_count").textContent = SAVED_CFGS.length
     ? `共 ${SAVED_CFGS.length} 份${q ? `，匹配 ${list.length} 份` : ""}（上限 200 份）`
     : "";
 }
+
+// 表头复选框：只对当前筛选结果生效，语义与「全选」按钮一致。
+function cfgSelectAll(on) {
+  const list = cfgVisibleList();
+  for (const c of list) {
+    if (on) CFG_SEL.add(c.id); else CFG_SEL.delete(c.id);
+  }
+  renderSavedConfigs();
+}
+
+function cfgToggle(id, on) {
+  if (on) CFG_SEL.add(id); else CFG_SEL.delete(id);
+  renderSavedConfigs();
+}
+
+function cfgClearSel() {
+  CFG_SEL.clear();
+  renderSavedConfigs();
+}
+
+// 批量删除：一次确认，确认框里列出前五个名字，避免「删了却不知道删的什么」。
+async function cfgBatchDelete() {
+  const ids = [...CFG_SEL];
+  if (!ids.length) return;
+  const picked = SAVED_CFGS.filter(c => CFG_SEL.has(c.id));
+  const head = picked.slice(0, 5).map(c => `「${c.name}」`).join("、");
+  const tail = picked.length > 5 ? ` 等 ${picked.length} 份` : "";
+  if (!await ask("删除配置", `确定删除 ${picked.length} 份配置：${head}${tail}。删除后无法恢复。`)) return;
+  try {
+    if (DEMO) {
+      MDB.savedConfigs = MDB.savedConfigs.filter(c => !CFG_SEL.has(c.id));
+      SAVED_CFGS = MDB.savedConfigs;
+      CFG_SEL.clear();
+      toast(`已删除 ${ids.length} 份配置`);
+    } else {
+      const r = await req("/api/configs/batch-delete", { method: "POST", body: { ids } });
+      CFG_SEL.clear();
+      const bad = (r.failed || []).length;
+      if (bad) toast(`已删除 ${r.deleted} 份，${bad} 份未能删除（可能已被别处删掉）`, "err");
+      else toast(`已删除 ${r.deleted} 份配置`);
+    }
+    await loadSavedConfigs();
+  } catch(e){ toast(e.message, "err"); }
+}
+
+// 批量打包下载：后端打一个 zip，比连点十几个「下载」可靠得多。
+async function cfgBatchDownload() {
+  const ids = [...CFG_SEL];
+  if (!ids.length) return;
+  try {
+    if (DEMO) {
+      // 示例页没有后端，只能逐个触发；真实实例是一次 zip
+      for (const c of SAVED_CFGS.filter(x => CFG_SEL.has(x.id))) {
+        let by = true;
+        try { by = JSON.parse(c.params || "{}").bypass_server !== false; } catch (_) {}
+        saveBlob(new Blob([demoGenConfig(c.core, c.target, c.core_version, by)], { type: "text/plain" }),
+          `${c.name}.${c.core === "mihomo" ? "yaml" : "json"}`);
+      }
+      toast(`示例页逐个下载 ${ids.length} 份；正式实例会打成一份 zip`);
+      return;
+    }
+    const r = await fetch("/api/configs/batch-download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+      body: JSON.stringify({ ids })
+    });
+    if (!r.ok) {
+      let msg = "打包下载失败（" + r.status + "）";
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch(_) {}
+      throw new Error(msg);
+    }
+    const m = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "");
+    saveBlob(await r.blob(), m ? m[1] : "configs.zip");
+    toast(`已打包 ${ids.length} 份配置`);
+  } catch(e){ toast(e.message, "err"); }
+}
+
 
 async function downloadConfig(id) {
   const c = SAVED_CFGS.find(x => x.id === id);

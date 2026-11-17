@@ -1099,13 +1099,28 @@ var systemDirectRules = []string{
 	// appleid.cdn-apple 全在这条后缀下）。上游新增 CDN 主机名时无需再逐条补。
 	"DOMAIN-SUFFIX,cdn-apple.com,DIRECT",
 
-	// ── 类 2：Apple ID 登录与激活 ──
+	// OCSP 证书吊销校验：装 App、跑更新、首次打开签名应用时，系统都要向它
+	// 问一句「这张证书还有效吗」。走代理后节点一抖或对 POST 返回非预期状态，
+	// 系统就把证书当成不可信——表现是卡在「正在验证」或直接报「无法验证」，
+	// 用户根本看不出是代理的问题。ocsp2 是新域名，老配置只收 ocsp 会漏。
+	"DOMAIN,ocsp.apple.com,DIRECT",
+	"DOMAIN,ocsp2.apple.com,DIRECT",
+
+	// ── 类 2：定位与区域判定 ──
+	// 这几个主机回报的是「设备大致在哪」。走代理等于告诉 Apple 你在节点所在国，
+	// 于是「查找我的」定位漂到海外、时区自动设置错乱、App Store 与 Apple ID
+	// 的区域判定跟着变。不是「慢」的问题，是答案本身就错了。
+	"DOMAIN,gs-loc.apple.com,DIRECT",    // 定位主入口
+	"DOMAIN-SUFFIX,ls.apple.com,DIRECT", // 定位服务后端（gsp-ssl.ls 等）
+	"DOMAIN-SUFFIX,ls-apple.com,DIRECT", // 地区变体
+
+	// ── 类 3：Apple ID 登录与激活 ──
 	// 登录走代理会被判异地 → 二次验证 / 锁账号；页面资源还做了证书固定。
 	"DOMAIN,appleid.apple.com,DIRECT",
 	"DOMAIN,idmsa.apple.com,DIRECT",
 	"DOMAIN,amp-api.apps.apple.com,DIRECT",
 
-	// ── 类 3：Microsoft 账号登录与认证 ──
+	// ── 类 4：Microsoft 账号登录与认证 ──
 	// OneDrive / Office / Windows / Teams 的登录都过这条链路；走代理出口 IP 触发风控。
 	"DOMAIN,login.microsoftonline.com,DIRECT",
 	"DOMAIN,login.live.com,DIRECT",
@@ -1118,7 +1133,7 @@ var systemDirectRules = []string{
 	"DOMAIN-SUFFIX,msauth.net,DIRECT",
 	"DOMAIN-SUFFIX,msftauthimages.net,DIRECT", // 登录页图形验证码
 
-	// ── 类 4：Windows 更新 / 激活 / 授权 ──
+	// ── 类 5：Windows 更新 / 激活 / 授权 ──
 	// 更新由 Microsoft CDN 按地域就近下发，走代理等于绕到远端节点再回源，
 	// 轻则龟速、重则 0x8024402c 一类报错；激活与授权走代理会被判「异常环境」。
 	// 注意：**不含** mp.microsoft.com 的应用内容分发（Store 应用下载属于内容服务，
@@ -1128,13 +1143,13 @@ var systemDirectRules = []string{
 	"DOMAIN-SUFFIX,activation.sls.microsoft.com,DIRECT", // 激活
 	"DOMAIN-SUFFIX,licensing.mp.microsoft.com,DIRECT",   // 授权
 
-	// ── 类 5：系统连通性检测（NCSI / 热点探测）──
+	// ── 类 6：系统连通性检测（NCSI / 热点探测）──
 	// 走代理一旦节点抖一下，系统就判定「无网络」，随后反复重连、弹网络异常、
 	// 甚至把 Wi-Fi 标记为「已连接但无法访问 Internet」。
 	"DOMAIN-SUFFIX,msftconnecttest.com,DIRECT",
 	"DOMAIN-SUFFIX,msftncsi.com,DIRECT",
 
-	// ── 类 6：明确要求直连的站点（用户指定）──
+	// ── 类 7：明确要求直连的站点（用户指定）──
 	// MediaFire：站点与下载节点都在 mediafire.com 后缀下（download####.mediafire.com）。
 	// 刻意不加 IP 规则：它全站挂在 Cloudflare 共享段上（实测
 	// download.mediafire.com → 104.18.213.225 / 104.18.214.225），

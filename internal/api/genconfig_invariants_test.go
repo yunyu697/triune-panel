@@ -40,6 +40,10 @@ func TestSystemDirectCoversEachCriticalClass(t *testing.T) {
 	}{
 		{"Apple 系统更新", []string{"mesu.apple.com", "swscan.apple.com", "swcdn.apple.com"}},
 		{"Apple ID 登录", []string{"appleid.apple.com", "idmsa.apple.com"}},
+		// 装 App / 跑更新都要过 OCSP；走代理时节点一抖就报「无法验证」。
+		{"OCSP 证书校验", []string{"ocsp.apple.com", "ocsp2.apple.com"}},
+		// 定位走代理会漂到节点所在国，连带时区与区域判定一起错。
+		{"定位与区域判定", []string{"gs-loc.apple.com", "ls.apple.com"}},
 		{"Microsoft 账号登录", []string{"login.microsoftonline.com", "login.live.com"}},
 		{"Microsoft 认证资源", []string{"msftauth.net", "msauth.net"}},
 		{"Windows 更新", []string{"windowsupdate.com", "update.microsoft.com"}},

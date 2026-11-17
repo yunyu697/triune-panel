@@ -153,6 +153,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/configs/{id}", a.write(a.handleConfigUpdate))
 	mux.HandleFunc("DELETE /api/configs/{id}", a.write(a.handleConfigDelete))
 	mux.HandleFunc("GET /api/configs/{id}/download", a.write(a.handleConfigDownload))
+	// 批量：选中一批一次删掉 / 一次打包带走。路径比 {id} 更具体，
+	// Go 1.22 的 mux 按具体度优先，不会把 batch-delete 当成一个 id。
+	mux.HandleFunc("POST /api/configs/batch-delete", a.write(a.handleConfigBatchDelete))
+	mux.HandleFunc("POST /api/configs/batch-download", a.write(a.handleConfigBatchDownload))
 
 	// 自定义规则标签：共享的运维经验，同样只在写档以上可见
 	mux.HandleFunc("GET /api/rule-tags", a.write(a.handleTagsList))

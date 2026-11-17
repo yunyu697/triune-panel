@@ -19,6 +19,7 @@ design-preview/
 !.e2e/backups-hostopt.js
 !.e2e/browser.js
 !.e2e/bypass-server.js
+!.e2e/configs-batch.js
 !.e2e/first-paint-flicker.js
 !.e2e/inbound-addr.js
 !.e2e/acme-dns.js

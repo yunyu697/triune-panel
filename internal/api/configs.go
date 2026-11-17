@@ -1,14 +1,17 @@
 package api
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"triune/internal/store"
 )
@@ -258,6 +261,171 @@ func (a *Server) handleConfigDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	a.auditOK(r, AuditConfig, c.Name, fmt.Sprintf("删除配置 #%d", id))
 	writeJSON(w, 200, map[string]string{"ok": "1"})
+}
+
+// ==================== 批量操作 ====================
+//
+// 「配置管理」攒到几十份之后，逐个点删除纯粹是体力活。下面两个接口只把
+// 「选中一批」这个动作搬过来，语义与单条接口保持一致：仍然逐条校验存在性，
+// 审计仍记一条汇总（不按条刷屏），删不掉的 id 原样回给前端去提示。
+
+const configBatchMax = configMaxCount // 与总份数上限一致：一次最多清空全部
+
+type batchIDsReq struct {
+	IDs []int64 `json:"ids"`
+}
+
+// cleanIDs 去重、丢掉非正数，保持用户点击的顺序（审计里读起来更自然）。
+func cleanIDs(in []int64) []int64 {
+	seen := make(map[int64]bool, len(in))
+	out := make([]int64, 0, len(in))
+	for _, id := range in {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// summarizeNames 取前三个名字，其余折成「等 N 份」——审计详情要一行装得下。
+func summarizeNames(names []string) string {
+	const head = 3
+	if len(names) <= head {
+		return strings.Join(names, "、")
+	}
+	return strings.Join(names[:head], "、") + fmt.Sprintf(" 等 %d 份", len(names))
+}
+
+// decodeBatchIDs 解析并校验 ids。校验不过时已经写过响应，返回 ok=false。
+func decodeBatchIDs(w http.ResponseWriter, r *http.Request) ([]int64, bool) {
+	var q batchIDsReq
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&q); err != nil {
+		fail(w, 400, "请求体格式错误")
+		return nil, false
+	}
+	ids := cleanIDs(q.IDs)
+	if len(ids) == 0 {
+		fail(w, 400, "没有选中任何配置")
+		return nil, false
+	}
+	if len(ids) > configBatchMax {
+		fail(w, 400, fmt.Sprintf("一次最多操作 %d 份", configBatchMax))
+		return nil, false
+	}
+	return ids, true
+}
+
+func (a *Server) handleConfigBatchDelete(w http.ResponseWriter, r *http.Request) {
+	ids, ok := decodeBatchIDs(w, r)
+	if !ok {
+		return
+	}
+	// 逐条删而不是一条 IN 语句：删不掉的那几份要能点名回给前端，
+	// 而且清单最多 200 份，逐条的开销远小于排查「为什么少删了一份」。
+	var names []string
+	failed := make([]int64, 0, 2)
+	for _, id := range ids {
+		c, err := a.Store.GetSavedConfig(id)
+		if err != nil {
+			failed = append(failed, id)
+			continue
+		}
+		if err := a.Store.DeleteSavedConfig(id); err != nil {
+			failed = append(failed, id)
+			continue
+		}
+		names = append(names, c.Name)
+	}
+	if len(names) > 0 {
+		a.auditOK(r, AuditConfig, summarizeNames(names),
+			fmt.Sprintf("批量删除 %d 份配置", len(names)))
+	}
+	writeJSON(w, 200, map[string]any{
+		"deleted": len(names),
+		"failed":  failed,
+	})
+}
+
+// safeZipName 换掉文件名里的路径分隔符与控制字符。
+//
+// zip 条目名允许出现斜杠，解压时会造出子目录；配合 .. 甚至能写到目标目录外面。
+// 配置名是用户自己起的，不能假设它规整。
+func safeZipName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			b.WriteRune('_')
+		case strings.ContainsRune(`/\:*?"<>|`, r):
+			b.WriteRune('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimLeft(strings.TrimSpace(b.String()), ".")
+	if out == "" {
+		out = "config"
+	}
+	return out
+}
+
+func (a *Server) handleConfigBatchDownload(w http.ResponseWriter, r *http.Request) {
+	ids, ok := decodeBatchIDs(w, r)
+	if !ok {
+		return
+	}
+	type entry struct{ name, ext, content string }
+	entries := make([]entry, 0, len(ids))
+	for _, id := range ids {
+		c, err := a.Store.GetSavedConfig(id)
+		if err != nil || c.Content == "" {
+			continue // 取不到的跳过，不让一份坏数据废掉整包
+		}
+		entries = append(entries, entry{c.Name, configExt(c.Core), c.Content})
+	}
+	if len(entries) == 0 {
+		fail(w, 404, "选中的配置都取不到内容")
+		return
+	}
+
+	h := w.Header()
+	// 包名固定用 ASCII：HTTP 头是 latin-1，中文会变乱码，而这个名字是服务端
+	// 生成的、不需要对应某一份配置（单条下载才用 safeFilename 的双写方案）。
+	h.Set("Content-Type", "application/zip")
+	h.Set("Content-Disposition",
+		`attachment; filename="triune-configs-`+time.Now().Format("20060102-150405")+`.zip"`)
+	h.Set("X-Content-Type-Options", "nosniff")
+
+	zw := zip.NewWriter(w)
+	used := make(map[string]int, len(entries))
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		base := e.name
+		key := e.name + "." + e.ext
+		// 同一份配置存好几版是正常用法。重名不补序号的话，zip 里会出现两个
+		// 同名条目，解压时后一个直接覆盖前一个——用户以为都下来了。
+		if n := used[key]; n > 0 {
+			base = fmt.Sprintf("%s (%d)", e.name, n+1)
+		}
+		used[key]++
+		fh := &zip.FileHeader{Name: safeZipName(base) + "." + e.ext, Method: zip.Deflate}
+		fh.SetModTime(time.Now())
+		fw, err := zw.CreateHeader(fh)
+		if err != nil {
+			break // 响应头已经发出去了，只能中断，不能再 fail()
+		}
+		if _, err := io.WriteString(fw, e.content); err != nil {
+			break
+		}
+		names = append(names, e.name)
+	}
+	_ = zw.Close()
+	if len(names) > 0 {
+		a.auditOK(r, AuditConfig, summarizeNames(names),
+			fmt.Sprintf("批量下载 %d 份配置", len(names)))
+	}
 }
 
 // ==================== 规则标签 ====================
