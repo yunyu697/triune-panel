@@ -1466,11 +1466,27 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 
 // sbDNSServers DNS 服务器定义。1.12 起是 type+server 的新格式，
 // 1.11 只认 address 字符串；写错一边就是启动 FATAL，所以单独抽出来。
+//
+// 两代格式的 detour 语义不同，不能照抄：
+//
+//   - 旧格式（1.11）：DNS server 不写 detour 时走 default outbound，
+//     也就是 route.final（本模板是 PROXY）——本地 DNS 会被绕进代理。
+//     所以必须显式写 detour: "direct"。
+//   - 新格式（1.12+）：DNS server 自己就是一个 dialer，官方文档写明
+//     "uses dialer just like outbound, which is equivalent to using an
+//     empty direct outbound by default"。不写 detour 就是直连；此时再写
+//     detour: "direct" 反而会被启动校验拒绝：
+//     FATAL start service: start dns/udp[local]:
+//     detour to an empty direct outbound makes no sense
+//     （SagerNet/sing-box#2803，1.12.0 起）
+//
+// 注意这条只在 start service 阶段报，`sing-box check` 查不出来——所以
+// 用 check 验过的产物仍然可能在客户端启动时炸。
 func sbDNSServers(caps sbCaps) []any {
 	if caps.NewDNSFormat {
 		return []any{
 			map[string]any{"type": "https", "tag": "remote", "server": "8.8.8.8", "detour": "PROXY"},
-			map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5", "detour": "direct"},
+			map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5"},
 		}
 	}
 	return []any{

@@ -1037,6 +1037,11 @@ momo 自己铺的 `ip rule` / 路由表抢路由，而且没有上面那几个�
 > 入站 tag、DNS 规则都合法。但 **momo 自己的 `Profile Check` 与真机启动尚未在 OpenWrt
 > 设备上验证**——它还会检查 UCI 里的 tag 与 `tcp_mode` 是否对得上，这是面板看不到的部分。
 > 如果你在 OpenWrt 上跑通了（或报错），欢迎反馈，这条会按实测结果更新。
+>
+> 注意 `check` 只证明「能加载」，不证明「能启动」：部分校验发生在 `start service` 阶段。
+> v2.0.9 的产物就曾因 DNS 段写了 `detour: "direct"`（指向一个没有任何选项的 direct 出站），
+> 在 sing-box 1.12+ 上启动即 `FATAL ... detour to an empty direct outbound makes no sense`，
+> 而同一份文件 `check` 是绿的。v2.1.0 已修，并补了「真内核 run 判活」的测试。
 
 ### 两个内核的写法不能混
 
@@ -2124,6 +2129,7 @@ data/
 
 | 版本 | 主题 |
 |---|---|
+| v2.1.0 | **修复 sing-box 1.12+ 客户端与 momo 产物启动即 FATAL**（`detour to an empty direct outbound makes no sense`）。根因是 DNS 段给本地服务器写了 `detour: "direct"`，而出站表里的 `direct` 是个没有任何选项的空出站；1.12 起 DNS server 自己就是 dialer，不写 detour 即直连，重复声明反而被启动校验拒绝。新格式删掉该字段、旧格式（1.11）保持显式直连（1.11 不写会走 `route.final` 绕进代理，且 1.11 无此校验，已用 1.11.15 实测）。同一个 DNS 段也供 momo 使用，所以 momo profile 一并修好。**这类问题 `sing-box check` 抓不到**（校验在 `start service` 阶段），v2.0.9 用 check 验 momo 因此漏过；本版补两条防线：结构不变量（1.11–1.15 × 四个目标全组合）与真内核 `run` 启动判活。 |
 | v2.0.9 | **从「改规则」补到「验证规则」**。① 规则体检脚本 `tp-check.sh`：在跑配置的设备上逐类解析域名，按 fake-ip 归属判定「该直连的进了代理」，再验连通性，异常项附带会坏在哪——「用本机内核校验」只证明配置能加载，不回答分流对不对；兼容 busybox（无 `dig` 退回 `nslookup`、无 `curl` 退回 `wget`），NTP 按端口直连无法用域名判断，改为比对时间偏差。② 规则漂移提醒：保存配置时记面板版本与规则快照（DB v7），列表标「落后 N 条」，点开列出新增/移除的规则原文，重新生成后清零。③ 诊断摘要：一段纯文本含版本、内核路径与配置 sha、规则条数、落后份数，报障直接贴。④ 生成页「关键服务保障」：勾完规则集显示每类被谁覆盖 / 仅内置兜底。⑤ 把「类别」抽成 `systemClasses` 一张表，体检脚本、界面提示、不变量测试全从它派生。顺带修掉体检脚本自身的 bash 3.2 坑（`"$ip（"` 会把中文读进变量名导致展开为空），并加测试钉住。 |
 | v2.0.8 | **补真机实测发现的两类漏项；配置管理支持多选批量**。在真机旁路由（OpenWrt + mihomo）上实测 2.0.7 产物：`softwareupdate -l` 查到更新、`git ls-remote` 5/5 成功、18MB Release 3.2MB/s 且字节数一致，主链路都对；测出两条该收未收的规则——① `ocsp.apple.com` / `ocsp2.apple.com` 走代理，装 App / 跑更新会卡「正在验证」或报「无法验证」；② 定位（`gs-loc.apple.com` / `*.ls.apple.com` / `*.ls-apple.com`）走代理会让「查找我的」漂到节点所在国、时区与区域判定跟着错。两类都补进强制直连并按类进不变量测试。配置管理新增复选框与批量操作条：打包下载（zip，同名补序号）、批量删除（一次确认、一条汇总审计、列出前五个名字）、取消选择；全选只作用于当前筛选结果，选择集存内存所以搜索重绘不丢。生成页把「自定义规则」挪到「规则集」之前，与产物顺序一致。验证：全量 `go test ./... -p 1` 绿、新增 `.e2e/configs-batch.js` 17 项零失败、真机 mihomo 1.19.34 `-t` 通过。 |
 | v2.0.7 | **规则体系整体排查：按类修，不再逐个补域名**。① 消除单侧静默丢弃：sing-box 的规则注入原先只认 `DOMAIN` / `DOMAIN-SUFFIX`，加别的类型时 mihomo 生效、sing-box 静默不生效；现在自定义规则与两份内置清单共用同一转换函数，无法表达会明确告警。顺带修掉自定义 `GEOIP` 在 sing-box 里拼成 `geosite-<val>` 的真 Bug（provider tag 实为 `geoip-<val>`，有同名 geosite 时静默用错集合、没有时启动 FATAL）。② 直连清单按类补齐：Apple 更新按 `apple-update` 全量 21 条（补上此前漏的 `swcdn` / `gg` / `gsra` / `ig` / `skl` / `gdmf-ados` / `wkms-public`）、新增 Windows 更新/激活/授权（`*.windowsupdate.com` / `activation.sls.microsoft.com` / `licensing.mp.microsoft.com`）、连通性检测改后缀；同时**收窄 OneDrive**——数据面走代理只是慢不是坏，强制直连属越权，现在只强制直连登录/认证。③ 补两类拿不到域名的流量：NTP（UDP 123，没有 SNI，走代理会让系统时间漂移 → TLS 证书随机报错）按端口直连；私有网段补 CGNAT `100.64.0.0/10`（Tailscale 打洞）与组播 `224.0.0.0/4` / `ff00::/8`（mDNS / SSDP / 投屏 / 智能家居发现）。④ 用 `genconfig_invariants_test.go` 把机制钉住：每条直连规则必须同时落到四个位置、直连与代理无交集、`systemProxyCIDRs` 单条不得宽于 `/20`、每个关键类别至少一条（整类被删会红）——以后加域名只需加一行。详见[系统关键服务强制直连](#系统关键服务强制直连不受策略影响)与[规则集的排序语义](#规则集的排序语义容易踩的坑)。 |

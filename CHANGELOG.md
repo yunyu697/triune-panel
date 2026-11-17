@@ -8,6 +8,39 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.1.0
+
+### 修复：sing-box 1.12+ 客户端导入后起不来（detour to an empty direct outbound）
+
+症状是在客户端里点启动就红：
+
+```
+FATAL start service: start dns-transport: start dns/udp[local]:
+detour to an empty direct outbound makes no sense
+```
+
+原因是 DNS 段给本地服务器写了 `detour: "direct"`，而出站表里的 `direct` 是一个
+除了 `type`/`tag` 没有任何选项的空出站。sing-box 1.12 起 DNS server 自己就是一个
+dialer，官方文档写明 *equivalent to using an empty direct outbound by default*——
+**不写 detour 就是直连**；此时再显式 detour 到一个空 direct，等于重复声明同一件事，
+启动校验直接拒绝（[SagerNet/sing-box#2803](https://github.com/SagerNet/sing-box/issues/2803)）。
+
+- 新格式（1.12+）的 `local` DNS 不再写 `detour`，语义不变，仍是直连
+- 旧格式（1.11）**保持原样**：1.11 的 DNS server 不写 detour 会走 `route.final`，
+  本地 DNS 就绕进代理了，必须显式直连；1.11 也没有这条校验（已用 1.11.15 实测）
+- 同一个 DNS 段同时供「生成配置」的 sing-box 目标与 openwrt-momo 产物使用，
+  所以 **momo profile 也一起修好了**——此前它同样一启动就 FATAL
+
+**为什么之前没发现**：这条校验发生在 `start service` 阶段，`sing-box check -c`
+是绿的。v2.0.9 用 check 验过 momo 产物，因此漏掉。这一版补了两道防线：
+
+- `TestNoDetourToPlainDirect`：1.11–1.15 × client / main-router / side-router /
+  openwrt-momo 全组合，断言新格式没有任何 detour 指向空 direct；旧格式则必须显式直连
+- `TestSingboxClientConfigStarts`：设 `TRINE_SINGBOX_BIN` 时用真内核 **run**（不是 check）
+  启动 3 秒判活。变异验证：把 detour 加回去，这条在 0.05s 内报出与用户完全一致的 FATAL
+
+---
+
 ## v2.0.9
 
 ### 从「改规则」补到「验证规则」：体检脚本、漂移提醒、诊断摘要
