@@ -973,7 +973,7 @@ function demoText(path) {
     return [
       "triune-panel 诊断摘要",
       "生成时间   2026-11-17 18:20:31 +0800",
-      "面板版本   v2.1.0-demo",
+      "面板版本   v2.1.1-demo",
       "运行平台   linux/amd64（go1.26.0）",
       "数据目录   /opt/triune-panel/data",
       "",
@@ -1027,7 +1027,7 @@ if (DEMO) {
   }));
   MDB = {
     // 演示页的顶栏版本号。跟着发布号走，免得预览页显示的版本比真实版本落后一大截。
-    version:"v2.1.0-demo",
+    version:"v2.1.1-demo",
     // 演示用的规则标签与已保存配置：让「点标签套用」「保存后下载」这条链路
     // 在离线演示页里也能完整走一遍
     ruleTags:[
