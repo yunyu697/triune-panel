@@ -140,13 +140,26 @@ func TestSingboxBypassRulesFollowDNSHijack(t *testing.T) {
 		if first["action"] != "hijack-dns" {
 			t.Errorf("%s rules[0] 应是 DNS 劫持，实际 %v", verStr, first)
 		}
-		second := rules[1].(map[string]any)
-		if second["outbound"] != "direct" || !hasInSlice(second["domain"], "node.example.com") {
-			t.Errorf("%s rules[1] 应是节点域名直连，实际 %v", verStr, second)
+		// 前面的 action 规则（hijack-dns / sniff）不带出站，也不参与分流。
+		// 用下标写死会让「以后再加一条 action 规则」凭空变红，所以按语义找：
+		// 第一条既没有 action 也没有 protocol 的规则才是节点直连。
+		base := 0
+		for base < len(rules) {
+			if m, ok := rules[base].(map[string]any); ok && m["action"] == nil && m["protocol"] == nil {
+				break
+			}
+			base++
 		}
-		third := rules[2].(map[string]any)
+		if base+1 >= len(rules) {
+			t.Fatalf("%s 规则太少: %#v", verStr, rules)
+		}
+		second := rules[base].(map[string]any)
+		if second["outbound"] != "direct" || !hasInSlice(second["domain"], "node.example.com") {
+			t.Errorf("%s rules[%d] 应是节点域名直连，实际 %v", verStr, base, second)
+		}
+		third := rules[base+1].(map[string]any)
 		if third["outbound"] != "direct" || !hasInSlice(third["ip_cidr"], "1.2.3.4/32") {
-			t.Errorf("%s rules[2] 应是节点 IP 直连，实际 %v", verStr, third)
+			t.Errorf("%s rules[%d] 应是节点 IP 直连，实际 %v", verStr, base+1, third)
 		}
 
 		// DNS 侧同样要绕开：节点域名落到 final:remote（经代理的 DoH）就成了

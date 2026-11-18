@@ -1346,6 +1346,19 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	for _, c := range systemProxyCIDRs {
 		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,PROXY,no-resolve", c))
 	}
+	// 这里刻意**不**加内建 GEOIP,CN 兜底，原因写在这里防止以后有人再想到这条捷径。
+	//
+	// geoip-cn 是远程规则集：首次启动没有本地缓存、镜像又拉不到时，mihomo 只写一条
+	// 日志就把整条 RULE-SET 跳过，然后一路落到 MATCH,PROXY——「国内站点莫名变慢、
+	// 个别 App 首屏卡死」，而配置与日志都干净。看起来补一条内建 GEOIP,CN 就兜住了，
+	// 但实测（mihomo v1.19.34，home 目录不可写）它在**解析配置阶段**直接退出：
+	//
+	//	level=fatal msg="Parse config error: rules[0] [GEOIP,CN,DIRECT] error:
+	//	can't download MMDB: open <home>/geoip.metadb: permission denied"
+	//
+	// 即：MMDB 缺失且下载不了（大陆访问 GitHub 的常态）时，「变慢」会变成「内核
+	// 起不来」。风险远大于收益。这个口子的兜底只能是可观测性——rule-provider 的
+	// `path` 已有本地缓存，体检脚本用 fake-ip 判据能直接发现「国内域名被代理」。
 	for _, c := range privateCIDRs {
 		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,DIRECT,no-resolve", c))
 	}
@@ -1434,9 +1447,18 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		"rules":               rules,
 	}
 	if router {
+		// QUIC 必须一起嗅：HTTP/3 连的是 UDP:443，只嗅 TLS 拿不到 SNI。
+		// 字节系 App（红果、抖音）大量用内置 HTTPDNS + 自研协议，它们连的是
+		// 真实 IP 而不是域名——本来就绕过了域名规则；再叠加「QUIC 不嗅」，
+		// 这条连接上就一个域名信息都不剩，只能靠 IP 归属判定。
+		// 旧版 mihomo 不认 QUIC 键时按未知字段忽略，不会拒收整份配置。
 		doc["sniffer"] = map[string]any{
 			"enable": true, "parse-pure-ip": true, "override-destination": false,
-			"sniff": map[string]any{"HTTP": map[string]any{"ports": []any{80, "8080-8880"}}, "TLS": map[string]any{"ports": []any{443, 8443}}},
+			"sniff": map[string]any{
+				"HTTP": map[string]any{"ports": []any{80, "8080-8880"}},
+				"TLS":  map[string]any{"ports": []any{443, 8443}},
+				"QUIC": map[string]any{"ports": []any{443, 8443}},
+			},
 		}
 	}
 
@@ -1531,6 +1553,12 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	// 变成「用隧道连隧道端点」的回环。
 	routeRules := []any{
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+		// 嗅探必须排在所有域名规则之前：sniffer 只对「目标不是域名」的连接生效
+		// （纯 IP 的 TLS / QUIC，典型来源是 App 内置的 HTTPDNS），不嗅这类连接
+		// 就没有任何域名信息，域名规则全部落空，只剩 IP 归属可判。
+		// mihomo 侧同一件事由 sniffer 段承担；这里用 1.11+ 才有的 route action
+		// （minSBVersion 就是 1.11，1.10 已被拒在生成之前）。
+		map[string]any{"action": "sniff"},
 	}
 	if len(bypass.Domains) > 0 {
 		routeRules = append(routeRules,

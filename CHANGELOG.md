@@ -8,6 +8,63 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.1.2
+
+### 分流：两个嗅探盲区补上，第三条兜底被实测否掉
+
+起因是一次真实故障：红果短剧 / 红果漫剧在 mihomo 旁路由上全新安装首开卡第一屏，
+关代理就正常。查下去发现配置、日志、界面全都干净——流量只是悄悄走了错的一侧。
+三个缺口指向同一件事：**连接的域名信息丢了，只剩 IP 归属可判**。前两条能修，
+第三条查证后必须放弃（原因见下）。
+
+**QUIC 不嗅探（mihomo）。** `sniffer` 只嗅 HTTP / TLS，而 HTTP/3 走 UDP:443，
+拿不到 SNI。App 用内置 HTTPDNS 时本来就连真实 IP、绕过域名规则，两条一叠加，
+这条连接上没有任何域名信息——域名类规则（含用户自己写的直连）对它全部失效。
+
+**sing-box 侧完全没有 sniff。** 客户端配置此前一条嗅探规则都没有（只有 momo 目标
+有）。纯 IP 的 TLS 连接同样还原不出域名。现在用 1.11+ 才有的 route action
+（`{"action":"sniff"}`）补在最前面，早于任何带域名的规则——顺序错了不会报错，
+但嗅探还没发生，域名规则就已经判完了。
+
+**`geoip-cn` 只有远程规则集一层（mihomo）——查过，这条路不能堵。** 首次启动没有
+本地缓存、镜像又拉不到时，mihomo 只写一条日志就把整条 `RULE-SET` 跳过，然后一路
+落到 `MATCH,PROXY`：「国内站点莫名变慢、个别 App 首屏卡死」，而配置和日志都干净。
+看起来补一条内建 `GEOIP,CN,DIRECT` 就兜住了，但实测（v1.19.34，home 目录不可写）
+它在**解析配置阶段**直接退出：
+
+```
+level=fatal msg="Parse config error: rules[0] [GEOIP,CN,DIRECT] error: can't download MMDB"
+```
+
+MMDB 缺失且下载不了（大陆访问 GitHub 的常态）时，「变慢」会变成「内核起不来」——
+风险远大于收益，所以本版**不加**这条。这个口子的兜底只能是可观测性：rule-provider
+的 `path` 已有本地缓存，体检脚本用 fake-ip 判据能直接发现「国内域名被代理」。
+测试里钉死 `TestMihomoRulesAvoidBareGeoip`，防止以后有人再想到这条捷径。
+
+**sing-box 侧同样不用兜底**：实测（1.14.4）把 `rule_set` 指向不可达地址后是
+`FATAL start service: initialize rule-set`，启动直接失败——硬失败、看得见。
+
+### 验证
+
+- `TestMihomoSnifferCoversQUIC` / `TestMihomoClientHasNoSniffer` /
+  `TestSingboxSniffsBeforeDomainRules` / `TestMihomoRulesAvoidBareGeoip`
+- 四条变异全部转红：删 `QUIC` 键、删 `action: sniff`、把 sniff 挪到规则末尾
+  （专验「顺序」而不只是「存在」）、往规则里加回裸 `GEOIP,CN`（专验那条反向保护）
+- 真内核：mihomo v1.19.34 接受 `sniffer.sniff.QUIC` 并启动（client 真 run、
+  router 走 `-t`）；sing-box 1.11.15 与 1.14.4 接受 route action `sniff` 并启动
+- `TestSingboxClientConfigStarts` 支持 `TRINE_SINGBOX_VER`：1.11 与 1.12+ 的 DNS
+  格式不同，此前「1.11 也支持」只能推断，现在能真跑
+
+### 已知边界
+
+mihomo 对 `sniffer.sniff` 下的未知键是**静默忽略**（拼错不报错），所以 QUIC 键名的
+正确性只能靠生成器断言与官方文档，内核侧证伪不了。裸 `GEOIP` 规则会让内核在 MMDB
+不可用时 fatal，所以「国内 IP 直连」完全依赖 `geoip-cn` 规则集本身，请用体检脚本
+确认其状态。另外 sing-box 1.14 起 `download_detour` 已 deprecated、1.16 将移除，
+登记为 KL-10。
+
+---
+
 ## v2.1.1
 
 ### 发布链路：把「验不了」和「坏了」分开

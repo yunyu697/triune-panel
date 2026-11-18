@@ -136,7 +136,13 @@ func TestSingboxClientConfigStarts(t *testing.T) {
 	if bin == "" {
 		t.Skip("未设置 TRINE_SINGBOX_BIN，跳过真机启动校验")
 	}
-	v, _ := parseSBVersion("1.14")
+	// 生成版本可覆盖：1.11 与 1.12+ 的 DNS 段格式不同，同一份 JSON 不能跨版本
+	// 跑。设 TRINE_SINGBOX_VER=1.11 就能用同一套「真启动」用例验旧版，
+	// 否则「1.11 也支持」永远只是推断（route action 的字段增删只有内核说了算）。
+	v, err := parseSBVersion(os.Getenv("TRINE_SINGBOX_VER"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	warns := []string{}
 	g := genSingbox("client", v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
 

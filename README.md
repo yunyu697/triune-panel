@@ -2093,7 +2093,14 @@ scrape_configs:
       `tun_inbound_tag` / `fake_ip_dns_server_tag` 的用户，要把配置里的 tag 一起改，
       否则 momo 的 Profile Check 会直接退出。
     - 端口（1053 / 7890 / 7891 / 7892）是生成文件里的默认值；同机已有别的服务占用
-      时按需改，momo 会从 profile 里读 `listen_port`，不要求固定值。
+      时按需改，momo 会从 profile 里读       `listen_port`，不要求固定值。
+23. **sing-box 1.16 会移除 `download_detour`，届时旧产物会直接起不来**：
+    - 1.14 起官方把 remote rule-set 的 `download_detour` 标为 deprecated（内核日志里
+      会打一条 WARN），并注明 1.16 移除。当前生成的配置仍然可用，但 **1.16 正式版
+      发布后，用旧产物会因 `unknown field` 启动失败**——这是确定性失败，不是偶发。
+    - 届时请在面板里重新生成客户端配置，不要继续用旧文件。面板会按官方迁移文档改走
+      `http_client` / `route.default_http_client`，登记见
+      [docs/known-limits.md](docs/known-limits.md) 的 KL-10。
 
 ## 架构
 
@@ -2148,6 +2155,7 @@ check 全是绿的。所以门禁调的是 `run` 判活（`TestSingboxClientConf
 
 | 版本 | 主题 |
 |---|---|
+| v2.1.2 | **补上两个嗅探盲区，第三条兜底被实测否掉**。起因：红果短剧/漫剧在 mihomo 旁路由上首开卡第一屏，关代理即正常，而配置、日志、界面全干净。三个缺口都指向「连接的域名信息丢了，只剩 IP 归属可判」：① mihomo 的 `sniffer` 加 **QUIC 嗅探**（此前只嗅 HTTP/TLS，HTTP/3 走 UDP:443 拿不到 SNI）；② sing-box 客户端补 route action **`sniff`**（此前一条嗅探规则都没有），且必须早于任何域名规则。③ 原打算给 `geoip-cn` 加内建 `GEOIP,CN` 兜底（远程规则集首启下载失败时 mihomo 只记日志就跳过整条规则，国内流量会落到 `MATCH,PROXY`），但**实测否掉**：MMDB 不可用时该规则是 `Parse config error` 直接 fatal，「变慢」会变成「起不来」。改为钉死反向保护测试并写明原因。实测 mihomo 1.19.34 与 sing-box 1.11.15 / 1.14.4 均接受新配置并启动，四条变异全红。 |
 | v2.1.1 | **把「验不了」和「坏了」分开**。① `verify-release.sh` 先探 `/rate_limit`（自身不耗配额）再判定：真限流记 SKIP + 退出码 2（稍后重跑即可），非限流故障照旧 5 项 FAIL + 退出码 1——限流不再被误当成发布事故，真故障也不会被降级放过（限流时坚持不改用认证通道补查匿名索引，否则会掩盖「匿名列表整条漏掉」那类真实故障）。② sing-box **服务端**产物补真内核 `run` 判活：覆盖 socks / vless-tls / reality / 注入 DNS 四类，变异（证书缺失、detour 指向空 direct）0.06s 报 FATAL，KL-08 转「已验证」。③ 发布门禁第一次在真实发布里跑通，14 项通过 / 0 失败，顺带修掉 label 含空格导致 kernel gate 恒失败的 `ambiguous redirect`。 |
 | v2.1.0 | **修复 sing-box 1.12+ 客户端与 momo 产物启动即 FATAL**（`detour to an empty direct outbound makes no sense`）。根因是 DNS 段给本地服务器写了 `detour: "direct"`，而出站表里的 `direct` 是个没有任何选项的空出站；1.12 起 DNS server 自己就是 dialer，不写 detour 即直连，重复声明反而被启动校验拒绝。新格式删掉该字段、旧格式（1.11）保持显式直连（1.11 不写会走 `route.final` 绕进代理，且 1.11 无此校验，已用 1.11.15 实测）。同一个 DNS 段也供 momo 使用，所以 momo profile 一并修好。**这类问题 `sing-box check` 抓不到**（校验在 `start service` 阶段），v2.0.9 用 check 验 momo 因此漏过；本版补两条防线：结构不变量（1.11–1.15 × 四个目标全组合）与真内核 `run` 启动判活。 |
 | v2.0.9 | **从「改规则」补到「验证规则」**。① 规则体检脚本 `tp-check.sh`：在跑配置的设备上逐类解析域名，按 fake-ip 归属判定「该直连的进了代理」，再验连通性，异常项附带会坏在哪——「用本机内核校验」只证明配置能加载，不回答分流对不对；兼容 busybox（无 `dig` 退回 `nslookup`、无 `curl` 退回 `wget`），NTP 按端口直连无法用域名判断，改为比对时间偏差。② 规则漂移提醒：保存配置时记面板版本与规则快照（DB v7），列表标「落后 N 条」，点开列出新增/移除的规则原文，重新生成后清零。③ 诊断摘要：一段纯文本含版本、内核路径与配置 sha、规则条数、落后份数，报障直接贴。④ 生成页「关键服务保障」：勾完规则集显示每类被谁覆盖 / 仅内置兜底。⑤ 把「类别」抽成 `systemClasses` 一张表，体检脚本、界面提示、不变量测试全从它派生。顺带修掉体检脚本自身的 bash 3.2 坑（`"$ip（"` 会把中文读进变量名导致展开为空），并加测试钉住。 |
