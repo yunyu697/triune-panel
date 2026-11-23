@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.1.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.1.3 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -10125,16 +10125,24 @@ async function genGenerate() {
       vparts.push(`节点服务器直连：<b>${escHtml(j.bypass_servers.join("、"))}</b>`);
     }
     const vres = $("gen_vres");
-    if (vparts.length) {
+    const warns = j.warnings || [];
+    if (vparts.length || warns.length) {
       vres.classList.remove("hide");
-      vres.innerHTML = vparts.join(" · ");
+      let html = vparts.join(" · ");
+      // 警告必须留在页面上，不能只靠 toast：toast 三秒就没了，而「哪条自定义
+      // 规则被纠正、哪条被跳过」正是用户下载前就得看见的事。看不到提示的人
+      // 会带着一条永远不会命中的规则走，然后把时间花在怀疑分流顺序上。
+      if (warns.length) {
+        html += (html ? "<br>" : "") + warns.map(w => escHtml(w)).join("<br>");
+      }
+      vres.innerHTML = html;
     } else {
       vres.classList.add("hide");
     }
     // 生成成功说明这个源至少没被拒绝，值得记住
     if (j.rule_mirror && j.rule_mirror !== "official") saveMirrorPref();
-    (j.warnings || []).forEach(w => toast(w, "warn"));
-    if (!(j.warnings || []).length) toast("生成完成：" + j.filename);
+    warns.forEach(w => toast(w, "warn"));
+    if (!warns.length) toast("生成完成：" + j.filename);
   } catch(e){
     toast(e.message, "err");
     // 失败原因必须**留在页面上**：toast 三秒就没了，而「为什么生成不出来」

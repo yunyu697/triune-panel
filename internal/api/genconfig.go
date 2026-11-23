@@ -983,30 +983,178 @@ func collectBypassHosts(nodes []*link.Node) bypassSpec {
 	return b
 }
 
-// parseCustomRule 解析 clash 风格自定义规则：TYPE,VALUE,POLICY[,no-resolve]
+// customRule 是一条解析后的自定义规则。
+type customRule struct {
+	Typ       string   // DOMAIN / DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR / IP-CIDR6 / GEOSITE / GEOIP
+	Val       string   // 规范化之后的值（可能已补掩码、去掉通配符）
+	Pol       string   // DIRECT / PROXY / REJECT
+	NoResolve bool     // 仅 IP-CIDR / IP-CIDR6 有意义（clash 的 no-resolve）
+	Notes     []string // 对值做了哪些纠正，必须回显给用户
+	Reason    string   // 解析失败的具体原因（ok=false 时有效）
+}
+
+// parseCustomRuleFull 解析 clash 风格自定义规则：TYPE,VALUE,POLICY[,no-resolve]
 // 支持 DOMAIN / DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR / IP-CIDR6 / GEOSITE / GEOIP
-func parseCustomRule(line string) (typ, val, pol string, ok bool) {
+//
+// 生成配置必须用这一个，而不是 parseCustomRule：简化版丢掉 no-resolve，
+// 也拿不到「值被纠正了」的说明——用户写的标准 clash 规则会悄悄变意却没有任何提示。
+func parseCustomRuleFull(line string) (customRule, bool) {
+	var c customRule
 	parts := strings.Split(strings.TrimSpace(line), ",")
-	if len(parts) < 3 {
-		return "", "", "", false
+	// 尾部可选的 no-resolve。clash 的写法是写在策略之后，官方语法就是四段。
+	// 之前只认三段，于是 `IP-CIDR,1.2.3.0/24,DIRECT,no-resolve` 被判成策略
+	// "NO-RESOLVE"→整条丢弃，用户只看到一行「无法解析已跳过」。
+	if len(parts) > 0 {
+		if last := strings.ToLower(strings.TrimSpace(parts[len(parts)-1])); last == "no-resolve" {
+			c.NoResolve = true
+			parts = parts[:len(parts)-1]
+		}
 	}
-	typ = strings.ToUpper(strings.TrimSpace(parts[0]))
-	pol = strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
-	switch pol {
+	if len(parts) < 3 {
+		c.Reason = "至少要写成 类型,值,策略"
+		return c, false
+	}
+	c.Typ = strings.ToUpper(strings.TrimSpace(parts[0]))
+	c.Pol = strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
+	switch c.Pol {
 	case "DIRECT", "PROXY", "REJECT":
 	default:
-		return "", "", "", false
+		c.Reason = "策略只能是 DIRECT / PROXY / REJECT"
+		return c, false
 	}
-	body := parts[1 : len(parts)-1]
-	val = strings.TrimSpace(strings.Join(body, ","))
-	switch typ {
-	case "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "IP-CIDR", "IP-CIDR6", "GEOSITE", "GEOIP":
+	val := strings.TrimSpace(strings.Join(parts[1:len(parts)-1], ","))
+
+	var errMsg string
+	var notes []string
+	switch c.Typ {
+	case "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD":
+		c.Typ, c.Val, notes, errMsg = normalizeDomainValue(c.Typ, val)
+	case "IP-CIDR", "IP-CIDR6":
+		c.Typ, c.Val, notes, errMsg = normalizeCIDRValue(c.Typ, val)
+	case "GEOSITE", "GEOIP":
 		if val == "" {
-			return "", "", "", false
+			errMsg = "缺少分类名"
+		} else if strings.ContainsAny(val, "/* ") {
+			errMsg = "分类名不能带通配符、斜杠或空格"
+		} else {
+			c.Val = val
 		}
-		return typ, val, pol, true
+	default:
+		errMsg = "不支持的类型 " + c.Typ
 	}
-	return "", "", "", false
+	if errMsg != "" {
+		c.Reason = errMsg
+		return c, false
+	}
+	c.Notes = notes
+	// no-resolve 只对 IP 规则有意义。写在域名规则上时，部分内核会直接拒绝解析
+	// 整份配置（而不是忽略这一行），所以在这里摘掉并说明，不让它变成启动失败。
+	if c.NoResolve && c.Typ != "IP-CIDR" && c.Typ != "IP-CIDR6" {
+		c.NoResolve = false
+		c.Notes = append(c.Notes, "no-resolve 只对 IP-CIDR 生效，已忽略")
+	}
+	return c, true
+}
+
+// parseCustomRule 是 parseCustomRuleFull 的简化包装，只给「只关心类型和值」
+// 的调用方（内置清单断言、清单匹配、DNS 派生）用。
+func parseCustomRule(line string) (typ, val, pol string, ok bool) {
+	c, ok := parseCustomRuleFull(line)
+	return c.Typ, c.Val, c.Pol, ok
+}
+
+// describeCustomNotes 把解析阶段的纠正说明转成给用户看的提示。
+func describeCustomNotes(line string, notes []string) []string {
+	out := make([]string, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, "自定义规则 "+line+"："+n)
+	}
+	return out
+}
+
+// normalizeDomainValue 把域名规则纠正成内核真的能匹配的形式。
+//
+// 两种写法语法合法、内核不报错、日志里也看不出异常，只有「没效果」：
+//
+//	1. 前置通配符：DOMAIN-SUFFIX 本身就是按点边界做后缀匹配，`*.foo.com` 的
+//	   第一个字符是 `*`，它只能匹配叫 `*.foo.com` 的域名——现实中不存在。
+//	2. DOMAIN 带通配符：DOMAIN 是完整相等匹配，同上，永远匹配不上。
+//
+// 这类错误只能靠解析阶段发现，所以在这里纠正并把说明带回去，而不是丢弃。
+func normalizeDomainValue(typ, val string) (string, string, []string, string) {
+	v := strings.TrimSpace(val)
+	if v == "" {
+		return "", "", nil, "值为空"
+	}
+	if strings.ContainsAny(v, "/ :") {
+		return "", "", nil, "值应为裸域名，不要带协议、端口或路径"
+	}
+	var notes []string
+	switch typ {
+	case "DOMAIN-SUFFIX":
+		if t := strings.TrimLeft(v, "*."); t != v {
+			if t == "" || strings.Contains(t, "*") {
+				return "", "", nil, "通配符位置无法用后缀表达；请写具体域名，或改用 DOMAIN-KEYWORD"
+			}
+			notes = append(notes, fmt.Sprintf("后缀匹配不需要通配符，已按「%s」处理", t))
+			v = t
+		}
+	case "DOMAIN":
+		if strings.Contains(v, "*") {
+			t := strings.TrimLeft(v, "*.")
+			if t == "" || strings.Contains(t, "*") {
+				return "", "", nil, "DOMAIN 只做完整匹配，不能含通配符；请改用 DOMAIN-SUFFIX 或 DOMAIN-KEYWORD"
+			}
+			notes = append(notes, fmt.Sprintf("DOMAIN 只做完整匹配，已改为 DOMAIN-SUFFIX,%s", t))
+			return "DOMAIN-SUFFIX", t, notes, ""
+		}
+	case "DOMAIN-KEYWORD":
+		if strings.Contains(v, "*") {
+			t := strings.ReplaceAll(v, "*", "")
+			if t == "" {
+				return "", "", nil, "关键字不能只有通配符"
+			}
+			notes = append(notes, fmt.Sprintf("关键字匹配不需要通配符，已按「%s」处理", t))
+			v = t
+		}
+	}
+	return typ, v, notes, ""
+}
+
+// normalizeCIDRValue 补全缺省的掩码，并拒收写错的地址。
+//
+// 之前缺掩码的地址只在 sing-box 侧被补成 /32，mihomo 侧原样输出——
+// 同一行规则在两种产物里一个能用、一个起不来。
+func normalizeCIDRValue(typ, val string) (string, string, []string, string) {
+	v := strings.TrimSpace(val)
+	if v == "" {
+		return "", "", nil, "值为空"
+	}
+	if strings.Contains(v, "/") {
+		if _, _, err := net.ParseCIDR(v); err != nil {
+			return "", "", nil, "不是合法的 CIDR（" + v + "）"
+		}
+		return typ, v, nil, ""
+	}
+	ip := net.ParseIP(v)
+	if ip == nil {
+		return "", "", nil, "不是合法的 IP 地址（" + v + "）"
+	}
+	var notes []string
+	if ip.To4() != nil {
+		if typ == "IP-CIDR6" {
+			notes = append(notes, fmt.Sprintf("%s 是 IPv4 地址，类型已改为 IP-CIDR", v))
+			typ = "IP-CIDR"
+		}
+		notes = append(notes, "缺少掩码，已按 /32（单个地址）处理")
+		return typ, v + "/32", notes, ""
+	}
+	if typ == "IP-CIDR" {
+		notes = append(notes, fmt.Sprintf("%s 是 IPv6 地址，类型已改为 IP-CIDR6", v))
+		typ = "IP-CIDR6"
+	}
+	notes = append(notes, "缺少掩码，已按 /128（单个地址）处理")
+	return typ, v + "/128", notes, ""
 }
 
 // geoProviderFor GEOSITE/GEOIP 自定义规则需要的动态 provider
@@ -1299,20 +1447,28 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		rules = append(rules, fmt.Sprintf("IP-CIDR,%s,DIRECT,no-resolve", c))
 	}
 	for _, line := range customRules {
-		typ, val, pol, ok := parseCustomRule(line)
+		c, ok := parseCustomRuleFull(line)
 		if !ok {
-			*warns = append(*warns, "无法解析的自定义规则已跳过: "+line)
-			continue
-		}
-		if typ == "GEOSITE" || typ == "GEOIP" {
-			geoProviderFor("mihomo", typ, val, pol, &sets, mir)
-			rules = append(rules, fmt.Sprintf("RULE-SET,geosite-%s,%s", val, pol))
-			if typ == "GEOIP" {
-				rules[len(rules)-1] = fmt.Sprintf("RULE-SET,geoip-%s,%s", val, pol)
+			msg := "无法解析的自定义规则已跳过: " + line
+			if c.Reason != "" {
+				msg += "（" + c.Reason + "）"
 			}
+			*warns = append(*warns, msg)
 			continue
 		}
-		rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
+		*warns = append(*warns, describeCustomNotes(line, c.Notes)...)
+		if c.Typ == "GEOSITE" || c.Typ == "GEOIP" {
+			geoProviderFor("mihomo", c.Typ, c.Val, c.Pol, &sets, mir)
+			rules = append(rules, fmt.Sprintf("RULE-SET,%s-%s,%s", strings.ToLower(c.Typ), c.Val, c.Pol))
+			continue
+		}
+		rule := fmt.Sprintf("%s,%s,%s", c.Typ, c.Val, c.Pol)
+		// no-resolve 必须原样写回去：不带它时 mihomo 会为了匹配 IP 规则去解析
+		// 目标域名，fake-ip 环境下解析出来的是 198.18.x.x，规则反而更匹配不上。
+		if c.NoResolve {
+			rule += ",no-resolve"
+		}
+		rules = append(rules, rule)
 	}
 	// 系统关键服务强制直连：必须在所有规则集之前——geosite-microsoft / onedrive
 	// 被设成 PROXY 时，若不前置，登录域名会先被 PROXY 规则吃掉（用户反馈的
@@ -1477,6 +1633,12 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	if !mir.direct() {
 		header += "# 规则集下载源：" + mir.label() + "\n"
 	}
+	// 规则集是 mrs 二进制格式。旧内核不会「降级按文本读」，而是直接报 format
+	// 不支持——用户看到的是「配置导入成功，但分流失效或内核起不来」，而配置
+	// 本身每一行都没错。这个下限必须写在文件里，不能只留在更新日志中。
+	if len(sets) > 0 {
+		header += "# 规则集为 mrs 二进制格式，需要 mihomo 1.18 或更高；旧版会报 format 不支持。\n"
+	}
 	if !bypass.empty() {
 		header += "# 节点服务器直连（避免回环）：" + strings.Join(bypass.hosts(), "、") + "\n"
 	}
@@ -1586,25 +1748,32 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 		return m
 	}
 	for _, line := range customRules {
-		typ, val, pol, ok := parseCustomRule(line)
+		c, ok := parseCustomRuleFull(line)
 		if !ok {
-			*warns = append(*warns, "无法解析的自定义规则已跳过: "+line)
+			msg := "无法解析的自定义规则已跳过: " + line
+			if c.Reason != "" {
+				msg += "（" + c.Reason + "）"
+			}
+			*warns = append(*warns, msg)
 			continue
 		}
-		if typ == "GEOSITE" || typ == "GEOIP" {
-			geoProviderFor("singbox", typ, val, pol, &sets, mir)
+		*warns = append(*warns, describeCustomNotes(line, c.Notes)...)
+		if c.Typ == "GEOSITE" || c.Typ == "GEOIP" {
+			geoProviderFor("singbox", c.Typ, c.Val, c.Pol, &sets, mir)
 			// 引用的 tag 必须与 geoProviderFor 建出来的一致（geoip-* / geosite-*）。
 			// 此前这里对 GEOIP 也拼成 geosite-<val>：规则集里恰好有同名 geosite
 			// 时静默用错集合，没有时 sing-box 启动 FATAL。
-			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{strings.ToLower(typ) + "-" + val}}, pol))
+			routeRules = append(routeRules, setOut(map[string]any{"rule_set": []any{strings.ToLower(c.Typ) + "-" + c.Val}}, c.Pol))
 			continue
 		}
-		body := sbRuleBody(typ, val)
+		// no-resolve 在 sing-box 里没有对应开关：它的 ip_cidr 规则直接比对目标
+		// 地址，不做 DNS 解析。值与掩码已在解析阶段规范化，两套产物因而一致。
+		body := sbRuleBody(c.Typ, c.Val)
 		if body == nil {
-			*warns = append(*warns, "自定义规则类型 "+typ+" 无法在 sing-box 表达，已跳过: "+line)
+			*warns = append(*warns, "自定义规则类型 "+c.Typ+" 无法在 sing-box 表达，已跳过: "+line)
 			continue
 		}
-		routeRules = append(routeRules, setOut(body, pol))
+		routeRules = append(routeRules, setOut(body, c.Pol))
 	}
 	// 内置清单：与 mihomo 同一份数据、同一位置（自定义之后、规则集之前）。
 	// 走同一条转换路径，新增规则类型时两边不会漂移。

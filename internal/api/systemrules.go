@@ -112,11 +112,13 @@ var systemClasses = []systemClass{
 // gsp-ssl.ls.apple.com 也必须算命中，否则「探针在清单里」这类断言会误报。
 func ruleListMatches(rules []string, policy, domain string) bool {
 	for _, line := range rules {
-		if policy != "" && !strings.HasSuffix(line, ","+policy) {
+		typ, val, pol, ok := parseCustomRule(line)
+		if !ok {
 			continue
 		}
-		typ, val, _, ok := parseCustomRule(line)
-		if !ok {
+		// 用解析出来的策略比较，而不是看行尾后缀：带 no-resolve 的规则行尾
+		// 不是策略，后缀判断会把它整条漏掉。
+		if policy != "" && pol != policy {
 			continue
 		}
 		switch typ {

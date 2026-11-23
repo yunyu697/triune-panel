@@ -8,6 +8,70 @@ Triune Panel 每个版本已验证的能力。README 只保留[版本摘要](REA
 
 ---
 
+## v2.1.3
+
+### 自定义规则：四条「写对了但不生效」的路，我全堵了
+
+这一版的起点是一份真实的故障单。红果短剧在旁路由上卡第一屏，我让它直连 applog：
+
+```
+DOMAIN-SUFFIX,applog.fqnovel.com,DIRECT
+```
+
+规则保存成功、生成了、也应用了，**一次都没生效**。因为实际域名是
+`log5-applog.fqnovel.com`——`log5-applog` 是一个完整的 DNS 标签，连字符不是点，
+而 `DOMAIN-SUFFIX` 按点边界做后缀匹配：`-applog.` 不等于 `.applog.`。
+
+配置语法合法、内核不报错、日志干净，唯一的表现是「没效果」。顺着这条线查下去，
+同一类坑一共有四处。
+
+**第一处：标准 clash 四段写法被整条丢掉。** `IP-CIDR,1.2.3.0/24,DIRECT,no-resolve`
+里最后一段被当成了策略名，`NO-RESOLVE` 不在允许列表，整条规则判为「无法解析」直接
+跳过。函数注释上写着支持 `[,no-resolve]`，实现里没有。现在 `no-resolve` 被正确识别，
+并原样写回 mihomo 产物——不带它时内核会为了匹配 IP 规则去解析目标域名，fake-ip 下
+解析出来是 `198.18.x.x`，规则反而更匹配不上。
+
+**第二处：前置通配符是字面量。** `DOMAIN-SUFFIX,*.foo.com` 只能匹配一个叫
+`*.foo.com` 的域名，现实中不存在。`DOMAIN,*.foo.com`、`DOMAIN-KEYWORD,*applog*`
+同理。内核不会报错，只是永远不命中。现在按能确定的意图纠正并告诉你：后缀去掉
+前置的 `*.` / `.`，`DOMAIN` 带通配符改成 `DOMAIN-SUFFIX`，关键字去掉 `*`；中间
+带通配符这种无法用任何规则表达的，拒收并说明该改用哪种类型。
+
+**第三处：缺掩码的 IP 在两种产物里不是一个意思。** `IP-CIDR,1.2.3.4` 在 sing-box
+侧被自动补成 `/32`，mihomo 侧原样输出——同一行规则，一个能用、一个起不来。现在
+解析阶段统一补全（`/32` 或 `/128`），并且 IPv4 地址写成 `IP-CIDR6`、IPv6 地址写成
+`IP-CIDR` 这类类型写反的情况也一并纠正。写错的地址（`1.2.3.0/33`、`999.1.1.1`）
+不再只是「跳过」，会带着原因告诉你错在哪。
+
+**第四处：提示只在页面活三秒。** 以前这些情况只弹一条 toast，三秒后消失，用户下载
+完配置根本不知道自己的规则被纠正过。现在警告常驻在生成结果区，跟着配置一起留到你
+下载为止。
+
+**顺带把版本下限写进产物。** 规则集是 mrs 二进制格式，旧内核不会退回按文本读，而是
+直接报 format 不支持——表现同样是「导入成功、分流失效」。现在 mihomo 配置的文件头
+会写明「需要 mihomo 1.18 或更高」，同时登记为 KL-11。
+
+### 我是怎么验的
+
+- 八条断言：`TestCustomRuleKeepsNoResolve` / `...NormalizesWildcardSuffix` /
+  `...WildcardDomainBecomesSuffix` / `...KeywordStripsWildcard` /
+  `...CidrGetsMaskBothCores` / `...RejectsBadCidrWithReason` /
+  `...NoResolveIgnoredOnDomain` / `...SuffixIsNotRewritten`
+  （最后一条专门防「修过头」：普通后缀规则一个字都不许改）
+- 三组变异全部转红：去掉 no-resolve 识别、去掉通配符纠正、去掉掩码补全
+- 两种产物对着看：同一批自定义规则分别生成 mihomo YAML 与 sing-box JSON，
+  逐条比对规范化后的值一致
+
+### 已知边界
+
+后缀的连字符陷阱**没法自动纠正**——那需要知道你想匹配哪个域名。`applog.fqnovel.com`
+匹配不到 `log5-applog.fqnovel.com` 这件事，规则本身是「对」的，只是意图对不上字面。
+所以遇到带连字符的子域，请用 `DOMAIN-KEYWORD` 或者把完整域名写进 `DOMAIN`。
+另外 `no-resolve` 在 sing-box 里没有对应开关（它的 `ip_cidr` 直接比对目标地址），
+写了会被忽略并提示。
+
+---
+
 ## v2.1.2
 
 ### 分流：补上两个嗅探盲区，第三条兜底我实测后撤了

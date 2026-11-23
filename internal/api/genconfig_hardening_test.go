@@ -149,3 +149,30 @@ func TestMihomoRulesAvoidBareGeoip(t *testing.T) {
 		}
 	}
 }
+
+// 产物必须自己声明规则集格式的版本下限。
+//
+// mrs 是二进制格式，旧内核不会退回按文本解析，而是直接报 format 不支持。
+// 把下限只写在更新日志里等于没写：拿到文件的人看不到更新日志，只会看到
+// 「导入成功、分流失效」，然后开始怀疑规则顺序和 DNS。
+func TestMihomoHeaderDeclaresMrsFloor(t *testing.T) {
+	sets, err := normalizeSets(genReq{Core: "mihomo", Sets: []setPolicy{
+		{ID: "geosite-cn", Policy: "DIRECT"},
+	}})
+	if err != nil {
+		t.Fatalf("构造规则集: %v", err)
+	}
+	warns := new([]string)
+	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	if !strings.Contains(g.header, "mrs") {
+		t.Errorf("用了 mrs 规则集却没在文件头说明格式与版本要求：\n%s", g.header)
+	}
+	if !strings.Contains(g.header, "1.18") {
+		t.Errorf("文件头缺版本下限：\n%s", g.header)
+	}
+	// 没有规则集时不该出现这条提示，否则会误导只做直连分流的人去升内核。
+	g2 := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	if strings.Contains(g2.header, "mrs") {
+		t.Errorf("没选规则集却提示 mrs：\n%s", g2.header)
+	}
+}
