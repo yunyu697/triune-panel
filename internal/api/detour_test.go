@@ -187,12 +187,71 @@ func TestSingboxClientConfigStarts(t *testing.T) {
 	}
 }
 
+// freeTCPPort 同 livecheck 里那份：在非 ephemeral 段里用 0.0.0.0 探测。
+// 用 :0 会拿到系统临时端口，探测地址与内核监听地址又不一致，两者之间的窗口
+// 足以让门禁假红一次（详见 internal/livecheck/live_test.go 的同名函数）。
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("取空闲端口失败: %v", err)
+	for p := 31100; p < 32100; p++ {
+		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", p))
+		if err != nil {
+			continue
+		}
+		_ = l.Close()
+		return p
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatalf("31100–32099 段内没有可用端口")
+	return 0
+}
+
+// 豁免规则在 sing-box 侧用的是 domain_keyword。这个字段在 1.11 与 1.12 都在，
+// 但「字段存在」不等于「这个位置接受它」——route rule 拒收未知键时是
+// FATAL start service，而 check 是绿的。所以真启动一次。
+func TestSingboxClientStartsWithBlockExemptRules(t *testing.T) {
+	bin := os.Getenv("TRINE_SINGBOX_BIN")
+	if bin == "" {
+		t.Skip("未设置 TRINE_SINGBOX_BIN，跳过真机启动校验")
+	}
+	v, err := parseSBVersion(os.Getenv("TRINE_SINGBOX_VER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	warns := []string{}
+	g := genSingbox("client", v, testNodes(), nil, blockExemptRules, &warns, ruleMirrorSel{}, bypassSpec{})
+	port := freeTCPPort(t)
+	if inbounds, ok := g.doc["inbounds"].([]any); ok {
+		for _, it := range inbounds {
+			if m, ok := it.(map[string]any); ok {
+				m["listen_port"] = port
+			}
+		}
+	}
+	raw, err := json.MarshalIndent(g.doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "client.json")
+	if err := os.WriteFile(file, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	cmd := exec.Command(bin, "run", "-c", file)
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动 sing-box 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("sing-box 启动即退出（%v）：\n%s", err, buf.String())
+	case <-time.After(3 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+	if strings.Contains(buf.String(), "FATAL") {
+		t.Fatalf("启动日志里有 FATAL：\n%s", buf.String())
+	}
 }

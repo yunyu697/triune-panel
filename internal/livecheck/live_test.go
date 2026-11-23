@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"os"
@@ -459,14 +460,27 @@ func TestXrayConfigStarts(t *testing.T) {
 	}
 }
 
+// freePort 取一个「刚探测过确实是空的」端口。
+//
+// 早先的实现用 :0 让系统分配，落在 ephemeral 段（macOS 49152–65535）。问题在于
+// 探测用的地址是 127.0.0.1，而内核绑定的是 0.0.0.0——从探测关闭到内核真正 bind
+// 之间有个窗口，系统完全可能把该端口分给别的连接，于是报
+// `bind: address already in use`，看起来像产物坏了。2026-11-24 发 v2.1.4 时
+// 就这样假红过一次（单独重跑三次全过）。
+//
+// 改为在非 ephemeral 段里顺序探测，并用 0.0.0.0 与内核实际监听地址一致。
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("取空闲端口失败: %v", err)
+	for p := 30000; p < 31000; p++ {
+		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", p))
+		if err != nil {
+			continue
+		}
+		_ = l.Close()
+		return p
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("30000–30999 段内没有可用端口")
+	return 0
 }
 
 var (

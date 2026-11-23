@@ -1205,6 +1205,72 @@ var fakeIPFilter = []string{
 	"xbox.*.microsoft.com", "+.xboxlive.com", "time.*.com", "ntp.*.com",
 }
 
+// blockExemptRules 是「即使命中了拦截类规则集，也必须直连」的域名。
+//
+// 与 systemDirectRules 的失效模式不同：那份是「走代理会坏」，这份是「被面板
+// 自己勾的拦截规则掐死会坏」。所以它**不进** fake-ip-filter、**不进** DNS 规则
+// 派生——豁免只影响路由判定，不影响解析。
+//
+// ── 为什么需要这份清单 ──
+// 「广告域名（通用全量）」geosite-category-ads-all 是上游的大杂烩分类：除真广告
+// 之外，它还收了国内 App 的日志上报域名。这些埋点一旦被 REJECT（直接 RST），
+// 不少 App 的埋点 SDK 会在冷启动阶段同步等首屏事件落盘，失败就退避重试——现象
+// 是**首屏一直转圈**，而 API、图片、SSO 全都正常，查分流永远查不出来。
+//
+// 2026-11-23 实测（OpenWrt 旁路由 + mihomo 1.19.34）：红果短剧首屏卡死，45 秒
+// 日志里 log5-applog.fqnovel.com 被拒 12 次，rtlog3/rtlog5-applog 同样密集重试；
+// 放行后首屏当场通过。同刻 api5-normal.fqnovel.com、封面 CDN、snssdk 系列全部
+// geosite-cn 直连且有 1.4 MB 下行——网络侧一直是通的，唯独埋点被掐。
+//
+// ── 准入判据（新增条目必须同时满足）──
+//  1. 属于应用自身的日志 / 埋点上报，不是第三方广告投放；
+//  2. 被 REJECT 会阻塞应用主流程，而不是「少一条上报」。仅凭「可能慢」不收；
+//  3. 写法必须覆盖同族变体——字节的埋点主机名是 log{N}-applog /
+//     rtlog{N}-applog，序号随时会变，逐条列举必然漏。
+//
+// ── 什么时候整份不生效 ──
+// 用户显式勾了「遥测 / 数据上报」规则集并设为 REJECT 时，一条都不插（见
+// blockExemptNeeded）：「隐私优先」预设就是这种意图，那边放行埋点等于违背
+// 用户的选择。这条判据把「顺手拦广告」与「明确要拦上报」区分开。
+var blockExemptRules = []string{
+	// 字节系应用日志上报。注意 log5-applog 里的 log5-applog 是**一个 DNS
+	// 标签**，连字符不是分隔符，所以 DOMAIN-SUFFIX,applog.fqnovel.com 永远
+	// 匹配不到它（这正是当初「加了规则却没生效」的原因），只能用 KEYWORD。
+	"DOMAIN-KEYWORD,applog,DIRECT",
+	// 字节自有接口域。实测 log.zijieapi.com 命中 ads-all 被拒；同域下还有
+	// mon / dig 等日志与配置接口，一并放行。该域是字节自己的 API 入口，
+	// 不含第三方广告联盟，不存在「放行了就漏广告」的问题。
+	"DOMAIN-SUFFIX,zijieapi.com,DIRECT",
+}
+
+// blockExemptWarn 插入豁免时给用户的说明。前端会常驻显示，所以写清「为什么」
+// 和「不想要时怎么办」，而不是一句「已自动处理」。
+const blockExemptWarn = "广告拦截已放行应用日志域名（applog / zijieapi.com）：" +
+	"拦掉它们会让部分 App 首屏卡死，而它们不是广告内容。" +
+	"要连埋点一起拦，请改用「隐私优先」预设；" +
+	"另有 App 卡首屏时，把它上报用的日志域名加成 DOMAIN-KEYWORD 自定义规则即可。"
+
+// blockExemptNeeded 判断本次生成是否需要插入拦截豁免。
+//
+// 只有「勾了全量广告规则集并设为 REJECT」才有误杀可言；没开拦截就不需要。
+// 而一旦用户明确勾了遥测规则集并 REJECT，说明他要的就是连埋点一起拦——此时
+// 不插入，把选择权留给他。
+func blockExemptNeeded(sets []normSet) bool {
+	adBlocked, telemetryBlocked := false, false
+	for _, s := range sets {
+		if s.Policy != "REJECT" {
+			continue
+		}
+		switch s.Tag {
+		case "geosite-category-ads-all":
+			adBlocked = true
+		case "geosite-category-telemetry":
+			telemetryBlocked = true
+		}
+	}
+	return adBlocked && !telemetryBlocked
+}
+
 // systemDirectRules 是「走代理就会功能失效」的域名，无条件直连。
 //
 // ── 准入判据（新增条目必须同时满足，缺一条就不该放进来）──
@@ -1469,6 +1535,19 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 			rule += ",no-resolve"
 		}
 		rules = append(rules, rule)
+	}
+	// 广告拦截豁免：必须排在**所有规则集之前**——ads-all 的 RULE-SET 一旦先
+	// 命中，这些应用日志域名就被 RST 了，App 首屏卡死，而配置看起来毫无问题。
+	// 排在自定义规则之后：用户仍可用自定义 REJECT 主动覆盖（那是他的显式选择）。
+	if blockExemptNeeded(sets) {
+		for _, line := range blockExemptRules {
+			typ, val, pol, ok := parseCustomRule(line)
+			if !ok {
+				continue // 清单是我们自己写的，解析失败只可能是代码 bug
+			}
+			rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
+		}
+		*warns = append(*warns, blockExemptWarn)
 	}
 	// 系统关键服务强制直连：必须在所有规则集之前——geosite-microsoft / onedrive
 	// 被设成 PROXY 时，若不前置，登录域名会先被 PROXY 规则吃掉（用户反馈的
@@ -1790,6 +1869,12 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 			}
 			routeRules = append(routeRules, setOut(body, pol))
 		}
+	}
+	// 广告拦截豁免：与 mihomo 同一份清单、同一位置（规则集之前）。sing-box 的
+	// 规则是顺序匹配，放进 rule_set 之后等于没写——REJECT 先命中就 RST 了。
+	if blockExemptNeeded(sets) {
+		applyBuiltin(blockExemptRules)
+		*warns = append(*warns, blockExemptWarn)
 	}
 	applyBuiltin(systemDirectRules)
 	applyBuiltin(systemProxyDomains)

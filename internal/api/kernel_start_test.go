@@ -95,3 +95,37 @@ func TestMihomoRouterConfigPassesCheck(t *testing.T) {
 		t.Fatalf("校验日志里有 fatal：\n%s", out)
 	}
 }
+
+// 豁免规则用的是 DOMAIN-KEYWORD / DOMAIN-SUFFIX。关键字规则类型写错时
+// mihomo 未必报错——宽容忽略之后表现为「规则在、永不命中」，正是这次红果
+// 事故的形态。所以除了产物断言，还要让真内核亲口认一次。
+//
+// 这里走自定义规则通道传同一份清单，不带远程规则集：要证的是「类型合法」，
+// 不是「镜像拉得下来」（后者归 livecheck 与门禁管，别让本用例依赖网络）。
+func TestMihomoRouterAcceptsBlockExemptRules(t *testing.T) {
+	bin := os.Getenv("TRINE_MIHOMO_BIN")
+	if bin == "" {
+		t.Skip("未设置 TRINE_MIHOMO_BIN，跳过真机校验")
+	}
+	warns := []string{}
+	g := genMihomo("main-router", testNodes(), nil, blockExemptRules, &warns, ruleMirrorSel{}, bypassSpec{})
+	g.doc["mixed-port"] = freeTCPPort(t)
+	g.doc["external-controller"] = "127.0.0.1:" + strconv.Itoa(freeTCPPort(t))
+
+	raw, err := yaml.Marshal(g.doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(file, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "-t", "-d", dir, "-f", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("mihomo -t 拒绝豁免规则（%v）：\n%s", err, out)
+	}
+	if strings.Contains(string(out), "level=fatal") {
+		t.Fatalf("校验日志里有 fatal：\n%s", out)
+	}
+}

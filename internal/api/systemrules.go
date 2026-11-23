@@ -142,7 +142,10 @@ func ruleListMatches(rules []string, policy, domain string) bool {
 // 少了 100.64.0.0/10 这种变化，用户同样会撞上奇怪的现象。
 func systemRuleSnapshot() []string {
 	out := make([]string, 0,
-		len(systemDirectRules)+len(systemProxyDomains)+len(systemProxyCIDRs)+len(privateCIDRs)+len(systemDirectPorts))
+		len(blockExemptRules)+len(systemDirectRules)+len(systemProxyDomains)+len(systemProxyCIDRs)+len(privateCIDRs)+len(systemDirectPorts))
+	// 拦截豁免也算「影响分流结果」：老配置少了这两条，勾着广告拦截时
+	// 还是会踩到「App 首屏卡死」，所以必须让它在漂移里显示出来。
+	out = append(out, blockExemptRules...)
 	out = append(out, systemDirectRules...)
 	out = append(out, systemProxyDomains...)
 	for _, c := range systemProxyCIDRs {
