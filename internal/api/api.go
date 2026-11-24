@@ -53,6 +53,9 @@ type Server struct {
 	diskVerMu sync.Mutex
 	diskVer   string
 	diskVerAt time.Time
+
+	// 自更新接力凭证的读-校验-删要串行，否则并发请求能换出两张会话（见 panelresume.go）
+	resumeMu sync.Mutex
 }
 
 // session 结构已迁到 sessions.go（带 IP / UA / 活跃时间，供「登录设备」页使用）。
@@ -78,7 +81,10 @@ func (a *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", a.handleHealthz)            // 免认证探活，供 systemd / 监控使用
 	mux.HandleFunc("GET /metrics", a.handleMetrics)            // Prometheus 指标，凭 metrics_token 访问（默认关闭）
 	mux.HandleFunc("GET /api/public/info", a.handlePublicInfo) // 免认证，仅版本号
-	mux.HandleFunc("GET /sub/{token}", a.handleSub)            // 订阅，凭 sub_token
+	// 自更新后的会话接力：重启清空了内存会话表，这张一次性凭证是唯一还能
+	// 认人的东西（见 panelresume.go 的安全边界说明）。
+	mux.HandleFunc("POST /api/session/resume", a.handleSessionResume)
+	mux.HandleFunc("GET /sub/{token}", a.handleSub) // 订阅，凭 sub_token
 
 	// ---- PWA 静态资源（免认证，必须挂在站点根上）----
 	// 作用域规则见 pwa.go 顶部说明：sw.js / manifest 一旦放进子目录就失效。

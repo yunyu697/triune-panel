@@ -20,6 +20,7 @@ design-preview/
 !.e2e/browser.js
 !.e2e/bypass-server.js
 !.e2e/lan-dns.js
+!.e2e/panel-update.js
 !.e2e/configs-batch.js
 !.e2e/first-paint-flicker.js
 !.e2e/inbound-addr.js

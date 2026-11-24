@@ -933,6 +933,29 @@ document.addEventListener("click", e => {
     b.classList.toggle("on", b.dataset.v === rad));
 })();
 
+/* 401 的统一出口。
+   单独抽成函数是为了让「更新期间不能踢人」这条规则可以被直接验证：
+   自更新重启时一批后台请求会同时 401，这时 dropSession 会清掉本地 token，
+   把「接力凭证还能换回会话」的前提毁掉，还会在等待层底下闪一下登录页。
+   返回 true 表示确实把人踢回了登录页。 */
+function authLost() {
+  if (UPD.on) return false;
+  /* 另一个标签页可能刚换过 token（自更新后恢复的会话就写在这里）。这时把
+     localStorage 一起清掉，等于顺手废掉那张能用的会话——用户在那边刷一下
+     又得重登。所以只清「确实是我这张」：库里的不是我，就只清内存身份。
+     这条没法做自动化覆盖：需要两个标签页共享 localStorage 且各自持有不同
+     token，而演示模式的 TOKEN 恒为空，构造不出来。 */
+  let stored = "";
+  try { stored = localStorage.getItem("triune_token") || ""; } catch (_) {}
+  if (stored && stored !== TOKEN) {
+    TOKEN = ""; ROLE = ""; ME = { user: "", role: "" };
+  } else {
+    dropSession();
+  }
+  showLogin();
+  return true;
+}
+
 /* ================= API（含演示 mock） ================= */
 async function req(path, opts = {}) {
   const m = opts.method || "GET";
@@ -948,7 +971,9 @@ async function req(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { dropSession(); showLogin(); throw new Error(j.error || "unauthorized"); }
+  if (r.status === 401) {
+    throw new Error(authLost() ? (j.error || "unauthorized") : "面板正在更新，请稍候");
+  }
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
@@ -958,7 +983,9 @@ async function req(path, opts = {}) {
 async function fetchText(path) {
   if (DEMO) return demoText(path);
   const r = await fetch(path, { headers: { Authorization: "Bearer " + TOKEN } });
-  if (r.status === 401) { dropSession(); showLogin(); throw new Error("登录已过期"); }
+  if (r.status === 401) {
+    throw new Error(authLost() ? "登录已过期" : "面板正在更新，请稍候");
+  }
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j.error || ("HTTP " + r.status));
@@ -1611,6 +1638,21 @@ async function mockRoute(path, opts) {
   if (api.startsWith("cores/") && api.endsWith("/rollback")) { const c=api.split("/")[1]; return {ok:1,restored:"1.9.5-20261001-120000.bak",component:c}; }
   if (api === "panel/backups") return {current_version:"v0.5.0-demo",executable:"/opt/triune-panel/triune-panel",backups:["v0.4.0-20261015-090000.bak","v0.3.0-20261002-180000.bak"],bak_exists:true};
   if (api === "panel/rollback") { await new Promise(r=>setTimeout(r,600)); return {ok:1,msg:"回滚完成，正在重启..."}; }
+  /* 自更新与接力换票：演示页没有真进程可 exec，但状态机要走真的。
+     分支用 window.__demoUpdate 指定（ok / no-ticket / resume-fail /
+     restart-fail / timeout），e2e 靠它把四种结局都跑一遍。 */
+  if (api === "self-update") {
+    await new Promise(r => setTimeout(r, 400));   // 模拟下载校验耗时
+    const mode = window.__demoUpdate || "ok";
+    if (mode === "download-fail") throw new Error("下载失败: HTTP 404");
+    return { ok:"1", sha256:"demo", new_version:"v9.9.9-demo",
+             resume_token: mode === "no-ticket" ? "" : "demo-ticket" };
+  }
+  if (api === "session" && rest.startsWith("/resume")) {
+    if (window.__demoUpdate === "resume-fail")
+      throw new Error("接力凭证已过期（有效期 5 分钟），请重新登录");
+    return { token:"demo-resumed-token", user:"admin", role:"owner" };
+  }
   return {};
 }
 
@@ -7955,17 +7997,278 @@ async function submitHTTPS() {
     $("certmsg").textContent = "正在为 " + domain + " 签发证书…";
   } catch (e) { toast("启用失败：" + e.message, "err"); }
 }
-async function selfUpdate() {
-  if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
-  toast("下载中…", "info");
+/* ---- 面板自更新 ----
+
+   为什么不只是「刷新前等一下」：自更新会把进程整个换掉（syscall.Exec），
+   内存里的会话表随之清空，所以刷新回来必然 401。旧实现在这里直接
+   `setTimeout(reload, 5000)` ——固定 5 秒是猜的，猜早了撞上重启中的连接拒绝，
+   猜晚了白等；而且那 5 秒里页面还停在旧界面，用户点任何东西都只会失败，
+   点「退出登录」还会把自己那点残留 token 清掉。
+
+   现在的做法：
+     1. 点更新的那一刻就盖一层不可关闭的等待层，把误操作挡在外面
+     2. 轮询免认证的 /api/public/info 判「新进程起来了没有」，不靠猜秒数
+     3. 起来了就拿服务端在重启前签发的一次性凭证换回会话（见 panelresume.go），
+        换到了直接 reload 回原页面；换不到才让人重新登录
+     4. 起不来看得出原因：exec 失败会被后端记成 restart_failed，直接摊开说
+
+   UPD 只描述「现在停在哪一步」，所有 DOM 只在 upd* 函数里改，便于 e2e 断言。 */
+const UPD = { on: false, old: "", expect: "", ticket: "", t0: 0, timer: null };
+
+/* 重启判定的总预算。exec 正常 1~3 秒；90 秒是给「机器很慢 + 内核起得慢」的余量，
+   再长就只是让用户盯着一个不动的圈。演示模式要能在 e2e 里跑完，单独放短。 */
+function updBudget() {
+  const o = typeof window !== "undefined" ? +window.__updBudgetMs : 0;
+  return (o > 0) ? o : (DEMO ? 4000 : 90000);
+}
+
+function stopUpdPoll() {
+  if (UPD.timer) { clearTimeout(UPD.timer); UPD.timer = null; }
+}
+
+function updShow(title, sub) {
+  UPD.on = true;
+  const box = $("upwait");
+  box.classList.remove("hide", "done", "fail");
+  $("upwait_act").classList.add("hide");
+  $("upwait_hint").classList.add("hide");
+  $("upwait_hint").innerHTML = "";
+  $("upwait_title").textContent = title;
+  $("upwait_sub").textContent = sub;
+  $("upwait_ver").textContent = "";
+  for (const li of $("upwait_steps").children) li.className = "";
+  // 等待层自己在最顶层；同时把页面滚动按住，别让底下的内容跟着滑
+  document.documentElement.classList.add("upwaiting");
+}
+
+function updMsg(title, sub) {
+  $("upwait_title").textContent = title;
+  $("upwait_sub").textContent = sub;
+}
+
+/* 走到第 n 步：之前的都算完成，当前高亮。n 超出步数就是全完成。 */
+function updStep(n, txt) {
+  for (const li of $("upwait_steps").children) {
+    const s = +li.dataset.step;
+    li.className = s < n ? "ok" : (s === n ? "on" : "");
+    if (s === n && txt) li.textContent = txt;
+  }
+}
+
+function updHide() {
+  UPD.on = false;
+  stopUpdPoll();
+  $("upwait").classList.add("hide");
+  document.documentElement.classList.remove("upwaiting");
+}
+
+/* 判定结束但没成：标题说结论，副标题说原因，hint 给下一步动作。
+   goLabel/retry 决定底部按钮长什么样——失败时是「刷新页面 / 再等一会儿」，
+   需要重登时只留一个「去登录」。 */
+function updStop(kind, title, sub, hint, opts) {
+  UPD.on = false;
+  stopUpdPoll();
+  const o = opts || {};
+  UPD.goReload = !!o.reload;
+  $("upwait").classList.add(kind);   // done / fail，只影响圆环颜色
+  updMsg(title, sub);
+  const h = $("upwait_hint");
+  if (hint) { h.innerHTML = hint; h.classList.remove("hide"); } else { h.classList.add("hide"); }
+  const go = document.querySelector('[data-act="upwaitGo"]');
+  const retry = document.querySelector('[data-act="upwaitRetry"]');
+  if (go) go.textContent = o.goLabel || "刷新页面";
+  if (retry) retry.classList.toggle("hide", !o.retry);
+  $("upwait_act").classList.remove("hide");
+}
+
+/* 更新请求本身。返回值统一成 {status, body}：
+   status === 0 表示「连不上」——那一瞬间可能正是进程在 exec，不能当失败。 */
+async function updCall(path, body) {
+  if (DEMO) {
+    try { return { status: 200, body: await mockRoute(path, { method: "POST", body }) }; }
+    catch (e) { return { status: 401, body: { error: e.message } }; }
+  }
   try {
-    const j = await req("/api/self-update", { method:"POST", body:{ url:$("up_url").value, sha256:$("up_sha").value } });
-    // 记住期望版本：刷新回来先核对一次。只报「更新完成」是不够的——
-    // 重启那一步失败时进程仍跑旧映像，用户得等到发现版本号没变才起疑。
-    try { sessionStorage.setItem("expectVer", normVer(j.new_version || "")); } catch(_) {}
-    toast("更新完成，面板重启中，5 秒后刷新页面");
-    setTimeout(() => location.reload(), 5000);
-  } catch (e) { toast(e.message, "err"); }
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+      body: JSON.stringify(body || {})
+    });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, body: j };
+  } catch (e) {
+    return { status: 0, body: { error: e.message } };
+  }
+}
+
+/* 探「现在跑的是哪个版本」。必须用免认证端点：换进程的那一刻旧 token 必然
+   401，用 /api/version 探会在成功的那一刻恰好看不见新版本。 */
+async function probePanelVersion() {
+  if (DEMO) return demoProbeVersion();
+  const r = await fetch("/api/public/info", { cache: "no-store" });
+  if (!r.ok) return "";
+  const j = await r.json().catch(() => ({}));
+  return j.version || "";
+}
+
+/* 演示模式下的假时间线：前几次仍是旧版本，之后变成新版本。
+   分支由 window.__demoUpdate 指定，e2e 用它覆盖四种结局。 */
+let DEMO_UPD_TICKS = 0;
+function demoUpdateReset() { DEMO_UPD_TICKS = 0; }
+function demoProbeVersion() {
+  const mode = (typeof window !== "undefined" && window.__demoUpdate) || "ok";
+  DEMO_UPD_TICKS++;
+  const old = "v2.1.8-demo";
+  if (mode === "restart-fail" || mode === "timeout") return old;  // 进程始终没换
+  return DEMO_UPD_TICKS >= 2 ? "v9.9.9-demo" : old;
+}
+
+async function selfUpdate() {
+  if (isViewer()) { toast("当前账号为只读角色，无权执行此操作", "err"); return; }
+  const url = ($("up_url").value || "").trim();
+  if (!DEMO && !url) { toast("先填新版本二进制的下载地址", "err"); return; }
+  if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
+
+  UPD.old = ($("curver").textContent || "").trim();
+  UPD.expect = ""; UPD.ticket = "";
+  demoUpdateReset();
+  try { sessionStorage.removeItem("updResume"); } catch (_) {}
+  updShow("正在更新面板", "正在下载并校验新版本，这一步可能要几十秒…");
+  updStep(1);
+  if (UPD.old) $("upwait_ver").textContent = "当前版本 " + UPD.old;
+
+  const r = await updCall("/api/self-update", { url, sha256: ($("up_sha").value || "").trim() });
+  if (r.status !== 200) {
+    // 下载失败 / sha256 不符 / 新二进制跑不起来，全在这里，进程一步都没动
+    const why = (r.body && r.body.error) || (r.status === 0 ? "连接中断" : "HTTP " + r.status);
+    updStop("fail", "更新没有开始", why,
+      "现有版本还在跑，什么都没变。核对下载地址与 sha256 后可以重试。",
+      { goLabel: "知道了", retry: false });
+    return;
+  }
+
+  UPD.expect = normVer((r.body && r.body.new_version) || "");
+  UPD.ticket = (r.body && r.body.resume_token) || "";
+  if (UPD.ticket) { try { sessionStorage.setItem("updResume", UPD.ticket); } catch (_) {} }
+
+  updStep(2, "替换二进制并重启");
+  updMsg("正在重启面板", "面板会换一个新进程，这几秒页面连不上是正常的。");
+  $("upwait_ver").textContent = UPD.old
+    ? UPD.old + " → " + (UPD.expect || "新版本")
+    : (UPD.expect || "");
+  UPD.t0 = Date.now();
+  await updWatch();
+}
+
+/* 轮询直到「新进程起来了」。判据是版本号匹配期望值；期望值丢失时
+   （响应被 exec 掐断）退化成「版本变了就算」。 */
+async function updWatch() {
+  stopUpdPoll();
+  const budget = updBudget();
+  const step = async () => {
+    if (!UPD.on) return;
+    let v = "";
+    try { v = await probePanelVersion(); } catch (e) { v = ""; }
+    if (!UPD.on) return;
+
+    const nv = normVer(v);
+    const hit = v && (UPD.expect
+      ? nv === UPD.expect
+      : (UPD.old ? nv !== normVer(UPD.old) : true));
+    if (hit) { await updBackOnline(v); return; }
+
+    if (Date.now() - UPD.t0 > budget) { await updGiveUp(); return; }
+    UPD.timer = setTimeout(step, 1200);
+  };
+  UPD.timer = setTimeout(step, 900);
+}
+
+/* 新进程回来了。有凭证就换票，换到直接 reload 回原页面；
+   换不到（过期 / 用过了 / 更新期间改过密码）就明说，别丢一句 unauthorized。 */
+async function updBackOnline(v) {
+  stopUpdPoll();
+  updStep(3, "等待面板回来");
+  $("upwait_sub").textContent = "面板已经起来了，正在恢复登录状态…";
+
+  if (!UPD.ticket) {
+    updNeedLogin("", "这次没能自动恢复登录（没有拿到接力凭证）。账密没有变化，登录后仍会回到原来的页面。");
+    return;
+  }
+  const r = await updCall("/api/session/resume", { token: UPD.ticket });
+  if (r.status !== 200 || !r.body || !r.body.token) {
+    const why = (r.body && r.body.error) || "恢复登录失败";
+    updNeedLogin(why, "账密没有变化，登录后仍会回到原来的页面。");
+    return;
+  }
+
+  // 先落盘再 reload：reload 后 boot 直接按新 token 画主界面，不会再撞 401
+  TOKEN = r.body.token;
+  try {
+    localStorage.setItem("triune_token", TOKEN);
+    if (r.body.user) localStorage.setItem("triune_user", r.body.user);
+    if (r.body.role) localStorage.setItem("triune_role", r.body.role);
+    sessionStorage.removeItem("updResume");
+    sessionStorage.setItem("expectVer", normVer(v));   // loadVersion 会据此报「已更新到」
+  } catch (_) {}
+
+  UPD.on = false;
+  $("upwait").classList.add("done");
+  $("upwait_title").textContent = "更新完成";
+  $("upwait_sub").textContent = "已更新到 " + v + "，正在回到原来的页面…";
+  updStep(4);
+  setTimeout(() => location.reload(), 700);
+}
+
+/* 更新完成但会话没能接上：把登录页准备好，再让用户自己按「去登录」。
+   不直接 showLogin 是因为等待层还盖着——先切页面、再撤层，中间不会闪。 */
+function updNeedLogin(why, hint) {
+  dropSession();
+  showLogin();
+  $("upwait").classList.add("done");
+  updStop("done", "更新完成，请重新登录", why || "面板重启后需要重新登录一次。",
+    hint || "", { goLabel: "去登录", retry: false });
+}
+
+/* 等不到新进程。先分辨「真的换了文件但没起来」——那种情况进程还是旧的，
+   旧 token 仍然有效，后端会把原因写在 restart_failed 里。 */
+async function updGiveUp() {
+  let failed = "";
+  if (DEMO) {
+    if (window.__demoUpdate === "restart-fail") {
+      failed = "二进制已更新，但重启失败（演示）：进程仍在运行 v2.1.8-demo";
+    }
+  } else {
+    try {
+      const r = await fetch("/api/version", { headers: { Authorization: "Bearer " + TOKEN } });
+      if (r.ok) { const j = await r.json(); failed = j.restart_failed || ""; }
+    } catch (_) {}
+  }
+  if (failed) {
+    updStop("fail", "更新没有完成", failed,
+      "配置与数据都没受影响。回滚：命令行跑 <code>tp update --rollback</code>，" +
+      "或用「设置 → 运维 → 面板自更新」里的回滚入口。",
+      { goLabel: "刷新页面", reload: true, retry: false });
+    return;
+  }
+  updStop("fail", "面板还没有回来", "等了一会儿没连上新进程。可能只是比预期慢，也可能这次没成功。",
+    "可以先「再等一会儿」；仍然不行就刷新页面看版本号有没有变。" +
+    "没变就回滚：<code>tp update --rollback</code>。",
+    { goLabel: "刷新页面", reload: true, retry: true });
+}
+
+/* 等待层上的两个按钮。做成具名函数是因为动作分发按 window[name] 找。 */
+function upwaitGo() {
+  if (UPD.goReload) { location.reload(); return; }
+  updHide();
+}
+function upwaitRetry() {
+  $("upwait").classList.remove("fail");
+  updMsg("继续等待面板", "正在重新确认进程状态…");
+  $("upwait_act").classList.add("hide");
+  $("upwait_hint").classList.add("hide");
+  UPD.on = true;
+  UPD.t0 = Date.now();
+  updWatch();
 }
 /* 外部节点是否混入订阅：开关只影响订阅输出，不动本机内核配置。
    默认关闭——外部节点是全局的，混进去等于给每个用户都塞上别人的节点。 */

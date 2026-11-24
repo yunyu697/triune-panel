@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.1.8 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.1.9 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1211,6 +1211,46 @@ canvas{display:block;width:100%}
     .cmd-panel,.tpop{box-shadow:var(--float-shadow)}
   }
 }
+
+/* ==================================================================
+   面板自更新等待层（见 app.js 的 selfUpdate）
+   - **不透明**底色，不是毛玻璃：更新期间它下面可能是登录表单，也可能是
+     已经过期的旧页面，两者都不该被看见，更不该被点到
+   - 没有关闭按钮是刻意的：那几秒面板确实什么都做不了，给个「关闭」只会
+     让人关掉之后再撞一次 401
+   - 只在「下载中 / 重启中 / 失败」出现；更新一完成就整层撤掉
+   ================================================================== */
+.upwait{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9000;display:flex;
+  align-items:center;justify-content:center;padding:20px;background:var(--bg);overflow:auto}
+/* 等待层在时把底下页面按住：手机上滑动会穿透到 .main 的滚动容器 */
+html.upwaiting body{overflow:hidden}
+.upwait-card{width:100%;max-width:430px;text-align:center;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);
+  padding:30px 26px 22px}
+.upwait-ring{width:44px;height:44px;margin:0 auto 18px;position:relative}
+.upwait-ring::before,.upwait-ring::after{content:"";position:absolute;
+  top:0;right:0;bottom:0;left:0;border-radius:50%}
+.upwait-ring::before{border:3px solid var(--line)}
+.upwait-ring::after{border:3px solid transparent;border-top-color:var(--acc);
+  animation:upwaitSpin .9s linear infinite}
+.upwait.done .upwait-ring::after{border-color:var(--ok);animation:none}
+.upwait.fail .upwait-ring::after{border-color:var(--err);animation:none}
+@keyframes upwaitSpin{to{transform:rotate(360deg)}}
+.upwait-card h3{font-size:16.5px;margin-bottom:6px;color:var(--text)}
+.upwait-sub{color:var(--muted);font-size:13px;min-height:21px}
+.upwait-ver{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px}
+.upwait-steps{list-style:none;margin:18px 0 0;padding:0;text-align:left}
+.upwait-steps li{position:relative;padding:6px 0 6px 26px;font-size:12.5px;
+  color:var(--muted);transition:color var(--t-fast)}
+.upwait-steps li::before{content:"";position:absolute;left:4px;top:12px;width:9px;height:9px;
+  border:2px solid var(--line);border-radius:50%;transition:background var(--t-fast),border-color var(--t-fast)}
+.upwait-steps li.on{color:var(--text)}
+.upwait-steps li.on::before{border-color:var(--acc);background:var(--acc)}
+.upwait-steps li.ok::before{border-color:var(--ok);background:var(--ok)}
+.upwait-act{margin-top:18px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.upwait-hint{margin-top:14px;font-size:12px;color:var(--muted);line-height:1.75;text-align:left}
+.upwait-hint code{font-family:var(--mono);font-size:11.5px;background:var(--hover);
+  padding:1px 5px;border-radius:4px}
 </style>
 </head>
 <body>
@@ -2788,6 +2828,28 @@ canvas{display:block;width:100%}
     <div class="more-h"><b>全部页面</b><span class="spacer"></span>
       <button class="btn sm" data-act="closeMoreSheet">关闭</button></div>
     <div id="moreBody"></div>
+  </div>
+</div>
+
+<!-- 面板自更新等待层。全程不可关闭（没有关闭按钮），
+     作用是「挡住误操作 + 把 1~3 秒的空窗交代清楚」。
+     文案与状态由 app.js 的 selfUpdate / updWatch 驱动。 -->
+<div id="upwait" class="upwait hide" role="alertdialog" aria-modal="true" aria-labelledby="upwait_title">
+  <div class="upwait-card">
+    <div class="upwait-ring" aria-hidden="true"></div>
+    <h3 id="upwait_title">正在更新面板</h3>
+    <p class="upwait-sub" id="upwait_sub">正在下载新版本…</p>
+    <div class="upwait-ver" id="upwait_ver"></div>
+    <ol class="upwait-steps" id="upwait_steps">
+      <li data-step="1">下载并校验新版本</li>
+      <li data-step="2">替换二进制并重启</li>
+      <li data-step="3">等待面板回来</li>
+    </ol>
+    <div class="upwait-act hide" id="upwait_act">
+      <button class="btn primary" data-act="upwaitGo">进入面板</button>
+      <button class="btn" data-act="upwaitRetry">再等一会儿</button>
+    </div>
+    <p class="upwait-hint hide" id="upwait_hint"></p>
   </div>
 </div>
 

@@ -82,7 +82,7 @@ func (a *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 			ID: c.ID, Name: c.Name, Up: up, Down: down, Total: total,
 			QuotaGB: c.QuotaGB, Enabled: c.Enabled, Exceeded: exceeded,
 			Warn: !exceeded && c.QuotaGB > 0 && pct >= float64(warnPctD),
-			Pct: pct, Expiring: expiring, Expired: expired,
+			Pct:  pct, Expiring: expiring, Expired: expired,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Total > out[j].Total })
@@ -375,7 +375,19 @@ func (a *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// 5. 重启（exec 替换进程映像，监听与数据无缝衔接）
 	a.auditOK(r, AuditUpdate, "panel", "面板自更新到 "+newVer)
-	writeJSON(w, 200, map[string]string{"ok": "1", "sha256": got, "new_version": newVer, "msg": "更新完成，正在重启..."})
+	// 6. 接力凭证：exec 一发生，内存里的会话表就没了，这张票是重启后唯一
+	//    还能认回这个账号的东西（见 panelresume.go）。
+	//    签不出来不算失败——大不了重新登录一次；不能让「免重登」这个便利
+	//    把更新本身搞砸，所以这里忽略错误、只决定响不带上它。
+	resumeTok, rerr := a.issueUpdateResume(a.currentUser(r))
+	if rerr != nil {
+		log.Printf("[update] 签发接力凭证失败（更新照常进行，重启后需重新登录）: %v", rerr)
+	}
+	out := map[string]string{"ok": "1", "sha256": got, "new_version": newVer, "msg": "更新完成，正在重启..."}
+	if resumeTok != "" {
+		out["resume_token"] = resumeTok
+	}
+	writeJSON(w, 200, out)
 	go a.restartSelf(exe, "更新到 "+newVer)
 }
 
@@ -444,7 +456,7 @@ func selfExeAt(p string) (string, error) {
 }
 
 // restartSelf 用 exec 把当前进程映像换成刚替换好的二进制。what 是给人看的动作描述
-//（"更新到 v1.0.9" / "回滚到 v1.0.8"），只用于失败时的那句话。
+// （"更新到 v1.0.9" / "回滚到 v1.0.8"），只用于失败时的那句话。
 //
 // exec 成功时**不会返回**——进程映像已经被换掉了。走到 return 就说明它失败了，
 // 而失败后进程会继续以**旧映像**跑下去（新二进制只在磁盘上）。这时面板对外
