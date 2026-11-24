@@ -85,8 +85,10 @@ func momoInbounds(caps sbCaps) []any {
 // 规则集（download_detour:direct）、自定义规则、绕过节点服务器、私网直连这些
 // 逻辑一旦复制就会各自漂移，而 momo 需要的只是「入口换掉 + DNS 走 fakeip」。
 func genMomo(ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string,
-	warns *[]string, mir ruleMirrorSel, bypass bypassSpec) *generator {
-	g := genSingbox("main-router", ver, nodes, sets, customRules, warns, mir, bypass)
+	warns *[]string, opts genOpts) *generator {
+	// 局域网 DNS 也要透传：momo 的 DNS 规则是从 genSingbox 的 rules 上追加的，
+	// 不透传就等于「这三个目标里有一个不认这个设置」。
+	g := genSingbox("main-router", ver, nodes, sets, customRules, warns, opts)
 	doc := g.doc
 
 	doc["inbounds"] = momoInbounds(capsFor(ver))

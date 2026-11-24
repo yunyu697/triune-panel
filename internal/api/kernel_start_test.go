@@ -29,7 +29,7 @@ func TestMihomoClientConfigStarts(t *testing.T) {
 		t.Skip("未设置 TRINE_MIHOMO_BIN，跳过真机启动校验")
 	}
 	warns := []string{}
-	g := genMihomo("client", testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), nil, nil, &warns, genOpts{})
 
 	// 端口全部换掉：本机 7890 / 9090 很可能是用户自己在跑的实例。
 	g.doc["mixed-port"] = freeTCPPort(t)
@@ -78,7 +78,7 @@ func TestMihomoRouterConfigPassesCheck(t *testing.T) {
 		t.Skip("未设置 TRINE_MIHOMO_BIN，跳过真机校验")
 	}
 	warns := []string{}
-	g := genMihomo("main-router", testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, nil, &warns, genOpts{})
 	// 端口换掉：本机 7890 / 9090 很可能被用户自己的实例占着。
 	g.doc["mixed-port"] = freeTCPPort(t)
 	g.doc["external-controller"] = "127.0.0.1:" + strconv.Itoa(freeTCPPort(t))
@@ -114,7 +114,7 @@ func TestMihomoRouterAcceptsBlockExemptRules(t *testing.T) {
 		t.Skip("未设置 TRINE_MIHOMO_BIN，跳过真机校验")
 	}
 	warns := []string{}
-	g := genMihomo("main-router", testNodes(), nil, blockExemptRules, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, blockExemptRules, &warns, genOpts{})
 	g.doc["mixed-port"] = freeTCPPort(t)
 	g.doc["external-controller"] = "127.0.0.1:" + strconv.Itoa(freeTCPPort(t))
 
@@ -238,10 +238,10 @@ func TestMihomoSniffsDomainOnNonStandardPort(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
-	g := genMihomo("client", testNodes(), nil, nil, new([]string), ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), nil, nil, new([]string), genOpts{})
 	// client 模式不生成 sniffer（没有 TUN），但嗅探机制与 TUN 无关，
 	// 直接借用 router 模式那份，测的是同一个 ports 配置。
-	rg := genMihomo("main-router", testNodes(), nil, nil, new([]string), ruleMirrorSel{}, bypassSpec{})
+	rg := genMihomo("main-router", testNodes(), nil, nil, new([]string), genOpts{})
 	g.doc["sniffer"] = rg.doc["sniffer"]
 
 	mixed := freeTCPPort(t)

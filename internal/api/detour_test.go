@@ -117,13 +117,13 @@ func TestNoDetourToPlainDirect(t *testing.T) {
 		newFormat := capsFor(v).NewDNSFormat
 		for _, target := range []string{"client", "main-router", "side-router"} {
 			warns := []string{}
-			g := genSingbox(target, v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+			g := genSingbox(target, v, testNodes(), nil, nil, &warns, genOpts{})
 			check(ver+"/"+target, g.doc, newFormat)
 		}
 		// momo 要求 1.12+，旧格式分支没有意义。
 		if newFormat {
 			warns := []string{}
-			g := genMomo(v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+			g := genMomo(v, testNodes(), nil, nil, &warns, genOpts{})
 			check(ver+"/openwrt-momo", g.doc, true)
 		}
 	}
@@ -145,7 +145,7 @@ func TestSingboxClientConfigStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	warns := []string{}
-	g := genSingbox("client", v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genSingbox("client", v, testNodes(), nil, nil, &warns, genOpts{})
 
 	// 换成空闲端口：本机 7890 很可能被用户自己的代理占着。
 	port := freeTCPPort(t)
@@ -235,7 +235,7 @@ func TestSingboxClientStartsWithBlockExemptRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	warns := []string{}
-	g := genSingbox("client", v, testNodes(), nil, blockExemptRules, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genSingbox("client", v, testNodes(), nil, blockExemptRules, &warns, genOpts{})
 	port := freeTCPPort(t)
 	if inbounds, ok := g.doc["inbounds"].([]any); ok {
 		for _, it := range inbounds {

@@ -47,7 +47,7 @@ func TestCustomRuleKeepsNoResolve(t *testing.T) {
 	}
 
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), nil, []string{line}, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, []string{line}, warns, genOpts{})
 	found := false
 	for _, r := range mihomoRuleList(t, g) {
 		if r == line {
@@ -83,7 +83,7 @@ func TestCustomRuleNormalizesWildcardSuffix(t *testing.T) {
 
 	warns := new([]string)
 	g := genMihomo("main-router", testNodes(), nil,
-		[]string{"DOMAIN-SUFFIX,*.foo.com,DIRECT"}, warns, ruleMirrorSel{}, bypassSpec{})
+		[]string{"DOMAIN-SUFFIX,*.foo.com,DIRECT"}, warns, genOpts{})
 	for _, r := range mihomoRuleList(t, g) {
 		if strings.Contains(r, "*.") {
 			t.Errorf("产物里仍带通配符，这条规则永远不会命中: %q", r)
@@ -146,7 +146,7 @@ func TestCustomRuleCidrGetsMaskBothCores(t *testing.T) {
 
 	warns := new([]string)
 	m := genMihomo("main-router", testNodes(), nil,
-		[]string{"IP-CIDR,1.2.3.4,DIRECT"}, warns, ruleMirrorSel{}, bypassSpec{})
+		[]string{"IP-CIDR,1.2.3.4,DIRECT"}, warns, genOpts{})
 	mv := ""
 	for _, r := range mihomoRuleList(t, m) {
 		if strings.Contains(r, "1.2.3.4") {
@@ -163,7 +163,7 @@ func TestCustomRuleCidrGetsMaskBothCores(t *testing.T) {
 	}
 	sw := new([]string)
 	sb := genSingbox("main-router", ver, testNodes(), nil,
-		[]string{"IP-CIDR,1.2.3.4,DIRECT"}, sw, ruleMirrorSel{}, bypassSpec{})
+		[]string{"IP-CIDR,1.2.3.4,DIRECT"}, sw, genOpts{})
 	sv := ""
 	for _, r := range sb.doc["route"].(map[string]any)["rules"].([]any) {
 		m, ok := r.(map[string]any)
@@ -205,7 +205,7 @@ func TestCustomRuleRejectsBadCidrWithReason(t *testing.T) {
 
 	warns := new([]string)
 	genMihomo("main-router", testNodes(), nil,
-		[]string{"IP-CIDR,1.2.3.0/33,DIRECT"}, warns, ruleMirrorSel{}, bypassSpec{})
+		[]string{"IP-CIDR,1.2.3.0/33,DIRECT"}, warns, genOpts{})
 	if len(*warns) == 0 {
 		t.Fatal("非法规则必须产生警告")
 	}
@@ -229,7 +229,7 @@ func TestCustomRuleNoResolveIgnoredOnDomain(t *testing.T) {
 
 	warns := new([]string)
 	g := genMihomo("main-router", testNodes(), nil,
-		[]string{"DOMAIN,foo.com,DIRECT,no-resolve"}, warns, ruleMirrorSel{}, bypassSpec{})
+		[]string{"DOMAIN,foo.com,DIRECT,no-resolve"}, warns, genOpts{})
 	for _, r := range mihomoRuleList(t, g) {
 		if strings.HasPrefix(r, "DOMAIN,foo.com") && strings.Contains(r, "no-resolve") {
 			t.Errorf("域名规则上不应保留 no-resolve: %q", r)

@@ -75,6 +75,8 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		AutoSwitchSetting,
 		// 生成客户端配置时规则集的下载源（默认 official，见 rulemirror.go）
 		MirrorSetting, MirrorPrefixSetting,
+		// 局域网专用域名交给谁解析（默认空 = 不写策略，见 landns.go）
+		SettingLANDNS,
 		// 面板是否用 TLS 监听（"1" 开，改了要重启；见 paneltls.go）
 		SettingPanelHTTPS,
 		// 备份容量治理策略（见 backups.go）
@@ -154,6 +156,9 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 规则集下载源（生成给客户端的配置用）。值必须是表里的 ID，
 		// 允许 custom + 合法前缀；非法值在这里就拒掉，别写进库让生成页读到脏值。
 		MirrorSetting: true, MirrorPrefixSetting: true,
+		// 局域网 DNS：库里只留规范化后的地址（见 parseLANResolver），
+		// 脏值写进去的后果是「生成出一份看起来正常、却解不出 nas.lan 的配置」。
+		SettingLANDNS: true,
 		// 面板 HTTPS 开关：只落库，真正生效在下次启动（certmgr 不管面板自己）
 		SettingPanelHTTPS: true,
 		// 备份容量治理：份数 / 总容量(MB) / 天数 / 是否允许后台自动清理（默认关）
@@ -195,6 +200,17 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "规则集下载源："+warn)
 			return
 		}
+	}
+	// 局域网 DNS 同理，而且更要在保存期拦：它是「.lan / .local 这些名字问谁」，
+	// 生成出来的配置每项都合法，填错只是「某个主机名解析不了」——与没填
+	// 一模一样，事后无从归因。规范化后的值写回库里，回显与产物才对得上。
+	if v, ok := m[SettingLANDNS]; ok {
+		lan, msg := parseLANResolver(v)
+		if msg != "" {
+			fail(w, 400, "局域网 DNS："+msg)
+			return
+		}
+		m[SettingLANDNS] = lan.raw
 	}
 	// HTTPS 开关只认 "0"/"1"/空：写进别的值会让下次启动既不建证书也不报错，
 	// 变成一个「开了但没生效」的静默状态。

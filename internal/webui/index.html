@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.1.7 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.1.8 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1679,6 +1679,20 @@ canvas{display:block;width:100%}
           接管全机流量后，代理客户端连节点服务器本身的那条连接也会被送进隧道，形成回环——
           配置能正常加载、节点却永远连不上。地址由「设置 → 公网地址」自动带出，无需手填；
           关闭后按原有规则分流。
+        </p>
+        <label style="display:block;margin-top:16px">局域网 DNS
+          <span class="hint" style="margin-left:8px">留空 = 这些名字问公网，解析不了</span>
+        </label>
+        <input id="gen_lan_dns" class="input mono" style="max-width:240px"
+               placeholder="10.0.0.1（留空 = 不设置）"
+               data-act="genOptionChanged" data-args='[]' data-el="value">
+        <p class="muted" style="margin:6px 0 0;line-height:1.6">
+          <b>.lan / .local / .home.arpa / .localdomain</b> 这几类名字只有你局域网里的解析器答得出来，
+          公网 DNS 一律查不到——要用 <b>nas.lan</b>、路由器、打印机这类主机名，填上这台机器的地址
+          （通常是主路由，如 <code>10.0.0.1</code>；换了端口就写 <code>10.0.0.1:5353</code>）。
+          不用这类名字就留空，产物里不会多出任何东西。<br>
+          <b>别填这份配置自己会用的地址</b>：主路由 / 旁路由目标下内核把 DNS 挂在自己的 :53 上，
+          填它等于让查询绕回自己，全屋一个名字都解析不出来。
         </p>
       </div>
 

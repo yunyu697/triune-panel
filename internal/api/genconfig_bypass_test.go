@@ -61,7 +61,7 @@ func TestMihomoBypassRulesComeFirst(t *testing.T) {
 	filterLen := len(fakeIPFilter)
 	g := genMihomo("main-router", testNodes(), nil,
 		[]string{"DOMAIN-SUFFIX,ads.example,REJECT", "DOMAIN,node.example.com,PROXY"},
-		warns, ruleMirrorSel{}, b)
+		warns, genOpts{Mirror: ruleMirrorSel{}, Bypass: b})
 
 	rules := g.doc["rules"].([]any)
 	if len(rules) < 4 {
@@ -104,7 +104,7 @@ func TestMihomoBypassRulesComeFirst(t *testing.T) {
 
 func TestMihomoWithoutBypassKeepsOldRules(t *testing.T) {
 	warns := new([]string)
-	g := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), nil, nil, warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 	// 只检查「节点地址」有没有被写进直连规则（bypass 开关的本意）。
 	// 不能用泛泛的 DOMAIN, 前缀判断——系统关键服务的内置直连规则同样是
@@ -130,7 +130,7 @@ func TestSingboxBypassRulesFollowDNSHijack(t *testing.T) {
 		}
 		warns := []string{}
 		g := genSingbox("main-router", ver, testNodes(), nil,
-			[]string{"DOMAIN-SUFFIX,ads.example,REJECT"}, &warns, ruleMirrorSel{}, b)
+			[]string{"DOMAIN-SUFFIX,ads.example,REJECT"}, &warns, genOpts{Mirror: ruleMirrorSel{}, Bypass: b})
 		route := g.doc["route"].(map[string]any)
 		rules := route["rules"].([]any)
 		if len(rules) < 4 {
@@ -188,7 +188,7 @@ func hasInSlice(v any, want string) bool {
 func TestSingboxWithoutBypassKeepsOldRules(t *testing.T) {
 	ver, _ := parseSBVersion("1.14")
 	warns := []string{}
-	g := genSingbox("client", ver, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genSingbox("client", ver, testNodes(), nil, nil, &warns, genOpts{})
 	rules := g.doc["route"].(map[string]any)["rules"].([]any)
 	for _, r := range rules {
 		m := r.(map[string]any)

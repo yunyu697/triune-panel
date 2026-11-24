@@ -28,7 +28,7 @@ func TestApplePushRuleInSystemDirectList(t *testing.T) {
 }
 
 func TestApplePushRenderedBeforeRuleSets(t *testing.T) {
-	g := genMihomo("main-router", testNodes(), adSets(), nil, new([]string), ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), adSets(), nil, new([]string), genOpts{})
 	rules := g.doc["rules"].([]any)
 
 	idx := sysRuleIndex(rules, applePushRule)
@@ -56,7 +56,7 @@ func TestApplePushRenderedInSingbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := genSingbox("main-router", ver, testNodes(), adSets(), nil, new([]string), ruleMirrorSel{}, bypassSpec{})
+	g := genSingbox("main-router", ver, testNodes(), adSets(), nil, new([]string), genOpts{})
 	rules := g.doc["route"].(map[string]any)["rules"].([]any)
 
 	firstSet := -1
@@ -108,7 +108,7 @@ func TestApplePushInRuleSnapshot(t *testing.T) {
 // 所以断言写成「任意端口都必须被覆盖」，并特意验 5223/2197/993 这些真实存在
 // 的非标端口：将来谁把 "1-65535" 改回清单，这条会立刻红。
 func TestTLSSniffCoversEveryPort(t *testing.T) {
-	g := genMihomo("main-router", testNodes(), nil, nil, new([]string), ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, nil, new([]string), genOpts{})
 	// 旁路由目标才发 sniffer 段；客户端模式由客户端自己的设置负责。
 	sn, ok := g.doc["sniffer"].(map[string]any)
 	if !ok {

@@ -53,7 +53,7 @@ func TestMihomoSystemDirectRulesBeforeRuleSets(t *testing.T) {
 		{ID: "geosite-onedrive", Policy: "PROXY"},
 		{ID: "geosite-cn", Policy: "DIRECT"},
 	}})
-	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), sets, nil, warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 
 	firstSet := firstRuleSetIndex(rules)
@@ -80,7 +80,7 @@ func TestMihomoCustomRulesBeforeSystemDirect(t *testing.T) {
 	warns := new([]string)
 	g := genMihomo("client", testNodes(), nil,
 		[]string{"DOMAIN,login.microsoftonline.com,REJECT"},
-		warns, ruleMirrorSel{}, bypassSpec{})
+		warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 	custom := sysRuleIndex(rules, "DOMAIN,login.microsoftonline.com,REJECT")
 	sys := sysRuleIndex(rules, "DOMAIN,login.microsoftonline.com,DIRECT")
@@ -105,7 +105,7 @@ func TestSingboxSystemDirectRulesAndDNS(t *testing.T) {
 			{ID: "geosite-cn", Policy: "DIRECT"},
 		}})
 		warns := []string{}
-		g := genSingbox("main-router", ver, testNodes(), sets, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+		g := genSingbox("main-router", ver, testNodes(), sets, nil, &warns, genOpts{})
 		rules := g.doc["route"].(map[string]any)["rules"].([]any)
 
 		// 找到第一条规则集规则的位置
@@ -166,7 +166,7 @@ func TestSingboxSystemDirectRulesAndDNS(t *testing.T) {
 func TestMomoInheritsSystemDirect(t *testing.T) {
 	v, _ := parseSBVersion("1.14")
 	warns := []string{}
-	g := genMomo(v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMomo(v, testNodes(), nil, nil, &warns, genOpts{})
 	rules := g.doc["route"].(map[string]any)["rules"].([]any)
 	found := false
 	for _, r := range rules {
@@ -213,7 +213,7 @@ func TestSystemDirectFakeIPFilterDerived(t *testing.T) {
 	// 关键域名必须在 mihomo 的 fake-ip-filter 里出现。每个「类」各取一条，
 	// 避免下次只改一类就以为全好了。
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, nil, warns, genOpts{})
 	got := g.doc["dns"].(map[string]any)["fake-ip-filter"].([]any)
 	for _, want := range []string{
 		"mesu.apple.com",            // 类 1 Apple 更新
@@ -276,14 +276,14 @@ func TestBothCoresResolveDirectNamesLocally(t *testing.T) {
 		t.Fatal("共享契约是空的，这份用例会变成空断言")
 	}
 
-	mg := genMihomo("main-router", testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	mg := genMihomo("main-router", testNodes(), nil, nil, &warns, genOpts{})
 	mihomoSet := map[string]bool{}
 	for _, d := range strs(mg.doc["dns"].(map[string]any)["fake-ip-filter"]) {
 		mihomoSet[d] = true
 	}
 
 	v, _ := parseSBVersion("1.14")
-	sg := genSingbox("main-router", v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	sg := genSingbox("main-router", v, testNodes(), nil, nil, &warns, genOpts{})
 	sbSet := map[string]bool{}
 	for _, r := range sg.doc["dns"].(map[string]any)["rules"].([]any) {
 		m, ok := r.(map[string]any)

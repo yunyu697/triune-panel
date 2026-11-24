@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"triune/internal/link"
@@ -575,6 +576,15 @@ type genReq struct {
 	// 就让老用户已经跑通的配置悄悄换下载地址。
 	RuleMirror       string `json:"rule_mirror"`
 	RuleMirrorPrefix string `json:"rule_mirror_prefix"`
+	// LANDNS 局域网专用域名（.lan / .local / .home.arpa / .localdomain）交给谁解析，
+	// 见 lanResolver。
+	//
+	// 用指针是为了分清「没带这个字段」和「明确清空」：
+	//   - nil：客户端没提这件事。可能是 v2.1.8 之前保存的配置，重新生成时
+	//     按当前设置走——「重新生成」应当是「按现在的偏好重建」，而不是悄悄
+	//     丢掉用户后来填过的设置；
+	//   - ""：用户把输入框清空了，就是不要这条策略，不去读设置。
+	LANDNS *string `json:"lan_dns"`
 	// BypassServer 自动把导出节点所用的服务器地址写成最高优先级 DIRECT 规则。
 	//
 	// 主路由 / 旁路由 / TUN 接管全机流量后，代理客户端「连节点服务器本身」的
@@ -593,6 +603,19 @@ func (q genReq) mirror() ruleMirrorSel {
 	return s
 }
 
+// genOpts 是生成器的可选输入。
+//
+// 收成一个结构体而不是继续往参数表上挂：这台生成器已经有五个必填参数
+// （目标 / 版本 / 节点 / 规则集 / 自定义规则），可选行为只会越来越多——
+// 绕过节点服务器、下载源、局域网 DNS，以后还有别的。每加一个就改 70 处
+// 调用点，改的时候还得逐处确认参数顺序，代价与收益完全不成比例；
+// 而且漏改一处就是编译错误，但顺序写反了不会报错。
+type genOpts struct {
+	Mirror ruleMirrorSel
+	Bypass bypassSpec
+	LAN    lanResolver
+}
+
 // handleExportCatalog GET /api/export/catalog：规则集目录 + 场景预设 + 下载源列表
 func (a *Server) handleExportCatalog(w http.ResponseWriter, r *http.Request) {
 	// 默认下载源跟着设置走：用户上次选过镜像，下次打开生成页就还是它，
@@ -602,11 +625,15 @@ func (a *Server) handleExportCatalog(w http.ResponseWriter, r *http.Request) {
 		defMirror = MirrorOfficial
 	}
 	defPrefix, _ := a.Store.GetSetting(MirrorPrefixSetting)
+	// 局域网 DNS 同样回填：填过一次就不该每次都重新输。空值是正常的初始状态
+	// （大多数家庭网络根本不用 .lan 名字），所以不设默认值。
+	defLAN, _ := a.Store.GetSetting(SettingLANDNS)
 	writeJSON(w, 200, map[string]any{
 		"sets":      ruleCatalog,
 		"scenarios": scenarioPresets,
 		"mirrors":   ruleMirrors,
 		"mirror":    map[string]string{"id": defMirror, "prefix": defPrefix},
+		"lan_dns":   defLAN,
 		// classes 是「哪类关键服务、由哪些规则集覆盖」的对照表。前端拿它把
 		// 用户勾选的规则集翻译成「这一类的保障来自哪」——少勾一个 geosite-apple
 		// 时，界面要能说清苹果那一类现在只剩系统清单兜底。
@@ -743,6 +770,26 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		warns = append(warns, warn)
 	}
 
+	// 局域网 DNS：值来自「设置」，前端每次导出都回传（同下载源）。
+	//
+	// 这里**不**因为值不合法就 400：库里可能躺着一条旧版本 / 手改数据库留下的
+	// 脏值，拒绝导出等于把用户锁死在「一份配置也导不出来」的状态，而他要的多半
+	// 只是先拿到一份能用的配置。退回空、把原因写进警告，症状清楚也不挡路；
+	// 真正的拦截在保存设置那一步（putSettings），脏值进不了库。
+	lanRaw := ""
+	switch {
+	case q.LANDNS != nil:
+		lanRaw = *q.LANDNS
+	default:
+		// 老配置（保存时还没有这个字段）与脚本调用：按当前设置走。
+		lanRaw, _ = a.Store.GetSetting(SettingLANDNS)
+	}
+	lan, lanBad := parseLANResolver(lanRaw)
+	if lanBad != "" {
+		warns = append(warns, "「局域网 DNS」设置无效，本次已忽略（"+lanBad+"）")
+	}
+	opts := genOpts{Mirror: mir, Bypass: bypass, LAN: lan}
+
 	// 生成前先确认「至少有一个节点真的能导出」，理由见 exportable.go。
 	// 一个都导不出时**不要**生成——空 proxies 的配置内核只会拒绝，
 	// 用户还得反过来猜是哪一步错了。
@@ -768,11 +815,11 @@ func (a *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 	var g *generator
 	switch {
 	case q.Target == genTargetMomo:
-		g = genMomo(ver, nodes, sets, q.CustomRules, &warns, mir, bypass)
+		g = genMomo(ver, nodes, sets, q.CustomRules, &warns, opts)
 	case q.Core == "mihomo":
-		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, mir, bypass)
+		g = genMihomo(q.Target, nodes, sets, q.CustomRules, &warns, opts)
 	default:
-		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, mir, bypass)
+		g = genSingbox(q.Target, ver, nodes, sets, q.CustomRules, &warns, opts)
 	}
 
 	var content string
@@ -1243,6 +1290,26 @@ var privateCIDRs = []string{
 // 主机名一直解析不了，而两边配置都合法、都不报错。
 var localOnlySuffixes = []string{"lan", "local", "home.arpa", "localdomain"}
 
+// lanDNSNotice 返回「这个组合会坏事」的提醒，没事可说时返回空串。
+//
+// 空值**不**进警告。理由不是「不重要」，而是警告在这套界面里等于「这次生成有
+// 东西要你处理」：它既留在页面上，又弹一条 toast，还会顶掉「生成完成」。把一条
+// 几乎人人可忽略的提示塞进去，结果是所有警告一起被学会无视——那比不提示更糟。
+// 「留空意味着什么」写在生成页那个输入框的说明里（就在手边），边界写进
+// docs/known-limits.md。
+//
+// 这里只剩一种情况真该拦一下：选了系统解析器、而这份配置自己在管 :53。
+// 那时若系统解析器指向本机，查询就绕回自己——一个名字都解析不出来，且症状
+// （全屋断网）与「填对了但服务挂了」完全一样，事后极难归因。
+func lanDNSNotice(lan lanResolver, router bool) string {
+	if lan.isSystem() && router {
+		return "「局域网 DNS」选的是系统解析器，而这份配置自己也在接管 :53——" +
+			"如果系统的解析器就指向本机（/etc/resolv.conf 里是 127.0.0.1），查询会绕回自己形成 DNS 环，" +
+			"一个名字都解析不出来。不确定系统解析器指向哪里的话，改填路由器地址。"
+	}
+	return ""
+}
+
 // fakeIPFilter 只收「fake-ip 本身会坏事、而 sing-box 侧不存在对应问题」的条目：
 // STUN / 主机待机联网（Nintendo、PlayStation、Xbox）拿假 IP 就没法工作，
 // 时间同步域名拿到假 IP 会让 NTP 客户端连到 198.18.x.x。
@@ -1470,7 +1537,7 @@ func systemDirectFakeIPFilter() []string {
 // 规则清单、嗅探、TUN、DNS、分组结构都在这条路径上，且不依赖任何用户数据。
 func generatorStamp() string {
 	var warns []string
-	g := genMihomo("router", nil, nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("router", nil, nil, nil, &warns, genOpts{})
 	return stampOf(g.doc)
 }
 
@@ -1507,8 +1574,9 @@ func targetNote(target string) string {
 
 // ==================== mihomo 生成器 ====================
 
-func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel, bypass bypassSpec) *generator {
+func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, opts genOpts) *generator {
 	router := target != "client"
+	mir, bypass, lan := opts.Mirror, opts.Bypass, opts.LAN
 
 	proxies := []any{}
 	names := []string{}
@@ -1684,8 +1752,23 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		"nameserver":         toAnySlice([]string{"https://223.5.5.5/dns-query", "https://doh.pub/dns-query"}),
 		"default-nameserver": toAnySlice([]string{"223.5.5.5", "119.29.29.29"}),
 	}
+	if !lan.empty() {
+		// nameserver-policy 与 fake-ip-filter 是同一件事的两半，缺一半都不成立：
+		//   - 只有 filter：names 拿到真实 IP，但拿去问公网 DoH，回 NXDOMAIN；
+		//   - 只有 policy：名字问对了地方，却先把 198.18.x.x 返给客户端，连不上。
+		//
+		// 四个后缀都由 localOnlySuffixes 派生，不在这里再写一遍清单。
+		policy := map[string]any{}
+		for _, s := range localOnlySuffixes {
+			policy["+."+s] = lan.mihomoValue()
+		}
+		dns["nameserver-policy"] = policy
+	}
 	if router {
 		dns["listen"] = "0.0.0.0:53"
+	}
+	if notice := lanDNSNotice(lan, router); notice != "" {
+		*warns = append(*warns, notice)
 	}
 
 	doc := map[string]any{
@@ -1770,6 +1853,11 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	if !bypass.empty() {
 		header += "# 节点服务器直连（避免回环）：" + strings.Join(bypass.hosts(), "、") + "\n"
 	}
+	// 写进文件头：查「nas.lan 解析不了」时第一眼就能确认这份配置到底填了没有，
+	// 不用在几百行 YAML 里翻 nameserver-policy（它只在填过时才存在）。
+	if !lan.empty() {
+		header += "# 局域网 DNS（.lan/.local/.home.arpa/.localdomain）：" + lan.label() + "\n"
+	}
 	header += "\n"
 	return &generator{doc: doc, header: header}
 }
@@ -1794,22 +1882,61 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 //
 // 注意这条只在 start service 阶段报，`sing-box check` 查不出来——所以
 // 用 check 验过的产物仍然可能在客户端启动时炸。
-func sbDNSServers(caps sbCaps) []any {
-	if caps.NewDNSFormat {
-		return []any{
-			map[string]any{"type": "https", "tag": "remote", "server": "8.8.8.8", "detour": "PROXY"},
-			map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5"},
-		}
+func sbDNSServers(caps sbCaps, lan lanResolver) []any {
+	servers := []any{
+		map[string]any{"type": "https", "tag": "remote", "server": "8.8.8.8", "detour": "PROXY"},
+		map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5"},
 	}
-	return []any{
+	if caps.NewDNSFormat {
+		if !lan.empty() {
+			servers = append(servers, sbLANServer(caps, lan))
+		}
+		return servers
+	}
+	servers = []any{
 		map[string]any{"tag": "remote", "address": "https://8.8.8.8/dns-query", "detour": "PROXY"},
 		map[string]any{"tag": "local", "address": "223.5.5.5", "detour": "direct"},
 	}
+	if !lan.empty() {
+		servers = append(servers, sbLANServer(caps, lan))
+	}
+	return servers
 }
 
-func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, mir ruleMirrorSel, bypass bypassSpec) *generator {
+// sbLANServer 生成「局域网解析器」那一项。
+//
+// 注意 `local`（上面那个 223.5.5.5）不是系统解析器——它的 tag 叫 local，但它是
+// 一个公网 UDP DNS。这也是为什么单靠 v2.1.7 给 sing-box 补 dns.rules → local
+// 并不能让 nas.lan 解析成功：指向的目标本身就答不出局域网名字。
+//
+// 旧格式（1.11）必须写 detour: direct。不写时 DNS 查询走 route.final，也就是
+// PROXY——把「查局域网 DNS」的包送进隧道，那台服务器在隧道另一头根本不可达，
+// 而且失败信息只会是超时。
+func sbLANServer(caps sbCaps, lan lanResolver) map[string]any {
+	host, port := lan.hostPort()
+	if caps.NewDNSFormat {
+		if lan.isSystem() {
+			return map[string]any{"type": "local", "tag": "lan"}
+		}
+		m := map[string]any{"type": "udp", "tag": "lan", "server": host}
+		if port != 53 {
+			m["server_port"] = port
+		}
+		return m
+	}
+	addr := host
+	if lan.isSystem() {
+		addr = "local"
+	} else if port != 53 || strings.Contains(host, ":") {
+		addr = net.JoinHostPort(host, strconv.Itoa(port))
+	}
+	return map[string]any{"tag": "lan", "address": addr, "detour": "direct"}
+}
+
+func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, opts genOpts) *generator {
 	router := target != "client"
 	caps := capsFor(ver)
+	mir, bypass, lan := opts.Mirror, opts.Bypass, opts.LAN
 
 	// DNS 分流需要 geosite-cn（国内域名走本地 DNS）：用户未勾选时自动补充，
 	// 否则 DNS 规则会引用一个不存在的 rule_set 导致 sing-box 启动失败
@@ -1955,6 +2082,10 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	// DNS：节点域名必须走本地解析。否则它落到 final:remote（经代理的 DoH），
 	// 而代理本身还没连上——先有鸡还是先有蛋，1.11 没有 default_domain_resolver
 	// 时尤其明显。国内域名走本地，其余走代理侧 DoH。
+	lanTag := "local"
+	if !lan.empty() {
+		lanTag = "lan"
+	}
 	dnsRules := []any{}
 	if len(bypass.Domains) > 0 {
 		dnsRules = append(dnsRules,
@@ -1977,16 +2108,25 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	//
 	// 用裸后缀是安全的：实测 sing-box 1.15 的 domain_suffix 按标签边界匹配，
 	// `lan` 命中 `nas.lan` 与 `lan`，不命中 `japan`。
+	//
+	// 填了「局域网 DNS」时改指 lan 服务器：local 那个 tag 是 223.5.5.5（公网），
+	// 名字问它一样是 NXDOMAIN，只是失败得没那么显眼。
 	dnsRules = append(dnsRules, map[string]any{
-		"domain_suffix": toAnySlice(localOnlySuffixes), "server": "local"})
+		"domain_suffix": toAnySlice(localOnlySuffixes), "server": lanTag})
 	dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-cn"}, "server": "local"})
 	if hasSet(sets, "geosite-private") {
-		dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-private"}, "server": "local"})
+		// 私有域规则集里就是各类内网后缀（.internal、.corp 之类），同样只有
+		// 局域网解析器答得出来。mihomo 侧做不到这一条（那边只有域名策略，
+		// 引 rule-set 要看内核版本行为，不赌），所以这里是 sing-box 多覆盖的一点。
+		dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-private"}, "server": lanTag})
 	}
 	dns := map[string]any{
-		"servers": sbDNSServers(caps),
+		"servers": sbDNSServers(caps, lan),
 		"rules":   dnsRules,
 		"final":   "remote",
+	}
+	if notice := lanDNSNotice(lan, router); notice != "" {
+		*warns = append(*warns, notice)
 	}
 
 	inbounds := []any{}

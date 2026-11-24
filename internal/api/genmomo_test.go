@@ -17,8 +17,8 @@ func momoDoc(t *testing.T, ver string) map[string]any {
 		t.Fatal(err)
 	}
 	warns := []string{}
-	g := genMomo(v, testNodes(), nil, nil, &warns, ruleMirrorSel{},
-		bypassSpec{Domains: []string{"node.example.com"}})
+	g := genMomo(v, testNodes(), nil, nil, &warns,
+		genOpts{Bypass: bypassSpec{Domains: []string{"node.example.com"}}})
 	raw, err := json.Marshal(g.doc)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestMomoTunStackFollowsVersion(t *testing.T) {
 func TestMomoReusesBaseGenerator(t *testing.T) {
 	warns := []string{}
 	v, _ := parseSBVersion("1.14")
-	g := genMomo(v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMomo(v, testNodes(), nil, nil, &warns, genOpts{})
 	doc := g.doc
 	outs := doc["outbounds"].([]any)
 	tags := map[string]bool{}
@@ -281,7 +281,7 @@ func TestMomoConfigPassesRealSingboxCheck(t *testing.T) {
 	}
 	warns := []string{}
 	v, _ := parseSBVersion("1.14")
-	g := genMomo(v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMomo(v, testNodes(), nil, nil, &warns, genOpts{})
 	raw, _ := json.MarshalIndent(g.doc, "", "  ")
 	file := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(file, raw, 0o644); err != nil {

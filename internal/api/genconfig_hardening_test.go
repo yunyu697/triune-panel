@@ -57,7 +57,7 @@ func portRangeCovers(v any, want int) bool {
 // 信息都不剩，域名类规则（含用户自定义的直连）全部失效，只剩 IP 归属可判。
 func TestMihomoSnifferCoversQUIC(t *testing.T) {
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, nil, warns, genOpts{})
 	sn, ok := g.doc["sniffer"].(map[string]any)
 	if !ok {
 		t.Fatal("router 模式必须生成 sniffer 段")
@@ -87,7 +87,7 @@ func TestMihomoSnifferCoversQUIC(t *testing.T) {
 // 客户端模式没有 TUN，写 sniffer 是无意义字段，还可能被旧版内核拒收。
 func TestMihomoClientHasNoSniffer(t *testing.T) {
 	warns := new([]string)
-	g := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), nil, nil, warns, genOpts{})
 	if _, ok := g.doc["sniffer"]; ok {
 		t.Error("client 模式不应生成 sniffer（没有 TUN 可嗅）")
 	}
@@ -104,7 +104,7 @@ func TestSingboxSniffsBeforeDomainRules(t *testing.T) {
 			t.Fatalf("解析版本 %s: %v", v, err)
 		}
 		warns := []string{}
-		g := genSingbox("main-router", ver, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+		g := genSingbox("main-router", ver, testNodes(), nil, nil, &warns, genOpts{})
 		rules, ok := g.doc["route"].(map[string]any)["rules"].([]any)
 		if !ok {
 			t.Fatalf("sing-box %s 没有 route.rules", v)
@@ -156,7 +156,7 @@ func TestMihomoRulesAvoidBareGeoip(t *testing.T) {
 		t.Fatalf("构造规则集: %v", err)
 	}
 	for _, target := range []string{"client", "main-router"} {
-		g := genMihomo(target, testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+		g := genMihomo(target, testNodes(), sets, nil, warns, genOpts{})
 		for _, r := range g.doc["rules"].([]any) {
 			s, ok := r.(string)
 			if !ok {
@@ -183,7 +183,7 @@ func TestMihomoHeaderDeclaresMrsFloor(t *testing.T) {
 		t.Fatalf("构造规则集: %v", err)
 	}
 	warns := new([]string)
-	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), sets, nil, warns, genOpts{})
 	if !strings.Contains(g.header, "mrs") {
 		t.Errorf("用了 mrs 规则集却没在文件头说明格式与版本要求：\n%s", g.header)
 	}
@@ -191,7 +191,7 @@ func TestMihomoHeaderDeclaresMrsFloor(t *testing.T) {
 		t.Errorf("文件头缺版本下限：\n%s", g.header)
 	}
 	// 没有规则集时不该出现这条提示，否则会误导只做直连分流的人去升内核。
-	g2 := genMihomo("client", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g2 := genMihomo("client", testNodes(), nil, nil, warns, genOpts{})
 	if strings.Contains(g2.header, "mrs") {
 		t.Errorf("没选规则集却提示 mrs：\n%s", g2.header)
 	}

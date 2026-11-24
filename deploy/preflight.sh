@@ -177,9 +177,9 @@ kernel_gate() {
 	fi
 }
 
-kernel_gate "sing-box 客户端" TRINE_SINGBOX_BIN "sing-box" internal/api 'TestSingboxClientConfigStarts|TestMomoConfigPassesRealSingboxCheck'
+kernel_gate "sing-box 客户端" TRINE_SINGBOX_BIN "sing-box" internal/api 'TestSingboxClientConfigStarts|TestSingboxClientConfigStartsWithLANResolver|TestMomoConfigPassesRealSingboxCheck'
 kernel_gate "sing-box 服务端" TRINE_SINGBOX_BIN "sing-box" internal/livecheck 'TestSingboxServerConfigStarts'
-kernel_gate "mihomo" TRINE_MIHOMO_BIN "mihomo" internal/api 'TestMihomoClientConfigStarts'
+kernel_gate "mihomo" TRINE_MIHOMO_BIN "mihomo" internal/api 'TestMihomoClientConfigStarts|TestMihomoUsesLANResolverPolicy'
 kernel_gate "xray" TRINE_XRAY_BIN "xray" internal/livecheck 'TestXrayConfigStarts'
 
 # 三个内核全缺时不能只是 WARN：那等于产物一次都没真跑过，

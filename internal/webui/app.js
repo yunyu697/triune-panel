@@ -3475,6 +3475,7 @@ const DEMO_CATALOG = {
     {id:"custom", name:"自定义前缀", kind:"prefix", note:"填 https:// 开头的前缀"}
   ],
   mirror: {id:"official", prefix:""},
+  lan_dns: "",
   scenarios: [
     {
       "id": "balanced",
@@ -4480,7 +4481,7 @@ async function loadGen() {
   } catch(e){}
   if (!genCatalog) {
     genCatalog = DEMO ? DEMO_CATALOG : await req("/api/export/catalog").catch(() => null);
-    if (genCatalog) { renderScenarios(); renderMirror(); renderSets(); }
+    if (genCatalog) { renderScenarios(); renderMirror(); renderLANDNS(); renderSets(); }
   }
   genTargetNote();
   renderSBVerSelect();
@@ -4588,6 +4589,29 @@ function mirrorArgs() {
   const id = sel ? sel.value : "official";
   const prefix = id === "custom" ? ($("gen_mirror_prefix").value || "").trim() : "";
   return { mirror: id, prefix };
+}
+
+/* 局域网 DNS：.lan / .local / .home.arpa / .localdomain 交给谁解析。
+   留空是正常的初始状态——大多数网络根本不用这类名字，所以既不预填、也不报
+   「未设置」，只在输入框下面写清后果（那段说明是常驻的，不是提示条）。
+   值同样存进服务端设置，下次打开还是它。 */
+function renderLANDNS() {
+  const el = $("gen_lan_dns");
+  if (!el) return;
+  const v = (genCatalog && genCatalog.lan_dns) || "";
+  if (v) el.value = v;
+}
+
+function lanDNSValue() {
+  const el = $("gen_lan_dns");
+  return el ? (el.value || "").trim() : "";
+}
+
+/* 只在「生成成功」时写库：输入框每敲一个字都 PUT 的话，审计里会多出一串
+   无意义的记录，而用户其实还没决定。写失败不打断生成——值不合法时服务端
+   会在导出结果里说明原因（那条提示是随产物一起回来的）。 */
+function saveLANPref() {
+  req("/api/settings", { method: "PUT", body: { lan_dns: lanDNSValue() } }).catch(() => {});
 }
 
 async function checkMirror() {
@@ -4872,6 +4896,9 @@ function buildGenParams() {
   // 自动直连节点服务器。存进 params，重新生成时才能还原同一份规则——
   // 只写进配置正文、不写进参数的话，一周后重跑会悄悄少掉这组防回环规则。
   body.bypass_server = !!$("gen_bypass").checked;
+  // 局域网 DNS 每次都带上：服务端不读库、只认请求（与下载源同一套约定），
+  // 这样「界面上看到的值」与「产物里的值」不可能对不上。
+  body.lan_dns = lanDNSValue();
   if (genCore === "singbox") body.core_version = genSBVer;
   return body;
 }
@@ -4932,6 +4959,8 @@ async function genGenerate() {
     if (j.bypass_servers && j.bypass_servers.length) {
       vparts.push(`节点服务器直连：<b>${escHtml(j.bypass_servers.join("、"))}</b>`);
     }
+    // 填了才回显：这是「确认它真的进了产物」的凭据，不是状态栏。
+    if (lanDNSValue()) vparts.push(`局域网 DNS：<b>${escHtml(lanDNSValue())}</b>`);
     const vres = $("gen_vres");
     const warns = j.warnings || [];
     if (vparts.length || warns.length) {
@@ -4949,6 +4978,7 @@ async function genGenerate() {
     }
     // 生成成功说明这个源至少没被拒绝，值得记住
     if (j.rule_mirror && j.rule_mirror !== "official") saveMirrorPref();
+    saveLANPref();
     warns.forEach(w => toast(w, "warn"));
     if (!warns.length) toast("生成完成：" + j.filename);
   } catch(e){

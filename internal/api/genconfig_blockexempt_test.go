@@ -31,7 +31,7 @@ func adSets() []normSet {
 
 func TestBlockExemptPrecedesAdRuleSet(t *testing.T) {
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), adSets(), nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), adSets(), nil, warns, genOpts{})
 	rules := mihomoRuleList(t, g)
 
 	exemptIdx, adIdx := -1, -1
@@ -56,7 +56,7 @@ func TestBlockExemptPrecedesAdRuleSet(t *testing.T) {
 
 	// 用户的显式自定义规则优先级高于豁免：他真想拦，得能拦得住。
 	custom := []string{"DOMAIN-KEYWORD,applog,REJECT"}
-	g2 := genMihomo("main-router", testNodes(), adSets(), custom, new([]string), ruleMirrorSel{}, bypassSpec{})
+	g2 := genMihomo("main-router", testNodes(), adSets(), custom, new([]string), genOpts{})
 	rules2 := mihomoRuleList(t, g2)
 	customIdx := -1
 	for i, r := range rules2 {
@@ -81,7 +81,7 @@ func TestBlockExemptInSingboxBeforeAdRuleSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb := genSingbox("main-router", ver, testNodes(), adSets(), nil,
-		new([]string), ruleMirrorSel{}, bypassSpec{})
+		new([]string), genOpts{})
 	rules := sb.doc["route"].(map[string]any)["rules"].([]any)
 
 	exemptIdx, adIdx := -1, -1
@@ -125,7 +125,7 @@ func TestBlockExemptSkippedWithoutRejectSet(t *testing.T) {
 		{Tag: "geosite-google", Policy: "PROXY", Behavior: "domain"},
 	}
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), sets, nil, warns, genOpts{})
 	for _, r := range mihomoRuleList(t, g) {
 		if strings.Contains(r, "applog") {
 			t.Errorf("没勾广告拦截却插了豁免规则: %s", r)
@@ -145,7 +145,7 @@ func TestBlockExemptSkippedWhenTelemetryExplicitlyBlocked(t *testing.T) {
 		Tag: "geosite-category-telemetry", Policy: "REJECT", Behavior: "domain",
 	})
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), sets, nil, warns, genOpts{})
 	for _, r := range mihomoRuleList(t, g) {
 		if strings.Contains(r, "applog") {
 			t.Errorf("用户显式拦遥测，不该再插豁免: %s", r)
@@ -168,7 +168,7 @@ func TestBlockExemptSkippedWhenTelemetryExplicitlyBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	sbWarns := new([]string)
-	genSingbox("main-router", ver, testNodes(), sets, nil, sbWarns, ruleMirrorSel{}, bypassSpec{})
+	genSingbox("main-router", ver, testNodes(), sets, nil, sbWarns, genOpts{})
 	if !hasWarn(*sbWarns, "首屏") {
 		t.Errorf("sing-box 侧显式拦遥测时没有提示: %v", *sbWarns)
 	}
@@ -189,7 +189,7 @@ func TestBlockExemptAppliesToTrimmedAdSet(t *testing.T) {
 		t.Fatal("勾「广告域名（精简）」没有触发豁免：它同样会 REJECT log.zijieapi.com")
 	}
 	warns := new([]string)
-	g := genMihomo("main-router", testNodes(), trimmed, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), trimmed, nil, warns, genOpts{})
 	found := false
 	for _, r := range mihomoRuleList(t, g) {
 		if r == "DOMAIN-SUFFIX,zijieapi.com,DIRECT" {

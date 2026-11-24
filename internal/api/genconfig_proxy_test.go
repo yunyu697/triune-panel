@@ -24,7 +24,7 @@ func TestMihomoGitHubProxyBeforeRuleSets(t *testing.T) {
 		{ID: "geosite-github", Policy: "DIRECT"},
 		{ID: "geosite-cn", Policy: "DIRECT"},
 	}})
-	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), sets, nil, warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 	firstSet := firstRuleSetIndex(rules)
 	if firstSet < 0 {
@@ -53,7 +53,7 @@ func TestMihomoGitHubIPFallbackAfterRuleSets(t *testing.T) {
 	sets, _ := normalizeSets(genReq{Core: "mihomo", Sets: []setPolicy{
 		{ID: "geosite-cn", Policy: "DIRECT"},
 	}})
-	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), sets, nil, warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 	firstSet := firstRuleSetIndex(rules)
 	if firstSet < 0 {
@@ -97,7 +97,7 @@ func TestSingboxGitHubProxyAndIPFallback(t *testing.T) {
 			{ID: "geosite-cn", Policy: "DIRECT"},
 		}})
 		warns := []string{}
-		g := genSingbox("main-router", ver, testNodes(), sets, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+		g := genSingbox("main-router", ver, testNodes(), sets, nil, &warns, genOpts{})
 		rules := g.doc["route"].(map[string]any)["rules"].([]any)
 
 		firstSet := -1
@@ -162,7 +162,7 @@ func TestMediafireDirect(t *testing.T) {
 		// 海外 CDN 默认 PROXY：不前置就会被它抢先，mediafire 直连失效
 		{ID: "geosite-category-cdn-!cn", Policy: "PROXY"},
 	}})
-	g := genMihomo("client", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("client", testNodes(), sets, nil, warns, genOpts{})
 	rules := g.doc["rules"].([]any)
 	idx := sysRuleIndex(rules, want)
 	if idx < 0 {
@@ -186,7 +186,7 @@ func TestMediafireDirect(t *testing.T) {
 	// sing-box / momo 走同一份清单
 	ver, _ := parseSBVersion("1.14")
 	warns2 := []string{}
-	g2 := genSingbox("main-router", ver, testNodes(), nil, nil, &warns2, ruleMirrorSel{}, bypassSpec{})
+	g2 := genSingbox("main-router", ver, testNodes(), nil, nil, &warns2, genOpts{})
 	rs := g2.doc["route"].(map[string]any)["rules"].([]any)
 	found := false
 	for _, r := range rs {
@@ -219,7 +219,7 @@ func TestMediafireDirect(t *testing.T) {
 func TestTunMTUExplicit(t *testing.T) {
 	warns := new([]string)
 	// mihomo（router 模式才有 tun）
-	g := genMihomo("main-router", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMihomo("main-router", testNodes(), nil, nil, warns, genOpts{})
 	tun, ok := g.doc["tun"].(map[string]any)
 	if !ok {
 		t.Fatal("mihomo 配置没有 tun 段")
@@ -231,7 +231,7 @@ func TestTunMTUExplicit(t *testing.T) {
 	// sing-box
 	ver, _ := parseSBVersion("1.14")
 	warns2 := []string{}
-	g2 := genSingbox("main-router", ver, testNodes(), nil, nil, &warns2, ruleMirrorSel{}, bypassSpec{})
+	g2 := genSingbox("main-router", ver, testNodes(), nil, nil, &warns2, genOpts{})
 	mtu := tunMTU(g2.doc["inbounds"].([]any))
 	if mtu != 1500 {
 		t.Errorf("sing-box tun.mtu=%v，期望 1500", mtu)
@@ -239,7 +239,7 @@ func TestTunMTUExplicit(t *testing.T) {
 
 	// openwrt-momo：PPPoE 常见，取 1420 给封装留余量
 	warns3 := []string{}
-	g3 := genMomo(ver, testNodes(), nil, nil, &warns3, ruleMirrorSel{}, bypassSpec{})
+	g3 := genMomo(ver, testNodes(), nil, nil, &warns3, genOpts{})
 	if m := tunMTU(g3.doc["inbounds"].([]any)); m != 1420 {
 		t.Errorf("momo tun-in mtu=%v，期望 1420", m)
 	}
@@ -263,7 +263,7 @@ func tunMTU(inbounds []any) any {
 func TestMomoInheritsGitHubProxy(t *testing.T) {
 	ver, _ := parseSBVersion("1.14")
 	warns := []string{}
-	g := genMomo(ver, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	g := genMomo(ver, testNodes(), nil, nil, &warns, genOpts{})
 	rules := g.doc["route"].(map[string]any)["rules"].([]any)
 	hit := false
 	for _, r := range rules {

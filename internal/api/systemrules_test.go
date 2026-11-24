@@ -197,7 +197,7 @@ func TestGeneratorStampDetectsBehaviorChange(t *testing.T) {
 	// 指纹的输入必须是「整份产物」，不是一份挑剩下的骨架：少哪个旋钮，
 	// 那个旋钮的改动就永远触发不了漂移。v2.1.5 的嗅探端口就是漏网的例子。
 	var warns []string
-	canon := genMihomo("router", nil, nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	canon := genMihomo("router", nil, nil, nil, &warns, genOpts{})
 	for _, k := range []string{"sniffer", "tun", "dns", "rules", "proxy-groups", "rule-providers"} {
 		if _, ok := canon.doc[k]; !ok {
 			t.Errorf("指纹输入里没有 %q，这个旋钮的改动不会触发漂移", k)

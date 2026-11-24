@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.1.7 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.1.8 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1788,6 +1788,20 @@ canvas{display:block;width:100%}
           接管全机流量后，代理客户端连节点服务器本身的那条连接也会被送进隧道，形成回环——
           配置能正常加载、节点却永远连不上。地址由「设置 → 公网地址」自动带出，无需手填；
           关闭后按原有规则分流。
+        </p>
+        <label style="display:block;margin-top:16px">局域网 DNS
+          <span class="hint" style="margin-left:8px">留空 = 这些名字问公网，解析不了</span>
+        </label>
+        <input id="gen_lan_dns" class="input mono" style="max-width:240px"
+               placeholder="10.0.0.1（留空 = 不设置）"
+               data-act="genOptionChanged" data-args='[]' data-el="value">
+        <p class="muted" style="margin:6px 0 0;line-height:1.6">
+          <b>.lan / .local / .home.arpa / .localdomain</b> 这几类名字只有你局域网里的解析器答得出来，
+          公网 DNS 一律查不到——要用 <b>nas.lan</b>、路由器、打印机这类主机名，填上这台机器的地址
+          （通常是主路由，如 <code>10.0.0.1</code>；换了端口就写 <code>10.0.0.1:5353</code>）。
+          不用这类名字就留空，产物里不会多出任何东西。<br>
+          <b>别填这份配置自己会用的地址</b>：主路由 / 旁路由目标下内核把 DNS 挂在自己的 :53 上，
+          填它等于让查询绕回自己，全屋一个名字都解析不出来。
         </p>
       </div>
 
@@ -8668,6 +8682,7 @@ const DEMO_CATALOG = {
     {id:"custom", name:"自定义前缀", kind:"prefix", note:"填 https:// 开头的前缀"}
   ],
   mirror: {id:"official", prefix:""},
+  lan_dns: "",
   scenarios: [
     {
       "id": "balanced",
@@ -9673,7 +9688,7 @@ async function loadGen() {
   } catch(e){}
   if (!genCatalog) {
     genCatalog = DEMO ? DEMO_CATALOG : await req("/api/export/catalog").catch(() => null);
-    if (genCatalog) { renderScenarios(); renderMirror(); renderSets(); }
+    if (genCatalog) { renderScenarios(); renderMirror(); renderLANDNS(); renderSets(); }
   }
   genTargetNote();
   renderSBVerSelect();
@@ -9781,6 +9796,29 @@ function mirrorArgs() {
   const id = sel ? sel.value : "official";
   const prefix = id === "custom" ? ($("gen_mirror_prefix").value || "").trim() : "";
   return { mirror: id, prefix };
+}
+
+/* 局域网 DNS：.lan / .local / .home.arpa / .localdomain 交给谁解析。
+   留空是正常的初始状态——大多数网络根本不用这类名字，所以既不预填、也不报
+   「未设置」，只在输入框下面写清后果（那段说明是常驻的，不是提示条）。
+   值同样存进服务端设置，下次打开还是它。 */
+function renderLANDNS() {
+  const el = $("gen_lan_dns");
+  if (!el) return;
+  const v = (genCatalog && genCatalog.lan_dns) || "";
+  if (v) el.value = v;
+}
+
+function lanDNSValue() {
+  const el = $("gen_lan_dns");
+  return el ? (el.value || "").trim() : "";
+}
+
+/* 只在「生成成功」时写库：输入框每敲一个字都 PUT 的话，审计里会多出一串
+   无意义的记录，而用户其实还没决定。写失败不打断生成——值不合法时服务端
+   会在导出结果里说明原因（那条提示是随产物一起回来的）。 */
+function saveLANPref() {
+  req("/api/settings", { method: "PUT", body: { lan_dns: lanDNSValue() } }).catch(() => {});
 }
 
 async function checkMirror() {
@@ -10065,6 +10103,9 @@ function buildGenParams() {
   // 自动直连节点服务器。存进 params，重新生成时才能还原同一份规则——
   // 只写进配置正文、不写进参数的话，一周后重跑会悄悄少掉这组防回环规则。
   body.bypass_server = !!$("gen_bypass").checked;
+  // 局域网 DNS 每次都带上：服务端不读库、只认请求（与下载源同一套约定），
+  // 这样「界面上看到的值」与「产物里的值」不可能对不上。
+  body.lan_dns = lanDNSValue();
   if (genCore === "singbox") body.core_version = genSBVer;
   return body;
 }
@@ -10125,6 +10166,8 @@ async function genGenerate() {
     if (j.bypass_servers && j.bypass_servers.length) {
       vparts.push(`节点服务器直连：<b>${escHtml(j.bypass_servers.join("、"))}</b>`);
     }
+    // 填了才回显：这是「确认它真的进了产物」的凭据，不是状态栏。
+    if (lanDNSValue()) vparts.push(`局域网 DNS：<b>${escHtml(lanDNSValue())}</b>`);
     const vres = $("gen_vres");
     const warns = j.warnings || [];
     if (vparts.length || warns.length) {
@@ -10142,6 +10185,7 @@ async function genGenerate() {
     }
     // 生成成功说明这个源至少没被拒绝，值得记住
     if (j.rule_mirror && j.rule_mirror !== "official") saveMirrorPref();
+    saveLANPref();
     warns.forEach(w => toast(w, "warn"));
     if (!warns.length) toast("生成完成：" + j.filename);
   } catch(e){

@@ -145,7 +145,7 @@ func TestEveryDirectRuleReachesAllThreeSinks(t *testing.T) {
 		{ID: "geosite-cn", Policy: "DIRECT"},
 		{ID: "geosite-microsoft", Policy: "PROXY"},
 	}})
-	mihomo := genMihomo("main-router", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	mihomo := genMihomo("main-router", testNodes(), sets, nil, warns, genOpts{})
 	rules := mihomo.doc["rules"].([]any)
 	firstSet := firstRuleSetIndex(rules)
 	if firstSet < 0 {
@@ -169,7 +169,7 @@ func TestEveryDirectRuleReachesAllThreeSinks(t *testing.T) {
 	sbSets, _ := normalizeSets(genReq{Core: "singbox", Sets: []setPolicy{
 		{ID: "geosite-microsoft", Policy: "PROXY"},
 	}})
-	sb := genSingbox("main-router", ver, testNodes(), sbSets, nil, &sw, ruleMirrorSel{}, bypassSpec{})
+	sb := genSingbox("main-router", ver, testNodes(), sbSets, nil, &sw, genOpts{})
 	sbRules := sb.doc["route"].(map[string]any)["rules"].([]any)
 	sbDNS := sb.doc["dns"].(map[string]any)["rules"].([]any)
 
@@ -214,7 +214,7 @@ func TestEveryProxyDomainBeforeRuleSets(t *testing.T) {
 		{ID: "geosite-cn", Policy: "DIRECT"},
 		{ID: "geosite-github", Policy: "DIRECT"},
 	}})
-	mihomo := genMihomo("main-router", testNodes(), sets, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	mihomo := genMihomo("main-router", testNodes(), sets, nil, warns, genOpts{})
 	rules := mihomo.doc["rules"].([]any)
 	firstSet := firstRuleSetIndex(rules)
 	if firstSet < 0 {
@@ -236,7 +236,7 @@ func TestEveryProxyDomainBeforeRuleSets(t *testing.T) {
 	sbSets, _ := normalizeSets(genReq{Core: "singbox", Sets: []setPolicy{
 		{ID: "geosite-github", Policy: "DIRECT"},
 	}})
-	sb := genSingbox("main-router", ver, testNodes(), sbSets, nil, &sw, ruleMirrorSel{}, bypassSpec{})
+	sb := genSingbox("main-router", ver, testNodes(), sbSets, nil, &sw, genOpts{})
 	sbRules := sb.doc["route"].(map[string]any)["rules"].([]any)
 	sbFirst := -1
 	for i, r := range sbRules {
@@ -272,7 +272,7 @@ func TestEveryProxyDomainBeforeRuleSets(t *testing.T) {
 // 漏了它的症状是系统时间漂移 → TLS 证书随机报错，没人会想到是代理。
 func TestNTPDirectByPortInBothCores(t *testing.T) {
 	warns := new([]string)
-	mihomo := genMihomo("main-router", testNodes(), nil, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	mihomo := genMihomo("main-router", testNodes(), nil, nil, warns, genOpts{})
 	rules := mihomo.doc["rules"].([]any)
 	firstSet := firstRuleSetIndex(rules)
 	found := -1
@@ -290,7 +290,7 @@ func TestNTPDirectByPortInBothCores(t *testing.T) {
 
 	ver, _ := parseSBVersion("1.14")
 	sw := []string{}
-	sb := genSingbox("main-router", ver, testNodes(), nil, nil, &sw, ruleMirrorSel{}, bypassSpec{})
+	sb := genSingbox("main-router", ver, testNodes(), nil, nil, &sw, genOpts{})
 	sbFound := false
 	for _, r := range sb.doc["route"].(map[string]any)["rules"].([]any) {
 		m := r.(map[string]any)
@@ -399,7 +399,7 @@ func TestSingboxCustomGeoipUsesGeoipTag(t *testing.T) {
 	ver, _ := parseSBVersion("1.14")
 	warns := []string{}
 	g := genSingbox("main-router", ver, testNodes(), nil,
-		[]string{"GEOIP,cn,DIRECT"}, &warns, ruleMirrorSel{}, bypassSpec{})
+		[]string{"GEOIP,cn,DIRECT"}, &warns, genOpts{})
 	route := g.doc["route"].(map[string]any)
 	rules := route["rules"].([]any)
 
