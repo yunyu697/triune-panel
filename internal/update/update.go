@@ -239,6 +239,16 @@ type ghReleases []struct {
 // ListVersions 拉取某组件的可用版本列表（GitHub Releases）。
 // apiBase 可替换为镜像；失败时返回错误（调用方决定如何提示）。
 func ListVersions(apiBase, repo string) ([]Release, error) {
+	return ListVersionsToken(apiBase, repo, "")
+}
+
+// ListVersionsToken 同 ListVersions，但可以带上 GitHub Token。
+//
+// 差别不是「快一点」：匿名是 60 次/小时且按**出口 IP** 算，一个 NAT 后面的
+// 所有设备、以及机器上跑着的其它工具共用这一份；带 Token 是 5000 次/小时且
+// 按账号算。同一个人多设备、或者顺手点了两次「检查更新」，就从「够用」变成
+// 「一整天都拿不到列表」。
+func ListVersionsToken(apiBase, repo, token string) ([]Release, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("未配置仓库（owner/name）")
 	}
@@ -248,6 +258,10 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	// 规范化：列表 URL 与 AssetAPIURLs 共用同一个 apiBase，去掉尾斜杠避免拼出 //。
 	// 自定义 gh_api_base（镜像）时，兜底地址也跟着指向该域名，而不是硬编码 api.github.com。
 	apiBase = strings.TrimRight(apiBase, "/")
+	key := "api|" + apiBase + "|" + repo
+	if rels, ok := versionsCacheGet(key); ok {
+		return rels, nil
+	}
 	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", apiBase, repo)
 	client := &http.Client{Timeout: 60 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
@@ -257,13 +271,16 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	// GitHub API 强制要求 User-Agent，缺失会被 403/重置
 	req.Header.Set("User-Agent", "triune-panel")
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if token = strings.TrimSpace(token); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("获取版本列表失败: %w（网络受限时可设置 gh_api_base 镜像，或直接用 URL 方式更新）", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("获取版本列表失败: HTTP %d", resp.StatusCode)
+		return nil, httpFail("获取版本列表失败", resp)
 	}
 	var gh ghReleases
 	// 注意上限：sing-box 等仓库的 releases JSON 可达 10MB+，太小会截断报 unexpected EOF
@@ -306,6 +323,8 @@ func ListVersions(apiBase, repo string) ([]Release, error) {
 	// GitHub 按创建时间排序，补丁版本回填（如 v1.14.5 晚于 v1.15.0 发布）
 	// 会让「第一条」不是最高版本；这里按版本号重排，认不出的退化为按时间。
 	sortReleases(out)
+	// 成功才入缓存：失败也缓存的话，一次抖动会让「重试」在 5 分钟内反复撞同一堵墙。
+	versionsCachePut(key, out)
 	return out, nil
 }
 

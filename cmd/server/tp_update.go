@@ -104,7 +104,16 @@ func panelReleases(dataDir string) (rels []update.Release, source string, err er
 		src = "官方仓库"
 	}
 	apiBase, _ := st.GetSetting("gh_api_base")
-	rs, err := update.ListVersions(apiBase, repo)
+	token, _ := st.GetSetting("gh_token")
+	rs, err := update.ListVersionsToken(apiBase, repo, token)
+	if err != nil && update.IsRateLimited(err) {
+		// 终端里更没耐心看长错误：配额耗尽就直接换不计配额的订阅通道，
+		// 换成了只在来源名上标一句，不让用户去理解 403 是什么。
+		if atom, aerr := update.ListVersionsAtom("", repo); aerr == nil {
+			rs, err = atom, nil
+			src += "·releases 订阅"
+		}
+	}
 	if err != nil {
 		return nil, src, err
 	}

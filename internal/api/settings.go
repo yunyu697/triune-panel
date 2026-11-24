@@ -11,6 +11,7 @@ import (
 	"triune/internal/certmgr"
 	"triune/internal/core"
 	"triune/internal/model"
+	"triune/internal/update"
 )
 
 // ---- settings ----
@@ -61,6 +62,8 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// DNS-01：服务商 ID + 凭据（凭据不回显，见下面的打码）
 		certmgr.SettingDNSProvider, certmgr.SettingDNSEnv,
 		"gh_mirror", "gh_api_base", "panel_repo", "panel_update_index",
+		// GitHub Token：只回占位符（见下面的打码），空 = 匿名 60 次/小时
+		SettingGHToken,
 		// 2FA 状态展示（totp_secret 不下发前端）
 		"auth_2fa_mode", "auth_email",
 		"smtp_host", "smtp_port", "smtp_user", "smtp_from",
@@ -89,6 +92,11 @@ func (a *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		// 量级。所以这里破一次「设置项照常回显」的惯例：只回占位符，前端把
 		// 占位符原样提交回来表示「没改过」（见 putSettings）。
 		if k == certmgr.SettingDNSEnv && v != "" {
+			v = certmgr.MaskedSecret
+		}
+		// GitHub Token 同理：它是**别人账号的钥匙**（一个 PAT 能读你所有仓库的
+		// 私有内容），回显明文等于把它复制到每个打开设置页的浏览器里。
+		if k == SettingGHToken && v != "" {
 			v = certmgr.MaskedSecret
 		}
 		out[k] = v
@@ -141,6 +149,8 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 组件更新相关（UI「保存更新设置」提交这些键）
 		"gh_mirror": true, "gh_api_base": true,
 		"panel_repo": true, "panel_update_index": true,
+		// GitHub Token（空 = 匿名；非空必须是一整行，见下面的校验）
+		SettingGHToken: true,
 		// 2FA 邮箱通道（auth_2fa_mode / totp_secret 由专用端点管理，不接受直接写）
 		"auth_email": true,
 		"smtp_host":  true, "smtp_port": true, "smtp_user": true,
@@ -192,6 +202,29 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		m["server_ip"] = n
+	}
+	// GitHub Token：原样提交占位符 = 没改过（与 DNS 凭据同一条规矩）。
+	// 非空时只校验「是不是一整行」：Token 有经典版（ghp_…）与细粒度版
+	// （github_pat_…）两种形态，按前缀判会误伤镜像自签的令牌；真正该拦的是
+	// 把整段「export GH_TOKEN=…」或「Authorization: Bearer …」粘进来——
+	// 那样存进库的是一行命令，不是令牌，结果只会是一次次 401。
+	if v, ok := m[SettingGHToken]; ok {
+		v = strings.TrimSpace(v)
+		switch {
+		case v == certmgr.MaskedSecret:
+			delete(m, SettingGHToken) // 占位符 = 没改过，别拿它覆盖真令牌
+		case v == "":
+			m[SettingGHToken] = ""
+		case strings.ContainsAny(v, " \t\r\n"):
+			fail(w, 400, "GitHub Token 里不能有空格或换行：只填令牌本身，"+
+				"不要带 `Bearer` 前缀或 `export GH_TOKEN=` 这类整行命令")
+			return
+		case len(v) > 512:
+			fail(w, 400, "GitHub Token 过长（正常 40–93 个字符）")
+			return
+		default:
+			m[SettingGHToken] = v
+		}
 	}
 	// 规则集下载源同学校验：库里只留合法值，否则生成页读到一个已下线的
 	// 镜像 ID 时会静默退回官方，用户却以为自己在走镜像。
@@ -316,6 +349,15 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		changedKeys = append(changedKeys, k)
 		if old != v {
 			diff = append(diff, settingDiff(k, old, v))
+		}
+	}
+	// 改了仓库 / 接口地址 / Token 之后，缓存里的那份列表就不一定是「同一个
+	// 问题的答案」了，立刻作废——否则用户看到的是「设置改了，列表还是旧的」，
+	// 只好反复点重试去猜。
+	for _, k := range []string{"gh_api_base", "panel_repo", SettingGHToken} {
+		if _, ok := m[k]; ok {
+			update.InvalidateVersions()
+			break
 		}
 	}
 	// 审计只记「改了哪些键」，不记值——smtp_pass / stats_secret 这类敏感项

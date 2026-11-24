@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,15 @@ var componentRepos = map[string]string{
 // panel_repo 未配置时用它——否则「面板 → 版本列表」开箱就是 400，必须先知道
 // 要填什么才能用。fork 或自建分发在设置里改成自己的仓库即可。
 const defaultPanelRepo = "yunyu697/triune-panel"
+
+// SettingGHToken 面板访问 GitHub 用的 Token（空 = 匿名）。
+//
+// 匿名额度是 60 次/小时且**按出口 IP** 计：同一 NAT 后面的所有设备、机器上
+// 跑着的其它 GitHub 工具共用这一份，用光之后面板与内核的版本列表会一起失效，
+// 报错却只有一句 HTTP 403。Token 是 5000 次/小时、按账号计。
+//
+// 与 DNS 凭据同级对待：只落库、只回占位符，不回显明文。
+const SettingGHToken = "gh_token"
 
 // ---- 查询 ----
 
@@ -118,14 +128,17 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 			repo = defaultPanelRepo
 			source = "default" // 告诉前端这是内置默认仓库，不是用户配的
 		}
-		rels, err := update.ListVersions(a.ghAPIBase(), repo)
+		rels, via, err := a.listVersions(repo)
 		if err != nil {
 			fail(w, 502, err.Error())
 			return
 		}
+		if via == "atom" {
+			source = "atom"
+		}
 		// 面板自更新要的是「本机这份平台的二进制」直链，而 GitHub 的 release
 		// 里一堆资产。这里按当前 GOOS/GOARCH 挑一个填进 url，前端就不用自己拼。
-		fillPanelAssetURL(rels)
+		fillPanelAssetURL(rels, repo, via)
 		writeVersions(w, comp, source, rels, channel)
 		return
 	}
@@ -134,13 +147,41 @@ func (a *Server) handleUpdateVersions(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知组件: "+comp)
 		return
 	}
-	rels, err := update.ListVersions(a.ghAPIBase(), repo)
+	rels, via, err := a.listVersions(repo)
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
 	}
 	markMihomoIncompat(comp, rels)
-	writeVersions(w, comp, "github", rels, channel)
+	writeVersions(w, comp, via, rels, channel)
+}
+
+// listVersions 拉版本列表，配额耗尽时自动改走不计配额的 releases 订阅。
+//
+// 返回的第二个值是**实际用到的通道**（github / atom），前端据此提示「这份列表
+// 没有校验值」。两条都失败时返回配额那条错误并附上订阅失败的原因：如果只说
+// 「订阅失败」，用户会以为换个通道就能好。
+func (a *Server) listVersions(repo string) ([]update.Release, string, error) {
+	rels, err := update.ListVersionsToken(a.ghAPIBase(), repo, a.ghToken())
+	if err == nil {
+		return rels, "github", nil
+	}
+	if !update.IsRateLimited(err) {
+		return nil, "", err
+	}
+	atom, aerr := update.ListVersionsAtom("", repo)
+	if aerr != nil {
+		return nil, "", fmt.Errorf("%w；releases 订阅通道也不可用：%v", err, aerr)
+	}
+	log.Printf("[update] %s 的接口配额已用完，版本列表改读 releases 订阅", repo)
+	return atom, "atom", nil
+}
+
+// ghToken 面板访问 GitHub 用的 Token（可空）。
+// 空 = 匿名 60 次/小时；填了 = 5000 次/小时。只从设置读，不回显明文。
+func (a *Server) ghToken() string {
+	v, _ := a.Store.GetSetting(SettingGHToken)
+	return strings.TrimSpace(v)
 }
 
 // markMihomoIncompat 给版本列表打上「装上之后 mihomo 客户端连不上」的标记。
@@ -164,11 +205,21 @@ func markMihomoIncompat(component string, rels []update.Release) {
 // fillPanelAssetURL 给每条 release 挑出「本机这个平台」的二进制直链填进 url。
 // 面板自更新只认 URL（不像内核那样能按版本号拼），而一个 release 里躺着四个
 // 平台的资产，让前端去猜不现实。
-func fillPanelAssetURL(rels []update.Release) {
+//
+// via=atom 时 API 没给资产清单，只能按命名规律拼：面板资产的四个名字是我们
+// 自己在 release 脚本里定的（triune-panel-<os>-<arch>），所以拼得出来。这也是
+// 「哪些需求能不靠配额满足」的分界线——名字由我方决定的可派生，第三方内核的
+// 资产名不可派生（它们的命名随版本/构建方式变）。
+func fillPanelAssetURL(rels []update.Release, repo, via string) {
 	name := fmt.Sprintf("triune-panel-%s-%s", runtime.GOOS, runtime.GOARCH)
 	for i := range rels {
 		if u := rels[i].AssetURLs[name]; u != "" {
 			rels[i].URL = u
+			continue
+		}
+		if via == "atom" && rels[i].Tag != "" {
+			rels[i].URL = fmt.Sprintf("https://github.com/%s/releases/download/%s/%s",
+				repo, url.PathEscape(rels[i].Tag), name)
 		}
 	}
 }

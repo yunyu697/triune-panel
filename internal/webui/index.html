@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.1.9 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.2.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -2218,6 +2218,14 @@ html.upwaiting body{overflow:hidden}
         <div class="frm" style="margin-top:10px">
           <div><label>默认下载镜像（可选，留空 = 官方地址）</label><input id="s_gh_mirror" class="input" placeholder="https://ghfast.top"></div>
           <div><label>面板版本索引 URL（可选）</label><input id="s_panel_index" class="input" placeholder="https://.../versions.json"></div>
+          <div class="full"><label>GitHub Token（可选，留空 = 匿名）</label><input id="s_gh_token" class="input mono" placeholder="ghp_… 或 github_pat_…" autocomplete="off"></div>
+          <p class="muted full" style="margin:0;font-size:12.5px;line-height:1.6">
+            不填 Token 时是<b>匿名请求，60 次/小时，按出口 IP 算</b>——同一个网络里的所有设备、
+            以及这台机器上其它用 GitHub 的工具共用这一份。用完之后面板与内核的版本列表会一起拿不到，
+            报「HTTP 403」。填了 Token 是 <b>5000 次/小时、按账号算</b>；只读权限就够，不需要任何勾选。
+            版本列表有 5 分钟缓存，配额耗尽时会自动改读 <code>releases.atom</code> 订阅（不计配额，
+            但没有资产校验值）。
+          </p>
         </div>
         <div class="card-actions">
           <button class="btn primary" data-act="saveUpdateSettings">保存更新设置</button>

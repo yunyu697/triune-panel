@@ -1106,7 +1106,9 @@ if (DEMO) {
       {id:1,core:"singbox",status:"failed_validation",note:"导入预检",created_at:"2026-10-30T22:51:33",detail:"校验失败示例: inbound/sg-01: port 36712 already in use"}
     ],
     settings:{bin_singbox:"/usr/local/bin/sing-box",bin_xray:"/usr/local/bin/xray",bin_mihomo:"",public_host:"vps.example.com",server_ip:"203.0.113.10",stats_enabled:"1",stats_secret:"",metrics_token:"demo-metrics-token-0123456789abcdef",quota_warn_pct:"80",acme_enabled:"1",acme_domain:"example.com,*.example.com",acme_email:"admin@example.com",acme_dns_provider:"cloudflare",acme_dns_env:"********",auth_email:"admin@example.com",smtp_host:"smtp.example.com",smtp_port:"465",smtp_user:"demo",smtp_from:"panel@example.com",notify_email:"ops@example.com",notify_webhook:"https://hooks.example.com/triune",notify_events:"settings,inbound,client",external_in_sub:"0",show_compat_core:"0",
-      backup_keep_count:"0",backup_max_mb:"0",backup_max_days:"0",backup_auto_prune:"0"},
+      backup_keep_count:"0",backup_max_mb:"0",backup_max_days:"0",backup_auto_prune:"0",
+      // 演示里留空：填了会显示 ********，容易被当成「已经配好了」
+      gh_token:""},
     // 备份容量治理与主机体检的演示数据：让离线 demo 也能完整走一遍预览→清理、
     // 检测→应用→撤销，而不是点进去一片空白。
     backupInventory:{
@@ -1370,7 +1372,16 @@ async function mockRoute(path, opts) {
     return { ok: true, channels: ch };
   }
   if (api === "settings" && m === "GET") return MDB.settings;
-  if (api === "settings" && m === "PUT") { Object.assign(MDB.settings, opts.body); return {ok:1}; }
+  if (api === "settings" && m === "PUT") {
+    // 与服务端同一条规矩：提交 ******** 表示「没改过」，别拿占位符覆盖真值。
+    // 演示页少了这一条就会演示出「保存一次就把凭据弄丢了」。
+    const patch = {};
+    Object.keys(opts.body || {}).forEach(k => {
+      if (opts.body[k] !== "********") patch[k] = opts.body[k];
+    });
+    Object.assign(MDB.settings, patch);
+    return {ok:1};
+  }
   if (api === "backups" && rest === "/inventory") {
     const inv = MDB.backupInventory, st = MDB.settings;
     inv.policy = { keep_count:+st.backup_keep_count || 0, max_mb:+st.backup_max_mb || 0,
@@ -1629,7 +1640,8 @@ async function mockRoute(path, opts) {
                     prerelease:releases.filter(r=>r.prerelease).length};
     const shown = ch === "all" ? releases
       : releases.filter(r => (ch === "prerelease") === !!r.prerelease);
-    return {component:comp,source:"github",channel:ch,counts,releases:shown};
+    // __demoVerSource="atom" 可以演示「接口配额用完、改读订阅」时的提示
+    return {component:comp,source:window.__demoVerSource || "github",channel:ch,counts,releases:shown};
   }
   if (api.startsWith("cores/") && api.endsWith("/update")) { await new Promise(r=>setTimeout(r,900)); const c=api.split("/")[1];
     const installed = !MDB.settings["bin_"+c];
@@ -8413,6 +8425,9 @@ async function loadSettings() {
     $("s_acme_dns_env").value = j.acme_dns_env || "";
     acmeSyncUI();
     $("s_gh_mirror").value = j.gh_mirror || ""; $("s_panel_index").value = j.panel_update_index || "";
+    // Token 和 DNS 凭据一样只回占位符：照原样填回，保存时原样提交 = 没改。
+    // 清空才是「退回匿名」，所以这里不能把占位符当空值处理。
+    $("s_gh_token").value = j.gh_token || "";
     $("s_auth_email").value = j.auth_email || "";
     $("s_smtp_host").value = j.smtp_host || ""; $("s_smtp_port").value = j.smtp_port || "";
     $("s_smtp_user").value = j.smtp_user || ""; $("s_smtp_from").value = j.smtp_from || "";
@@ -8823,6 +8838,9 @@ async function fetchVersions(comp, install = false) {
   try {
     const j = await req("/api/updates/versions?component=" + comp + "&channel=all");
     verAll = j.releases || [];
+    // 走的是订阅兜底：列表是真的，但没有资产校验值。不说清楚的话，用户会在
+    // 「为什么这次没有 sha256」上怀疑面板出了别的问题。
+    if (j.source === "atom") toast("接口配额已用完，本次版本列表改读 releases 订阅（无 sha256；下载后仍会校验可执行性与版本号）", "warn");
     verCounts = j.counts || {};
     if (!verAll.length) { toast("版本列表为空", "warn"); return; }
     $("vs_component").textContent = comp;
@@ -9016,7 +9034,8 @@ async function coreRollbackDlg(comp) {
 
 async function saveUpdateSettings() {
   try {
-    await req("/api/settings", { method:"PUT", body:{ gh_mirror:$("s_gh_mirror").value, panel_update_index:$("s_panel_index").value } });
+    await req("/api/settings", { method:"PUT", body:{ gh_mirror:$("s_gh_mirror").value, panel_update_index:$("s_panel_index").value,
+      gh_token:$("s_gh_token").value.trim() } });
     markDirty("set_card_update", false);
     $("updsetmsg").textContent = "已保存"; setTimeout(()=>$("updsetmsg").textContent="", 2500);
   } catch(e){ toast(e.message, "err"); }
