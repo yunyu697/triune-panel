@@ -5431,10 +5431,13 @@ function driftChipHTML(c) {
   if (!d || !d.stale) return "";
   const txt = d.unknown
     ? "旧版本生成"
-    : (d.added_count ? `落后 ${d.added_count} 条` : `少 ${d.removed_count} 条`);
+    : (d.added_count ? `落后 ${d.added_count} 条`
+      : (d.removed_count ? `少 ${d.removed_count} 条` : "生成器已更新"));
   const tip = d.unknown
     ? "这份配置保存时还没记录规则快照，无法判断差在哪，建议重新生成"
-    : "点开看多了 / 少了哪几条内置规则";
+    : (d.generator_changed && !d.added_count && !d.removed_count
+      ? "内置规则没变，但生成器行为变了（嗅探 / TUN / 规则顺序这类），产物会不一样"
+      : "点开看多了 / 少了哪几条内置规则");
   return ` <button class="chip warn" style="border:0;cursor:pointer;vertical-align:middle"
       data-act="showDrift" data-args="${escJson([c.id, c.name])}" title="${escHtml(tip)}">${escHtml(txt)}</button>`;
 }
@@ -5456,6 +5459,11 @@ async function showDrift(id, name) {
     } else if (!d.stale) {
       html += `<p class="muted">内置规则与当前版本一致，没有需要补的条目。</p>`;
     } else {
+      if (d.generator_changed) {
+        html += `<p>这份配置是旧版生成器产出的：内置规则一条不差，但产物的行为变了
+          （嗅探端口、TUN MTU、规则顺序这类不在规则行里的设置）。旧产物的表现可能和新版本
+          对不上，重新生成一次就好。</p>`;
+      }
       if ((d.added || []).length) {
         html += `<h4 style="margin:12px 0 6px;font-size:13.5px">当前版本新增 ${d.added.length} 条（你的配置里没有）</h4>${rows(d.added)}`;
       }
@@ -5473,7 +5481,7 @@ async function showDrift(id, name) {
 function demoDrift() {
   return {
     panel_version: "v2.0.7", current_version: "v2.0.9",
-    stale: true, unknown: false, added_count: 2, removed_count: 0,
+    stale: true, unknown: false, added_count: 2, removed_count: 0, generator_changed: false,
     added: ["DOMAIN,ocsp.apple.com,DIRECT", "DOMAIN-SUFFIX,ls.apple.com,DIRECT"],
     removed: []
   };

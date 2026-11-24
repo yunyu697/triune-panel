@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -1226,8 +1228,28 @@ var privateCIDRs = []string{
 	"::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
 }
 
+// localOnlySuffixes 是「公网 DNS 一定答不出来、必须由本地解析器回答」的名字后缀。
+//
+// 这些是标准规定的特殊用途域名，不是谁家的服务清单：
+//   - local（RFC 6761）：mDNS，隔空投送 / 打印机 / 智能家居发现；
+//   - home.arpa（RFC 8375）：家庭网络专用域；
+//   - lan / localdomain：dnsmasq 与大量家用路由的默认域，实测广泛在用。
+//
+// 两套内核都需要这件事，但机制完全不同，所以各写一遍时最容易漏一边：
+// mihomo 是 fake-ip 模式下把域名排除出 fake-ip（否则拿到 198.18.x.x，局域网
+// 名字当然连不上）；sing-box 没有 fake-ip，必须显式写成 `dns.rules → local`，
+// 否则落到 `final: remote`，经代理去问 DoH——局域网主机名必然解析失败。
+// 此前只有 mihomo 侧有 `*.lan` / `*.local`，sing-box 用户的 NAS、打印机
+// 主机名一直解析不了，而两边配置都合法、都不报错。
+var localOnlySuffixes = []string{"lan", "local", "home.arpa", "localdomain"}
+
+// fakeIPFilter 只收「fake-ip 本身会坏事、而 sing-box 侧不存在对应问题」的条目：
+// STUN / 主机待机联网（Nintendo、PlayStation、Xbox）拿假 IP 就没法工作，
+// 时间同步域名拿到假 IP 会让 NTP 客户端连到 198.18.x.x。
+//
+// 连通性检测（msftconnecttest / msftncsi）不在这里——它们属于内置直连类，
+// 由 systemDirectFakeIPFilter 派生，写两遍只会让后来的人以为要一起改。
 var fakeIPFilter = []string{
-	"*.lan", "*.local", "+.msftconnecttest.com", "+.msftncsi.com",
 	"+.stun.*", "+.srv.nintendo.net", "+.stun.playstation.net",
 	"xbox.*.microsoft.com", "+.xboxlive.com", "time.*.com", "ntp.*.com",
 }
@@ -1386,27 +1408,81 @@ func sbRuleBody(typ, val string) map[string]any {
 	return nil
 }
 
+// systemDirectDNSForms 把 systemDirectRules 拆成「精确域名 / 后缀」两组。
+//
+// 抽出来的理由与 sbRuleBody 相同：mihomo 的 `fake-ip-filter` 与 sing-box 的
+// `dns.rules → local` 是同一件事的两种写法（这些域名必须拿真实 IP、必须本地
+// 解析，否则「DNS 经代理、流量走直连」形成死锁）。两边各自写一遍 parse+switch
+// 时，一边加了新类型、另一边静默漏掉——两边都不报错，只有那个服务连不上。
+//
+// 只认 DOMAIN 与 DOMAIN-SUFFIX：IP-CIDR 之类与域名过滤无关，写进 fake-ip-filter
+// 不报错但毫无作用；清单允许的类型由 TestSystemListsUseSupportedRuleTypes 钉住。
+func systemDirectDNSForms() (exact, suffix []string) {
+	exact = make([]string, 0, len(systemDirectRules))
+	suffix = make([]string, 0, 8)
+	for _, line := range systemDirectRules {
+		typ, val, _, ok := parseCustomRule(line)
+		if !ok {
+			continue // 清单是我们自己写的，解析失败只能是代码 bug，由单测兜住
+		}
+		switch typ {
+		case "DOMAIN":
+			exact = append(exact, val)
+		case "DOMAIN-SUFFIX":
+			suffix = append(suffix, val)
+		}
+	}
+	return exact, suffix
+}
+
 // systemDirectFakeIPFilter 是 systemDirectRules 在 mihomo fake-ip-filter 里的对应写法。
 // TUN + fake-ip 下若不排除，这些域名会拿到 198.18.x.x 假 IP，依赖证书固定的
 // 客户端（App Store / OneDrive / Microsoft 账号）握手失败——规则再对也连不上。
-// 由 systemDirectRules 派生而非另写一份，避免两处清单漂移。
+// 与 sing-box 的 dns.rules 同源派生（systemDirectDNSForms），避免两套产物漂移。
 func systemDirectFakeIPFilter() []string {
-	out := make([]string, 0, len(systemDirectRules))
-	for _, line := range systemDirectRules {
-		parts := strings.Split(line, ",")
-		if len(parts) < 2 {
-			continue
-		}
-		switch parts[0] {
-		case "DOMAIN":
-			out = append(out, parts[1])
-		case "DOMAIN-SUFFIX":
-			out = append(out, "+."+parts[1])
-		}
-		// 其它类型（IP-CIDR 等）与域名过滤无关，跳过——把 IP 字符串写进
-		// fake-ip-filter 不报错但毫无作用，留着只会让人误以为已处理。
+	exact, suffix := systemDirectDNSForms()
+	out := make([]string, 0, len(exact)+len(suffix)+len(localOnlySuffixes))
+	out = append(out, exact...)
+	for _, s := range suffix {
+		out = append(out, "+."+s)
+	}
+	// 局域网专用后缀同样不能进 fake-ip：`nas.lan` 拿到 198.18.x.x 就再也连不上。
+	for _, s := range localOnlySuffixes {
+		out = append(out, "+."+s)
 	}
 	return out
+}
+
+// generatorStamp 是对「当前生成器行为」取的指纹：用一份固定的最小输入跑一遍
+// mihomo 生成器，对**产物本身**做哈希。
+//
+// 为什么不是再往快照里加几行（嗅探端口、MTU、规则位置……）：那还是枚举，
+// 下次改的是没被枚举到的旋钮时，用户照样收不到「该重新生成」的提示。v2.1.5
+// 就是现成的例子——真正让 APNs 规则生效的是嗅探端口从 `443,8443` 放开到
+// 全端口，而旧快照只记规则行，那一版之所以还报了漂移，纯粹因为同时新增了
+// `push.apple.com` 这一行。哪天只改嗅探，漂移就是零条、界面显示「一致」。
+//
+// 取产物指纹等于把判据换成「生成器还吐不吐同样的东西」，新增任何影响产物的
+// 开关都不用记得来这里登记。刻意排除头注释：里面带版本号与下载源，会让每次
+// 发版都报漂移，而那种漂移没有行为含义。
+//
+// 输入固定为「路由目标 + 零节点 + 零规则集 + 零自定义规则 + 官方源」：
+// 规则清单、嗅探、TUN、DNS、分组结构都在这条路径上，且不依赖任何用户数据。
+func generatorStamp() string {
+	var warns []string
+	g := genMihomo("router", nil, nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	return stampOf(g.doc)
+}
+
+// stampOf 对一份产物取短指纹。抽出来是为了让测试能证明「产物变了 → 指纹变了」，
+// 而不是只证明「同一份产物两次哈希一样」。
+func stampOf(doc map[string]any) string {
+	body, err := yaml.Marshal(doc)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // mihomoMixedPort 客户端配置里的默认混合端口（HTTP/SOCKS 同端口）。
@@ -1886,26 +1962,23 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	}
 	// 系统关键服务用本地 DNS 解析：它们是直连流量，若落到 final:remote（经代理的
 	// DoH）会拿到与直连出口不匹配的 IP，且 DoH 本身依赖代理先连通——形成死锁。
-	// 与 mihomo 的 fake-ip-filter 对应，同一份 systemDirectRules 派生。
-	sysDomains, sysSuffixes := []string{}, []string{}
-	for _, line := range systemDirectRules {
-		typ, val, _, ok := parseCustomRule(line)
-		if !ok {
-			continue
-		}
-		switch typ {
-		case "DOMAIN":
-			sysDomains = append(sysDomains, val)
-		case "DOMAIN-SUFFIX":
-			sysSuffixes = append(sysSuffixes, val)
-		}
-	}
+	// 与 mihomo 的 fake-ip-filter 同源派生（systemDirectDNSForms），一份清单两种写法。
+	sysDomains, sysSuffixes := systemDirectDNSForms()
 	if len(sysDomains) > 0 {
 		dnsRules = append(dnsRules, map[string]any{"domain": toAnySlice(sysDomains), "server": "local"})
 	}
 	if len(sysSuffixes) > 0 {
 		dnsRules = append(dnsRules, map[string]any{"domain_suffix": toAnySlice(sysSuffixes), "server": "local"})
 	}
+	// 局域网专用后缀（.lan / .local / .home.arpa / .localdomain）交给本地解析。
+	// 与 mihomo 的 fake-ip-filter 是同一件事的另一种写法（见 localOnlySuffixes）；
+	// 之前只写了 mihomo 那一侧，sing-box 用户的 NAS / 打印机主机名落在
+	// final:remote，经代理问 DoH 必然失败。
+	//
+	// 用裸后缀是安全的：实测 sing-box 1.15 的 domain_suffix 按标签边界匹配，
+	// `lan` 命中 `nas.lan` 与 `lan`，不命中 `japan`。
+	dnsRules = append(dnsRules, map[string]any{
+		"domain_suffix": toAnySlice(localOnlySuffixes), "server": "local"})
 	dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-cn"}, "server": "local"})
 	if hasSet(sets, "geosite-private") {
 		dnsRules = append(dnsRules, map[string]any{"rule_set": []any{"geosite-private"}, "server": "local"})

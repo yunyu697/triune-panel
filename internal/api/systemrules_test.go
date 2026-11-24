@@ -181,6 +181,72 @@ func TestSystemRuleSnapshotDrift(t *testing.T) {
 	}
 }
 
+// 生成器指纹：规则一条不差、但生成器行为变了，也必须报漂移。
+//
+// 这条防的是「快照只记规则行」的老办法：嗅探端口、TUN MTU、规则顺序这类
+// 不在规则行里的改动，旧办法会显示「一致」——用户以为没事，产物其实变了。
+func TestGeneratorStampDetectsBehaviorChange(t *testing.T) {
+	stamp := generatorStamp()
+	if stamp == "" {
+		t.Fatal("生成器指纹为空：取指纹失败时漂移会静默失效")
+	}
+	if again := generatorStamp(); again != stamp {
+		t.Fatalf("两次指纹不一致（%s vs %s）：生成器不确定，指纹就没法比", stamp, again)
+	}
+
+	// 指纹的输入必须是「整份产物」，不是一份挑剩下的骨架：少哪个旋钮，
+	// 那个旋钮的改动就永远触发不了漂移。v2.1.5 的嗅探端口就是漏网的例子。
+	var warns []string
+	canon := genMihomo("router", nil, nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	for _, k := range []string{"sniffer", "tun", "dns", "rules", "proxy-groups", "rule-providers"} {
+		if _, ok := canon.doc[k]; !ok {
+			t.Errorf("指纹输入里没有 %q，这个旋钮的改动不会触发漂移", k)
+		}
+	}
+	// 产物真的变了，指纹必须跟着变——只改一个嗅探端口就够了
+	base := stampOf(canon.doc)
+	sniff := canon.doc["sniffer"].(map[string]any)["sniff"].(map[string]any)
+	sniff["TLS"] = map[string]any{"ports": []any{443, 8443}}
+	if stampOf(canon.doc) == base {
+		t.Error("改了嗅探端口但指纹没变：指纹没有覆盖产物内容")
+	}
+
+	got, rules := splitRuleSnapshot(systemRuleSnapshot())
+	if got != stamp {
+		t.Errorf("快照应带指纹 %q，实际 %q", stamp, got)
+	}
+	if len(rules) != len(systemRuleSnapshotRules()) {
+		t.Errorf("拆分后规则条数 %d，应为 %d（指纹行不能被算成一条规则）", len(rules), len(systemRuleSnapshotRules()))
+	}
+	for _, r := range rules {
+		if strings.HasPrefix(r, genStampPrefix) {
+			t.Errorf("拆分后的规则里还残留指纹行：%q", r)
+		}
+	}
+
+	// 规则完全一样、只有指纹不同 → stale + generator_changed，且不许报增删条数
+	old, _ := json.Marshal(append([]string{genStampPrefix + "deadbeef0000"}, systemRuleSnapshotRules()...))
+	d := driftOf(string(old))
+	if !d.Stale || !d.GeneratorChanged {
+		t.Fatalf("生成器变了却没报漂移：%+v", d)
+	}
+	if d.AddedCount != 0 || d.RemovedCount != 0 {
+		t.Errorf("规则没变，不该报增删：+%d -%d", d.AddedCount, d.RemovedCount)
+	}
+
+	// 加指纹之前存的记录没有指纹：不能当成「行为变了」，否则历史配置全标红
+	legacy, _ := json.Marshal(systemRuleSnapshotRules())
+	if d := driftOf(string(legacy)); d.Stale || d.GeneratorChanged {
+		t.Errorf("没有指纹的旧快照不该报行为变化：%+v", d)
+	}
+
+	// 反向：指纹一致也不能把「少了几条规则」压掉
+	short, _ := json.Marshal(append([]string{genStampPrefix + stamp}, systemRuleSnapshotRules()[:5]...))
+	if d := driftOf(string(short)); !d.Stale || d.GeneratorChanged {
+		t.Errorf("少了规则却没报漂移：%+v", d)
+	}
+}
+
 // 保存配置时要把版本与规则快照一起落库，列表接口据此报「落后」。
 func TestConfigSaveRecordsDriftAndReportsStale(t *testing.T) {
 	a := newRoleTestServer(t)

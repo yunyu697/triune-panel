@@ -183,18 +183,32 @@ func TestMomoInheritsSystemDirect(t *testing.T) {
 // fake-ip-filter 与直连规则必须同源派生，避免两处清单漂移导致「规则对但连不上」。
 func TestSystemDirectFakeIPFilterDerived(t *testing.T) {
 	filter := systemDirectFakeIPFilter()
-	if len(filter) != len(systemDirectRules) {
-		t.Fatalf("filter %d 条 != 规则 %d 条", len(filter), len(systemDirectRules))
+	// 按集合比，不按位置：fake-ip-filter 是集合语义，派生顺序（精确域名在前、
+	// 后缀在后）不该被当成契约。
+	want := map[string]bool{}
+	exact, suffix := systemDirectDNSForms()
+	for _, d := range exact {
+		want[d] = true
 	}
-	for i, line := range systemDirectRules {
-		typ, val, _, _ := parseCustomRule(line)
-		want := val
-		if typ == "DOMAIN-SUFFIX" {
-			want = "+." + val
+	for _, s := range suffix {
+		want["+."+s] = true
+	}
+	for _, s := range localOnlySuffixes {
+		want["+."+s] = true
+	}
+	if len(filter) != len(want) || len(want) != len(systemDirectRules)+len(localOnlySuffixes) {
+		t.Fatalf("filter %d 条、派生 %d 条、规则 %d 条 + 局域网后缀 %d 条，应相等",
+			len(filter), len(want), len(systemDirectRules), len(localOnlySuffixes))
+	}
+	for _, got := range filter {
+		if !want[got] {
+			t.Errorf("filter 里多出 %q", got)
+			continue
 		}
-		if filter[i] != want {
-			t.Errorf("filter[%d]=%q，期望 %q", i, filter[i], want)
-		}
+		delete(want, got)
+	}
+	for miss := range want {
+		t.Errorf("filter 少了 %q", miss)
 	}
 	// 关键域名必须在 mihomo 的 fake-ip-filter 里出现。每个「类」各取一条，
 	// 避免下次只改一类就以为全好了。
@@ -219,6 +233,77 @@ func TestSystemDirectFakeIPFilterDerived(t *testing.T) {
 		}
 		if !ok {
 			t.Errorf("fake-ip-filter 缺少 %s", want)
+		}
+	}
+}
+
+// 「这些名字必须由本地解析」在两套产物里都得成立。
+//
+// 两套内核的机制不同：mihomo 是 fake-ip 模式下把域名排除出 fake-ip（否则拿到
+// 198.18.x.x），sing-box 是 dns.rules → local（否则落 final: remote，经代理问
+// DoH）。同一条需求两种写法，各自写一遍时最容易漏一边——sing-box 侧的
+// .lan / .local 就这样漏了整整几版：局域网主机名解析不了，两边都不报错。
+//
+// 这里断言的是「共享契约」：直连清单里的域名 + 局域网专用后缀。
+// 不进契约的：STUN / Xbox / NTP 那几个 fake-ip 专属条目（sing-box 没有 fake-ip，
+// 本来就不会把它们的域名映射成假地址，无需对应规则）。
+func TestBothCoresResolveDirectNamesLocally(t *testing.T) {
+	warns := []string{}
+	strs := func(v any) []string {
+		out := []string{}
+		if arr, ok := v.([]any); ok {
+			for _, x := range arr {
+				if s, ok := x.(string); ok {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	}
+
+	want := map[string]bool{}
+	exact, suffix := systemDirectDNSForms()
+	for _, d := range exact {
+		want[d] = true
+	}
+	for _, s := range suffix {
+		want["+."+s] = true
+	}
+	for _, s := range localOnlySuffixes {
+		want["+."+s] = true
+	}
+	if len(want) == 0 {
+		t.Fatal("共享契约是空的，这份用例会变成空断言")
+	}
+
+	mg := genMihomo("main-router", testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	mihomoSet := map[string]bool{}
+	for _, d := range strs(mg.doc["dns"].(map[string]any)["fake-ip-filter"]) {
+		mihomoSet[d] = true
+	}
+
+	v, _ := parseSBVersion("1.14")
+	sg := genSingbox("main-router", v, testNodes(), nil, nil, &warns, ruleMirrorSel{}, bypassSpec{})
+	sbSet := map[string]bool{}
+	for _, r := range sg.doc["dns"].(map[string]any)["rules"].([]any) {
+		m, ok := r.(map[string]any)
+		if !ok || m["server"] != "local" {
+			continue
+		}
+		for _, d := range strs(m["domain"]) {
+			sbSet[d] = true
+		}
+		for _, d := range strs(m["domain_suffix"]) {
+			sbSet["+."+d] = true
+		}
+	}
+
+	for d := range want {
+		if !mihomoSet[d] {
+			t.Errorf("mihomo 的 fake-ip-filter 少了 %q：该域名会拿到假 IP", d)
+		}
+		if !sbSet[d] {
+			t.Errorf("sing-box 的 dns.rules 没把 %q 交给本地解析：会经代理问 DoH", d)
 		}
 	}
 }

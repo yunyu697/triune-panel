@@ -298,12 +298,23 @@ func ruleListMatches(rules []string, policy, domain string) bool {
 	return false
 }
 
-// systemRuleSnapshot 当前二进制内置的整套系统规则，一条一行、原文保留。
+// systemRuleSnapshot 当前二进制内置的整套系统规则，一条一行、原文保留，
+// 外加一条生成器指纹（`@gen:` 前缀，见 splitRuleSnapshot）。
 //
 // 存进「保存的配置」里，用来事后回答「这份配置比现在少了哪几条」。
 // 只放会影响分流结果的东西：端口与私网段也各有策略，所以一并收进来——
 // 少了 100.64.0.0/10 这种变化，用户同样会撞上奇怪的现象。
 func systemRuleSnapshot() []string {
+	rules := systemRuleSnapshotRules()
+	out := make([]string, 0, len(rules)+1)
+	if s := generatorStamp(); s != "" {
+		out = append(out, genStampPrefix+s)
+	}
+	return append(out, rules...)
+}
+
+// systemRuleSnapshotRules 只含规则行，不含指纹。
+func systemRuleSnapshotRules() []string {
 	out := make([]string, 0,
 		len(blockExemptRules)+len(systemDirectRules)+len(systemProxyDomains)+len(systemProxyCIDRs)+len(privateCIDRs)+len(systemDirectPorts))
 	// 拦截豁免也算「影响分流结果」：老配置少了这两条，勾着广告拦截时
@@ -321,6 +332,27 @@ func systemRuleSnapshot() []string {
 		out = append(out, fmt.Sprintf("PORT,%d,DIRECT", p))
 	}
 	return out
+}
+
+// genStampPrefix 给指纹行加的前缀。取 `@` 开头是因为规则行总以类型名开头
+// （DOMAIN / IP-CIDR / PORT…），自定义规则也被 parseCustomRuleFull 限制在这几种，
+// 不会撞车；拆分时只认这个前缀，其余一律当规则原文。
+const genStampPrefix = "@gen:"
+
+// splitRuleSnapshot 把快照拆成「生成器指纹」与「规则行」两部分。
+//
+// 规则行的对比要按集合求差（用户看的是多了哪几条），指纹只做等值比较——
+// 混在一起会让界面把 `@gen:xxx` 当成一条新增规则展示。
+func splitRuleSnapshot(snap []string) (stamp string, rules []string) {
+	rules = make([]string, 0, len(snap))
+	for _, s := range snap {
+		if strings.HasPrefix(s, genStampPrefix) {
+			stamp = strings.TrimPrefix(s, genStampPrefix)
+			continue
+		}
+		rules = append(rules, s)
+	}
+	return stamp, rules
 }
 
 // diffRuleSnapshot 按集合求差，保持各自原有顺序（配置文件是给人看的，
@@ -578,6 +610,10 @@ type configDriftView struct {
 	CurrentVersion string `json:"current_version"`
 	AddedCount     int    `json:"added_count"`
 	RemovedCount   int    `json:"removed_count"`
+	// GeneratorChanged 表示「规则一条不差，但生成器行为变了」（嗅探端口、
+	// TUN MTU、规则顺序这类不在规则行里的东西）。只看 Added/Removed 会显示
+	// 「一致」，而产物其实已经不一样了。
+	GeneratorChanged bool `json:"generator_changed"`
 }
 
 // configDriftDetail 详情页要的漂移明细（规则行原文）。
@@ -587,10 +623,13 @@ type configDriftDetail struct {
 	Removed []string `json:"removed"`
 }
 
-// driftOf 算出某份配置相对当前二进制的规则漂移。
+// driftOf 算出某份配置相对当前二进制的漂移。
 //
 // 快照为空说明是旧库里的记录（加字段之前保存的）。这种情况**不假装它是最新的**：
 // Unknown=true，界面按「建议重新生成」提示，用户点一下就能拿到新配置。
+//
+// 规则行按集合求差；生成器指纹只做等值比较，两者分开呈现——用户要看的是
+// 「多了哪几条规则」，「生成器行为变了」是另一句话。
 func driftOf(snapshot string) configDriftDetail {
 	d := configDriftDetail{configDriftView: configDriftView{CurrentVersion: Version}}
 	d.Added, d.Removed = []string{}, []string{}
@@ -605,9 +644,13 @@ func driftOf(snapshot string) configDriftDetail {
 		d.Stale = true
 		return d
 	}
-	added, removed := diffRuleSnapshot(old, systemRuleSnapshot())
+	oldStamp, oldRules := splitRuleSnapshot(old)
+	added, removed := diffRuleSnapshot(oldRules, systemRuleSnapshotRules())
 	d.Added, d.Removed = added, removed
 	d.AddedCount, d.RemovedCount = len(added), len(removed)
-	d.Stale = len(added) > 0 || len(removed) > 0
+	// 只在两边都有指纹时比较：指纹是这次才加进快照的，把「旧记录没有指纹」
+	// 当成「行为变了」会让所有历史配置一次性标红，那只是噪音。
+	d.GeneratorChanged = oldStamp != "" && oldStamp != generatorStamp()
+	d.Stale = len(added) > 0 || len(removed) > 0 || d.GeneratorChanged
 	return d
 }
