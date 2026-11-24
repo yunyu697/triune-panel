@@ -62,6 +62,16 @@ var systemClasses = []systemClass{
 		Sets:   []string{"geosite-apple"},
 	},
 	{
+		Key: "apple-push", Name: "Apple 推送（APNs）", Expect: "direct",
+		// 裸 push.apple.com 不解析，真实主机形如 7-courier2.push.apple.com，
+		// 探针必须用能解析的那个，否则体检会报「解析失败」，看起来像规则坏了。
+		Probes: []string{"courier.push.apple.com"},
+		// APNs 不说 HTTP：只查解析归属，不发 HTTP 请求。
+		URL:  "",
+		Hint: "推送延迟高、反复断连重连，iPhone / iPad 待机耗电明显加快",
+		Sets: []string{"geosite-apple"},
+	},
+	{
 		Key: "ms-login", Name: "Microsoft 账号登录", Expect: "direct",
 		Probes: []string{"login.live.com", "login.microsoftonline.com"},
 		URL:    "https://login.live.com/",

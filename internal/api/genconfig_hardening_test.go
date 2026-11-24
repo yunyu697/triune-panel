@@ -11,20 +11,40 @@ package api
 //   3. geoip-cn 只有远程规则集一层 → 首次启动下载失败即整条规则消失。
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// hasPort 判断 mihomo 的 ports 列表是否包含某个数字端口。
-// 列表里可能混着 "8080-8880" 这样的区间字符串，只认精确的数字项。
-func hasPort(v any, want int) bool {
+// portRangeCovers 判断 mihomo 的 ports 列表是否覆盖某个端口。
+//
+// 列表里既可能是数字 443，也可能是区间字符串 "1-65535"、"8080-8880"。
+// 只认精确数字项会漏判区间——而「区间覆盖了某端口」和「枚举了某端口」
+// 对内核来说完全等价，测试必须按内核的语义来判。
+func portRangeCovers(v any, want int) bool {
 	arr, ok := v.([]any)
 	if !ok {
 		return false
 	}
 	for _, x := range arr {
-		if n, ok := x.(int); ok && n == want {
-			return true
+		switch t := x.(type) {
+		case int:
+			if t == want {
+				return true
+			}
+		case string:
+			lo, hi, found := strings.Cut(t, "-")
+			if !found {
+				continue
+			}
+			a, err1 := strconv.Atoi(strings.TrimSpace(lo))
+			b, err2 := strconv.Atoi(strings.TrimSpace(hi))
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			if want >= a && want <= b {
+				return true
+			}
 		}
 	}
 	return false
@@ -58,7 +78,7 @@ func TestMihomoSnifferCoversQUIC(t *testing.T) {
 			t.Errorf("sniffer.sniff 缺少 %s", c.key)
 			continue
 		}
-		if !hasPort(m["ports"], c.port) {
+		if !portRangeCovers(m["ports"], c.port) {
 			t.Errorf("sniffer.sniff.%s 未覆盖 %d 端口: %v", c.key, c.port, m["ports"])
 		}
 	}

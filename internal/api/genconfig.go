@@ -1373,6 +1373,16 @@ var systemDirectRules = []string{
 	// download.mediafire.com → 104.18.213.225 / 104.18.214.225），
 	// 按 IP 放行会把同一片 CF 上的成千上万个站点一起拉成直连。
 	"DOMAIN-SUFFIX,mediafire.com,DIRECT",
+
+	// ── 类 8：Apple 推送（APNs）──
+	// 推送不是「用的时候才连」，而是设备常连的长连接（courier.push.apple.com:5223）。
+	// 走代理后每次交互都要多绕一个海外 RTT，链路一抖就断线重连；实测开着代理时
+	// iPhone / iPad 待机耗电明显加快，而安卓不走这条通道，所以只有苹果设备中招。
+	// 只按域名放行：设备若直接拿 IP 连（没有 SNI）仍会落进 MATCH,PROXY。要彻底覆盖
+	// 得加 Apple 的 17.0.0.0/8，但那会把 iCloud 等海外服务一起拉成直连，暂不默认开启。
+	// 这条规则成立的前提是 sniffer 嗅探 `TLS 5223`（见下面的 sniffer 段）——少了它
+	// 域名匹配永远不命中，规则就是摆设。
+	"DOMAIN-SUFFIX,push.apple.com,DIRECT",
 }
 
 // systemDirectPorts 是「按端口判断、拿不到域名」的必须直连流量。
@@ -1687,11 +1697,37 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 		// 真实 IP 而不是域名——本来就绕过了域名规则；再叠加「QUIC 不嗅」，
 		// 这条连接上就一个域名信息都不剩，只能靠 IP 归属判定。
 		// 旧版 mihomo 不认 QUIC 键时按未知字段忽略，不会拒收整份配置。
+		// ── 为什么 TLS 必须是「全端口」而不是一份端口清单 ──
+		//
+		// 系统直连清单里的域名全部被派生进 fake-ip-filter，DNS 因此返回真实 IP。
+		// 连接进到内核时 `metadata.Host` 是空的，只剩 `DstIP`；域名规则
+		// （`DOMAIN` / `DOMAIN-SUFFIX`）走 `metadata.RuleHost()`，此时唯一的
+		// 来源就是 `SniffHost`——也就是 SNI。
+		//
+		// 而 mihomo 的嗅探有硬门槛：`SupportPort(metadata.DstPort)` 为假就直接
+		// return false（component/sniffer/dispatcher.go:134），且 ports 缺省是
+		// 空集＝不嗅。于是「这条规则能不能生效」变成「这个服务碰巧用了我枚举过
+		// 的端口没有」——而端口由第三方决定，我们无权假设。
+		//
+		// 2026-11-24 实测：APNs 走 5223，枚举里只有 443/8443，`push.apple.com`
+		// 的直连规则**完全没生效**，推送长连接照样挂在海外节点上（苹果设备待机
+		// 耗电加快）。配置合法、内核不报错、日志干净，只有翻连接列表才看得出来。
+		// 同一形状还会在每一个「非 443 的系统服务」上重演：iMessage / FaceTime
+		// （5223）、APNs 备用（2197）、邮件（993/143）、目录服务……逐个补端口
+		// 是永远补不完的。
+		//
+		// 所以这里不枚举：加密业务用哪个端口不可预测，只要协议是 TLS 就该能识别。
+		// 代价可以忽略——嗅探只对 `Host` 为空的连接触发（见 shouldOverride），
+		// 且失败结果进 LRU（5 次后跳过），不影响已有域名信息的流量。
+		//
+		// 明文 HTTP 与 QUIC 仍按端口收窄：前者在现代系统服务里几乎绝迹，后者的
+		// UDP 嗅探要跨包缓存，全端口会把游戏/语音一起卷进来，而 QUIC 端口本就
+		// 高度集中在 443。这个取舍写在 docs/known-limits.md（KL-12）。
 		doc["sniffer"] = map[string]any{
 			"enable": true, "parse-pure-ip": true, "override-destination": false,
 			"sniff": map[string]any{
 				"HTTP": map[string]any{"ports": []any{80, "8080-8880"}},
-				"TLS":  map[string]any{"ports": []any{443, 8443}},
+				"TLS":  map[string]any{"ports": []any{"1-65535"}},
 				"QUIC": map[string]any{"ports": []any{443, 8443}},
 			},
 		}

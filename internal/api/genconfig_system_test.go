@@ -205,6 +205,7 @@ func TestSystemDirectFakeIPFilterDerived(t *testing.T) {
 		"mesu.apple.com",            // 类 1 Apple 更新
 		"swcdn.apple.com",           // 类 1 Apple 更新（此前漏收）
 		"+.cdn-apple.com",           // 类 1 Apple 更新 CDN 后缀
+		"+.push.apple.com",          // 类 8 Apple 推送（APNs）
 		"login.microsoftonline.com", // 类 3 微软登录
 		"+.windowsupdate.com",       // 类 4 Windows 更新
 		"+.msftauth.net",            // 类 3 登录页资源

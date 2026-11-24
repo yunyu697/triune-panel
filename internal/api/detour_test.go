@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -190,14 +191,31 @@ func TestSingboxClientConfigStarts(t *testing.T) {
 // freeTCPPort 同 livecheck 里那份：在非 ephemeral 段里用 0.0.0.0 探测。
 // 用 :0 会拿到系统临时端口，探测地址与内核监听地址又不一致，两者之间的窗口
 // 足以让门禁假红一次（详见 internal/livecheck/live_test.go 的同名函数）。
+// allocatedPorts 记住本次测试进程已发出去的端口。
+//
+// 没有它，一个用例里连调两次 freeTCPPort 会拿到**同一个**端口：第一次探测完就
+// Close，第二次又从 31100 扫起，照样「可用」。于是 mixed-port 与
+// external-controller 撞在一起，内核报 `bind: address already in use`，
+// 而报错位置离真正的错很远。
+var allocatedPorts = struct {
+	sync.Mutex
+	used map[int]bool
+}{used: map[int]bool{}}
+
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
+	allocatedPorts.Lock()
+	defer allocatedPorts.Unlock()
 	for p := 31100; p < 32100; p++ {
+		if allocatedPorts.used[p] {
+			continue
+		}
 		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", p))
 		if err != nil {
 			continue
 		}
 		_ = l.Close()
+		allocatedPorts.used[p] = true
 		return p
 	}
 	t.Fatalf("31100–32099 段内没有可用端口")
