@@ -138,8 +138,8 @@ func TestBlockExemptSkippedWithoutRejectSet(t *testing.T) {
 	}
 }
 
-// 「隐私优先」预设显式勾了遥测 REJECT：那边放行埋点等于违背用户的选择。
-// 这条判据把「顺手拦广告」与「明确要拦上报」区分开。
+// 「隐私优先」「纯净拦截」预设显式勾了遥测 REJECT：那边放行埋点等于违背用户的
+// 选择。但**不插不等于不说**——那种配置下 App 首屏真的会卡，用户得知道是自己勾的。
 func TestBlockExemptSkippedWhenTelemetryExplicitlyBlocked(t *testing.T) {
 	sets := append(adSets(), normSet{
 		Tag: "geosite-category-telemetry", Policy: "REJECT", Behavior: "domain",
@@ -151,12 +151,92 @@ func TestBlockExemptSkippedWhenTelemetryExplicitlyBlocked(t *testing.T) {
 			t.Errorf("用户显式拦遥测，不该再插豁免: %s", r)
 		}
 	}
+	if !hasWarn(*warns, "首屏") {
+		t.Errorf("显式拦遥测时不插豁免，但没有一句提示——用户只会看到 App 卡住却查不出原因。实际提示: %v", *warns)
+	}
 	if !blockExemptNeeded(adSets()) {
 		t.Error("只勾广告拦截时必须插入豁免")
 	}
 	if blockExemptNeeded(sets) {
 		t.Error("遥测被显式 REJECT 时不应插入豁免")
 	}
+
+	// sing-box 侧同样要提示：两个内核的产物由同一套判据生成，
+	// 只有一边提示的话，用 sing-box 的人就看不到。
+	ver, err := parseSBVersion("1.14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbWarns := new([]string)
+	genSingbox("main-router", ver, testNodes(), sets, nil, sbWarns, ruleMirrorSel{}, bypassSpec{})
+	if !hasWarn(*sbWarns, "首屏") {
+		t.Errorf("sing-box 侧显式拦遥测时没有提示: %v", *sbWarns)
+	}
+}
+
+// 精简广告集与全量集是同一类，不是「干净版」。
+//
+// 上游 v2fly/domain-list-community 里 category-ads 通过 include:bytedance @ads
+// 带着 log.zijieapi.com——正是当初实测被拒的那个域名。此前判据只认
+// geosite-category-ads-all 这一个 ID，选了精简集就一条豁免都不插：配置合法、
+// 内核不报错，App 首屏照样卡。换一个勾选框，同一个坑。
+func TestBlockExemptAppliesToTrimmedAdSet(t *testing.T) {
+	trimmed := []normSet{
+		{Tag: "geosite-category-ads", Policy: "REJECT", Behavior: "domain"},
+		{Tag: "geosite-cn", Policy: "DIRECT", Behavior: "domain"},
+	}
+	if !blockExemptNeeded(trimmed) {
+		t.Fatal("勾「广告域名（精简）」没有触发豁免：它同样会 REJECT log.zijieapi.com")
+	}
+	warns := new([]string)
+	g := genMihomo("main-router", testNodes(), trimmed, nil, warns, ruleMirrorSel{}, bypassSpec{})
+	found := false
+	for _, r := range mihomoRuleList(t, g) {
+		if r == "DOMAIN-SUFFIX,zijieapi.com,DIRECT" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("精简集下没有 zijieapi 豁免规则: %v", mihomoRuleList(t, g))
+	}
+	if !hasWarn(*warns, "应用日志") {
+		t.Errorf("精简集下插了豁免却没说明: %v", *warns)
+	}
+}
+
+// 目录里每个「拦截类」规则集都必须声明 AppLog。
+//
+// 这条守卫针对的是判据本身：以前要记得「哪些 tag 该插豁免」，现在只需在目录里
+// 填一行。填漏了就红——而不是等某个用户勾了那个集合、发现 App 卡在首屏才暴露。
+func TestCatalogBlockSetsDeclareAppLog(t *testing.T) {
+	allowed := map[string]bool{appLogNone: true, appLogMixed: true, appLogExplicit: true}
+	for _, d := range ruleCatalog {
+		if d.Policy != "REJECT" || d.Group != "广告与隐私" {
+			continue
+		}
+		if !allowed[d.AppLog] {
+			t.Errorf("规则集 %s（%s）设为 REJECT 但没声明 AppLog：拦掉它会不会连带拦掉应用日志，必须显式回答（none / mixed / explicit）",
+				d.ID, d.Name)
+		}
+	}
+	// 反向：声明了 mixed/explicit 的集合必须真的存在于目录里，否则判据永远不生效。
+	for _, d := range ruleCatalog {
+		if d.AppLog == appLogMixed || d.AppLog == appLogExplicit {
+			if d.Policy != "REJECT" {
+				t.Errorf("规则集 %s 声明了 AppLog=%s 但默认策略不是 REJECT——豁免只对拒绝生效，这条声明是死的",
+					d.ID, d.AppLog)
+			}
+		}
+	}
+}
+
+func hasWarn(warns []string, sub string) bool {
+	for _, w := range warns {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // 清单要能被两个渲染器都表达出来。曾经往内置清单加 DOMAIN-KEYWORD 时

@@ -4454,6 +4454,7 @@ DEMO_CATALOG.classes = [
   { key:"apple-ocsp", name:"Apple 证书校验", expect:"direct", sets:["geosite-apple"], hint:"装 App / 跑更新卡在「正在验证」" },
   { key:"apple-loc", name:"Apple 定位与区域判定", expect:"direct", sets:["geosite-apple"], hint:"定位漂到国外，时区与区域判定跟着错" },
   { key:"apple-id", name:"Apple ID 登录", expect:"direct", sets:["geosite-apple"], hint:"登录被判异地，触发二次验证" },
+  { key:"apple-push", name:"Apple 推送（APNs）", expect:"direct", sets:["geosite-apple"], hint:"推送延迟高、反复断连重连，待机耗电明显加快" },
   { key:"ms-login", name:"Microsoft 账号登录", expect:"direct", sets:["geosite-microsoft","geosite-onedrive"], hint:"OneDrive / Office / Teams 登不上" },
   { key:"win-update", name:"Windows 更新 / 激活", expect:"direct", sets:["geosite-microsoft"], hint:"更新龟速或报 0x8024402c" },
   { key:"connectivity", name:"系统连通性检测", expect:"direct", sets:[], hint:"被误判「无网络」，反复重连" },

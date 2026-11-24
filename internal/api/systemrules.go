@@ -1,16 +1,19 @@
 package api
 
-// 系统规则的「人可读视图」：体检脚本、覆盖提示、漂移快照三件事都从这里派生。
+// 系统规则的唯一来源：体检脚本、覆盖提示、漂移快照、以及**生成器用的清单**，
+// 四件事都从这里派生。
 //
-// 清单本身（systemDirectRules 等）是平铺的规则行——适合渲染，不适合回答
-// 「这一类还缺不缺」「这条规则在真机上生效了吗」。把「类」抽成结构体之后：
+// 以前规则清单（systemDirectRules / systemProxyDomains）是平铺的规则行，类别表
+// 另写一份——两处靠「记得一起改」维持一致。加一条域名忘了归类，规则照样生成、
+// 照样生效，只是体检与覆盖提示悄悄漏掉这一类，谁也不会发现。现在把规则挂在类上：
+// 加规则必须放进某个类（没有别的地方可放），清单由各类拼出来，方向由 Expect 决定
+// （direct → DIRECT、proxy → PROXY），写反了测试会红。
 //
-//   - 体检脚本按类生成探针，用户在自己设备上跑一次就知道分流对不对；
-//   - 生成页按类提示「由哪个规则集覆盖 / 是否只有系统清单兜底」；
-//   - 不变量测试按类断言，整类被删会红（而不是只删一个域名时静默通过）。
+// 仍然手写的是「探针」：裸域名常常不解析（windowsupdate.com 实测 NXDOMAIN），
+// 探针必须是能解析的真实子域，派生不出来，只能人工挑——但挑漏了有测试兜着
+// （TestSystemClassProbesAreInRuleLists 双向断言）。
 //
-// 这是 v2.0.7「按类维护」的延伸：那次管的是生成器，这次管的是验证与提示。
-// 新增一条规则时只要在对应类里加一行，三处自动跟上。
+// 新增一条规则时只要在对应类里加一行，四处自动跟上。
 
 import (
 	"encoding/json"
@@ -20,8 +23,9 @@ import (
 
 // systemClass 一组「会一起失效」的系统规则。
 //
-// Expect 决定体检时什么算通过：直连类必须解析到真实 IP（fake-ip 说明流量
-// 进了代理），代理类必须解析到 fake-ip（真实 IP 说明规则没生效）。
+// Expect 决定体检时什么算通过，也决定 Rules 里每条规则的策略：
+// 直连类必须解析到真实 IP（fake-ip 说明流量进了代理），代理类必须解析到 fake-ip
+// （真实 IP 说明规则没生效）。
 type systemClass struct {
 	Key    string   `json:"key"`    // 稳定标识，前端与脚本都用它，别拿中文名做键
 	Name   string   `json:"name"`   // 展示名
@@ -30,6 +34,28 @@ type systemClass struct {
 	URL    string   `json:"url"`    // 体检用的轻量 URL（空 = 只查解析归属）
 	Hint   string   `json:"hint"`   // 体检不通过时告诉用户会坏在哪
 	Sets   []string `json:"sets"`   // 能覆盖这一类的规则集 id；空 = 只有系统清单兜底
+	// Rules 这一类的规则行（clash 语法 TYPE,VALUE,POLICY）。生成器直接渲染它们，
+	// 顺序即规则优先级。策略必须与 Expect 一致（direct→DIRECT、proxy→PROXY），
+	// 由 TestSystemClassRulesMatchExpect 把住。
+	Rules []string `json:"-"`
+
+	// 直连类的准入判据（加规则前逐条对照，缺一条就不该放进来）：
+	//
+	//  1. 走代理后服务**功能失效或必然失败**，而不是「只是慢一点」；
+	//  2. 失效原因是出口 IP 地域判定、TLS 证书固定（pinning）、QUIC，或该服务只认本地网络；
+	//  3. 只收「系统 / 更新 / 激活 / 认证」这类基础服务，**不收内容服务**——
+	//     App Store 下载、Apple Music、Office 内容、OneDrive 文件同步、Windows Store
+	//     应用内容都不属于「走代理必坏」，内容走不走代理是用户的选择，强制直连属越权。
+	//
+	// 之所以内置成硬编码而不是让用户勾规则集：上游 geosite-apple / geosite-microsoft
+	// 是**大类**，会连带把内容服务一起直连；而用户什么规则集都不勾时，这些域名会落到
+	// MATCH,PROXY，照样坏。
+	//
+	// 清单来源：v2fly/domain-list-community 的 apple-update / microsoft / onedrive
+	// 三个分类，逐条核对过原文，不是凭记忆写的。
+	//
+	// 只允许 DOMAIN / DOMAIN-SUFFIX：DNS 与 fake-ip 的派生只认这两种类型，写别的
+	// 类型会在 sing-box 侧静默失效（TestSystemListsUseSupportedRuleTypes 兜着）。
 }
 
 var systemClasses = []systemClass{
@@ -39,6 +65,31 @@ var systemClasses = []systemClass{
 		URL:    "https://mesu.apple.com/",
 		Hint:   "检查更新会一直转圈，或下到一半校验失败；软恢复不可用",
 		Sets:   []string{"geosite-apple"},
+		// 全量取自 apple-update 分类（见 https://support.apple.com/HT210060）。
+		Rules: []string{
+			"DOMAIN,mesu.apple.com,DIRECT",
+			"DOMAIN,swscan.apple.com,DIRECT",
+			"DOMAIN,swdist.apple.com,DIRECT",
+			"DOMAIN,swdownload.apple.com,DIRECT",
+			"DOMAIN,swcdn.apple.com,DIRECT",
+			"DOMAIN,appldnld.apple.com,DIRECT",
+			"DOMAIN,oscdn.apple.com,DIRECT",
+			"DOMAIN,osrecovery.apple.com,DIRECT",
+			"DOMAIN,gdmf.apple.com,DIRECT",
+			"DOMAIN,gdmf-ados.apple.com,DIRECT",
+			"DOMAIN,gs.apple.com,DIRECT",
+			"DOMAIN,gsra.apple.com,DIRECT",
+			"DOMAIN,gg.apple.com,DIRECT",
+			"DOMAIN,ig.apple.com,DIRECT",
+			"DOMAIN,skl.apple.com,DIRECT",
+			"DOMAIN,wkms-public.apple.com,DIRECT",
+			"DOMAIN,configuration.apple.com,DIRECT",
+			"DOMAIN,xp.apple.com,DIRECT",
+			"DOMAIN,captive.apple.com,DIRECT", // Wi-Fi 热点 / 网络接入检测
+			// 更新与 Apple ID 共用的 CDN（updates / updates-http / fcs-keys-pub-prod /
+			// appleid.cdn-apple 全在这条后缀下）。上游新增 CDN 主机名时无需再逐条补。
+			"DOMAIN-SUFFIX,cdn-apple.com,DIRECT",
+		},
 	},
 	{
 		Key: "apple-ocsp", Name: "Apple 证书校验（OCSP）", Expect: "direct",
@@ -46,6 +97,13 @@ var systemClasses = []systemClass{
 		URL:    "http://ocsp.apple.com/",
 		Hint:   "装 App 或更新时卡在「正在验证」，或直接报「无法验证」",
 		Sets:   []string{"geosite-apple"},
+		// 装 App、跑更新、首次打开签名应用时，系统都要向它问一句「这张证书还有效吗」。
+		// 走代理后节点一抖或对 POST 返回非预期状态，系统就把证书当成不可信。
+		// ocsp2 是新域名，老配置只收 ocsp 会漏。
+		Rules: []string{
+			"DOMAIN,ocsp.apple.com,DIRECT",
+			"DOMAIN,ocsp2.apple.com,DIRECT",
+		},
 	},
 	{
 		Key: "apple-loc", Name: "Apple 定位与区域判定", Expect: "direct",
@@ -53,6 +111,13 @@ var systemClasses = []systemClass{
 		URL:    "https://gs-loc.apple.com/",
 		Hint:   "「查找我的」定位漂到国外，时区与 App Store 区域判定跟着错",
 		Sets:   []string{"geosite-apple"},
+		// 这几个主机回报的是「设备大致在哪」。走代理等于告诉 Apple 你在节点所在国，
+		// 于是定位漂到海外、时区自动设置错乱、区域判定跟着变。不是「慢」，是答案错了。
+		Rules: []string{
+			"DOMAIN,gs-loc.apple.com,DIRECT",    // 定位主入口
+			"DOMAIN-SUFFIX,ls.apple.com,DIRECT", // 定位服务后端（gsp-ssl.ls 等）
+			"DOMAIN-SUFFIX,ls-apple.com,DIRECT", // 地区变体
+		},
 	},
 	{
 		Key: "apple-id", Name: "Apple ID 登录与激活", Expect: "direct",
@@ -60,6 +125,12 @@ var systemClasses = []systemClass{
 		URL:    "https://appleid.apple.com/",
 		Hint:   "登录被判异地，触发二次验证甚至锁账号",
 		Sets:   []string{"geosite-apple"},
+		// 登录走代理会被判异地 → 二次验证 / 锁账号；页面资源还做了证书固定。
+		Rules: []string{
+			"DOMAIN,appleid.apple.com,DIRECT",
+			"DOMAIN,idmsa.apple.com,DIRECT",
+			"DOMAIN,amp-api.apps.apple.com,DIRECT",
+		},
 	},
 	{
 		Key: "apple-push", Name: "Apple 推送（APNs）", Expect: "direct",
@@ -70,6 +141,18 @@ var systemClasses = []systemClass{
 		URL:  "",
 		Hint: "推送延迟高、反复断连重连，iPhone / iPad 待机耗电明显加快",
 		Sets: []string{"geosite-apple"},
+		// 推送不是「用的时候才连」，而是设备常连的长连接（courier.push.apple.com:5223）。
+		// 走代理后每次交互都要多绕一个海外 RTT，链路一抖就断线重连。它是这张表里唯一
+		// 「不报错、只是变差」的条目——安卓不走这条通道，所以只有苹果设备中招。
+		//
+		// 只按域名放行：设备若直接拿 IP 连（没有 SNI）仍会落进 MATCH,PROXY。要彻底覆盖
+		// 得加 Apple 的 17.0.0.0/8，但那会把 iCloud 等海外服务一起拉成直连，暂不默认开启。
+		// 这条规则之所以真能命中，靠的是 sniffer 的 TLS 嗅探覆盖**全部端口**：直连域名
+		// 被排除出 fake-ip，连接进来时只剩裸 IP，域名只能靠 SNI 补回。只嗅 443/8443 的
+		// 那一版里，5223 上的这条规则一次都没生效过，表现就是待机耗电。
+		Rules: []string{
+			"DOMAIN-SUFFIX,push.apple.com,DIRECT",
+		},
 	},
 	{
 		Key: "ms-login", Name: "Microsoft 账号登录", Expect: "direct",
@@ -77,6 +160,19 @@ var systemClasses = []systemClass{
 		URL:    "https://login.live.com/",
 		Hint:   "OneDrive / Office / Teams 登不上，或反复要求重新登录",
 		Sets:   []string{"geosite-microsoft", "geosite-onedrive"},
+		// OneDrive / Office / Windows / Teams 的登录都过这条链路；走代理出口 IP 触发风控。
+		Rules: []string{
+			"DOMAIN,login.microsoftonline.com,DIRECT",
+			"DOMAIN,login.live.com,DIRECT",
+			"DOMAIN,login.microsoft.com,DIRECT",
+			"DOMAIN,login.windows.net,DIRECT",
+			"DOMAIN,account.live.com,DIRECT",
+			"DOMAIN,account.microsoft.com,DIRECT",
+			"DOMAIN-SUFFIX,microsoftonline.com,DIRECT", // 各国后缀与 -p 变体
+			"DOMAIN-SUFFIX,msftauth.net,DIRECT",        // 登录页脚本与资源 CDN
+			"DOMAIN-SUFFIX,msauth.net,DIRECT",
+			"DOMAIN-SUFFIX,msftauthimages.net,DIRECT", // 登录页图形验证码
+		},
 	},
 	{
 		Key: "win-update", Name: "Windows 更新 / 激活", Expect: "direct",
@@ -86,6 +182,16 @@ var systemClasses = []systemClass{
 		URL:    "https://windowsupdate.microsoft.com/",
 		Hint:   "更新龟速或报 0x8024402c 一类错误；激活提示「环境异常」",
 		Sets:   []string{"geosite-microsoft"},
+		// 更新由 Microsoft CDN 按地域就近下发，走代理等于绕到远端节点再回源，
+		// 轻则龟速、重则 0x8024402c 一类报错；激活与授权走代理会被判「异常环境」。
+		// 注意：**不含** mp.microsoft.com 的应用内容分发（Store 应用下载属于内容服务，
+		// 由用户勾选的规则集决定），只收操作系统更新与激活。
+		Rules: []string{
+			"DOMAIN-SUFFIX,windowsupdate.com,DIRECT",            // download./ctldl./au.download. 全在内
+			"DOMAIN-SUFFIX,update.microsoft.com,DIRECT",         // 旧版更新端点
+			"DOMAIN-SUFFIX,activation.sls.microsoft.com,DIRECT", // 激活
+			"DOMAIN-SUFFIX,licensing.mp.microsoft.com,DIRECT",   // 授权
+		},
 	},
 	{
 		Key: "connectivity", Name: "系统连通性检测（NCSI）", Expect: "direct",
@@ -94,6 +200,12 @@ var systemClasses = []systemClass{
 		URL:    "http://www.msftconnecttest.com/connecttest.txt",
 		Hint:   "系统误判「无网络」，反复重连、Wi-Fi 标记为已连接但无法访问",
 		Sets:   nil,
+		// 走代理一旦节点抖一下，系统就判定「无网络」，随后反复重连、弹网络异常、
+		// 甚至把 Wi-Fi 标记为「已连接但无法访问 Internet」。
+		Rules: []string{
+			"DOMAIN-SUFFIX,msftconnecttest.com,DIRECT",
+			"DOMAIN-SUFFIX,msftncsi.com,DIRECT",
+		},
 	},
 	{
 		Key: "mediafire", Name: "MediaFire（内置直连）", Expect: "direct",
@@ -101,6 +213,13 @@ var systemClasses = []systemClass{
 		URL:    "https://www.mediafire.com/",
 		Hint:   "下载站与文件节点都该直连；进代理会明显变慢",
 		Sets:   nil,
+		// 站点与下载节点都在 mediafire.com 后缀下（download####.mediafire.com）。
+		// 刻意不加 IP 规则：它全站挂在 Cloudflare 共享段上（实测
+		// download.mediafire.com → 104.18.213.225 / 104.18.214.225），
+		// 按 IP 放行会把同一片 CF 上的成千上万个站点一起拉成直连。
+		Rules: []string{
+			"DOMAIN-SUFFIX,mediafire.com,DIRECT",
+		},
 	},
 	{
 		Key: "github", Name: "GitHub 全系（内置代理）", Expect: "proxy",
@@ -108,11 +227,45 @@ var systemClasses = []systemClass{
 		URL:    "https://github.com/",
 		Hint:   "直连时握手超时：网页打不开、git push 连不上",
 		Sets:   nil,
+		// 2026-11-17 实测（广州联通千兆）：直连 https://github.com 握手阶段就超时
+		// （5s 无任何响应），而 raw.githubusercontent.com 同刻可达——可达性是
+		// 「按端点 / 按时间抖动」的，靠兜底规则碰运气不行。
+		Rules: []string{
+			// 主站 / gist / api / codeload / ssh.github.com 全在这条后缀下
+			"DOMAIN-SUFFIX,github.com,PROXY",
+			// raw / objects / avatars / camo / user-images / private-user-images
+			"DOMAIN-SUFFIX,githubusercontent.com,PROXY",
+			// github.githubassets.com：页面 CSS/JS，掉它就白屏
+			"DOMAIN-SUFFIX,githubassets.com,PROXY",
+			"DOMAIN-SUFFIX,github.io,PROXY",  // Pages
+			"DOMAIN-SUFFIX,github.dev,PROXY", // 网页版 VSCode
+			"DOMAIN-SUFFIX,ghcr.io,PROXY",    // 容器镜像
+			"DOMAIN-SUFFIX,githubapp.com,PROXY",
+		},
 	},
 	{
 		Key: "ntp", Name: "时间同步（NTP 按端口直连）", Expect: "port",
 		Hint: "时间漂移会让 TLS 证书随机报「已过期 / 无效」，且极难归因",
 	},
+}
+
+// systemDirectRules / systemProxyDomains 由各类拼出来，不单独维护。
+//
+// 方向由 Expect 决定：direct 类的规则进直连清单，proxy 类的进代理清单。于是
+// 「加一条规则」只有一处可写——放进某个类的 Rules。以前这两份清单与类别表分居
+// 两个文件，加规则忘了归类，规则照样生效、体检与覆盖提示却悄悄漏掉这一类。
+var systemDirectRules, systemProxyDomains = buildSystemRuleLists()
+
+func buildSystemRuleLists() (direct, proxy []string) {
+	for _, c := range systemClasses {
+		switch c.Expect {
+		case "direct":
+			direct = append(direct, c.Rules...)
+		case "proxy":
+			proxy = append(proxy, c.Rules...)
+		}
+	}
+	return direct, proxy
 }
 
 // ruleListMatches 判断某个域名是否被清单里的规则命中（只认 DOMAIN 与

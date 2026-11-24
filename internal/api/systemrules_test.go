@@ -369,3 +369,62 @@ func mustSnapshot(t *testing.T, a *Server, id int64) string {
 	}
 	return c.RuleSnapshot
 }
+
+// 类里每条规则的策略必须与 Expect 一致，且不许重复登记。
+//
+// 清单现在由各类拼出来，方向由 Expect 决定——所以「把一条 PROXY 规则写进直连类」
+// 这种抄错会直接变成一条走错方向的分流规则，而不是编译错误。往直连类里塞了
+// PROXY 行，生成的配置会把它当强制代理；反过来更糟：本该直连的系统服务被推去
+// 走节点，症状和当初那些事故一模一样。这里把它挡在测试里。
+func TestSystemClassRulesMatchExpect(t *testing.T) {
+	seen := map[string]string{} // 规则行 → 所属类
+	for _, c := range systemClasses {
+		want := map[string]string{"direct": "DIRECT", "proxy": "PROXY"}[c.Expect]
+		if c.Expect == "port" {
+			if len(c.Rules) > 0 {
+				t.Errorf("「%s」是端口类（Expect=port），不该有域名规则：%v", c.Name, c.Rules)
+			}
+			continue
+		}
+		if want == "" {
+			t.Errorf("「%s」的 Expect=%q 不认识，无法判断它的规则该走哪个方向", c.Name, c.Expect)
+			continue
+		}
+		for _, line := range c.Rules {
+			typ, val, pol, ok := parseCustomRule(line)
+			if !ok {
+				t.Errorf("「%s」的规则解析失败：%q", c.Name, line)
+				continue
+			}
+			if pol != want {
+				t.Errorf("「%s」是 %s 类，但规则 %q 的策略是 %s", c.Name, c.Expect, line, pol)
+			}
+			key := typ + "," + val
+			if prev, dup := seen[key]; dup {
+				t.Errorf("%s 同时登记在「%s」与「%s」两个类里，体检归属会说不清", key, prev, c.Name)
+			}
+			seen[key] = c.Name
+		}
+	}
+
+	// 派生结果必须是这两份，否则生成器拿到的是半个清单。
+	if len(systemDirectRules) == 0 || len(systemProxyDomains) == 0 {
+		t.Fatalf("派生清单为空：直连 %d 条、代理 %d 条", len(systemDirectRules), len(systemProxyDomains))
+	}
+}
+
+// 类的名字与探针提示不允许为空——体检不通过时用户只看得到这两样。
+func TestSystemClassProbesAndHintPresent(t *testing.T) {
+	for _, c := range systemClasses {
+		if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Key) == "" {
+			t.Errorf("类别缺少 key 或 name: %+v", c)
+			continue
+		}
+		if c.Expect != "port" && len(c.Probes) == 0 {
+			t.Errorf("「%s」没有探针，体检脚本会漏掉这一类", c.Name)
+		}
+		if strings.TrimSpace(c.Hint) == "" {
+			t.Errorf("「%s」没有 hint：体检不通过时用户不知道会坏在哪", c.Name)
+		}
+	}
+}

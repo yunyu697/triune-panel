@@ -26,7 +26,28 @@ type ruleSetDef struct {
 	// Policy 是勾选该规则集时的默认策略。国内站点走 DIRECT、广告追踪走 REJECT，
 	// 前端不再一律按 PROXY 起手（那会把国内站点也塞进代理）。
 	Policy string `json:"policy"`
+	// AppLog 说明「REJECT 这个集合时，会不会连带拦掉应用自己的日志上报」。
+	// 它决定要不要插拦截豁免（blockExemptRules）。每个拦截类集合都必须填，
+	// 三选一，空值会被 TestCatalogBlockSetsDeclareAppLog 判红：
+	//
+	//	appLogNone     不含。拦了不影响应用主流程。
+	//	appLogMixed    顺带混进来的。必须插豁免，否则部分 App 首屏卡死。
+	//	appLogExplicit 本身就是「拦上报」的集合。用户明确要拦 → 不插豁免，只提示。
+	//
+	// 为什么放在目录里：判据此前是「列举哪些 tag 要插豁免」，于是「广告域名（精简）」
+	// 被漏在外面——上游 category-ads 通过 include:bytedance @ads 一样带着
+	// log.zijieapi.com，选了它照样 RST，而豁免一条都不插。新增一个广告类集合时
+	// 只需要在这里填一行，判据本身不用动。
+	AppLog string `json:"-"`
 }
+
+// AppLog 的三个取值。用字符串而不是布尔：将来若出现「半混入」的集合
+// （例如只含第三方埋点 SDK），需要的是再补一档，而不是把两个布尔拼起来。
+const (
+	appLogNone     = "none"
+	appLogMixed    = "mixed"
+	appLogExplicit = "explicit"
+)
 
 type setPolicy struct {
 	ID     string `json:"id"`
@@ -57,17 +78,23 @@ var ruleCatalog = []ruleSetDef{
 	{ID: "geosite-private", Name: "局域网 / 私有域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both", Policy: "DIRECT"},
 	{ID: "geoip-private", Name: "局域网 / 私有 IP", Dir: "geoip", Behavior: "ipcidr", Group: "基础分流", Cores: "mihomo", Policy: "DIRECT"},
 	{ID: "geosite-geolocation-!cn", Name: "非中国大陆域名", Dir: "geosite", Behavior: "domain", Group: "基础分流", Cores: "both", Policy: "PROXY"},
-	{ID: "geosite-category-ads-all", Name: "广告域名（通用全量）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
-	{ID: "geosite-category-ads", Name: "广告域名（精简）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
-	{ID: "geosite-category-public-tracker", Name: "公共追踪器", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
-	{ID: "geosite-category-telemetry", Name: "遥测 / 数据上报", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
-	{ID: "geosite-category-consent-management", Name: "Cookie 同意管理", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
+	{ID: "geosite-category-ads-all", Name: "广告域名（通用全量）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogMixed},
+	// 精简集只收「广告投放」类，但上游 category-ads 里 include:bytedance @ads 照样带着
+	// log.zijieapi.com——这也是实测被拒过的那个域名。所以它和全量集是同一类，不是「干净版」。
+	{ID: "geosite-category-ads", Name: "广告域名（精简）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogMixed},
+	// 追踪器分类里没有实证到应用自有埋点，但误插豁免的代价只是「applog / zijieapi 走直连」
+	// （本来就该直连），而漏插的代价是首屏卡死。代价不对称，所以按 mixed 处理。
+	{ID: "geosite-category-public-tracker", Name: "公共追踪器", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogMixed},
+	// 遥测集里明确列着 fqnovel / bytedance 的 applog 主机。用户勾它就是要把这些拦掉，
+	// 所以不插豁免——但必须提示他首屏会卡，见 explicitBlockWarn。
+	{ID: "geosite-category-telemetry", Name: "遥测 / 数据上报", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogExplicit},
+	{ID: "geosite-category-consent-management", Name: "Cookie 同意管理", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogNone},
 	{ID: "geosite-category-password-management", Name: "密码管理器", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "PROXY"},
-	{ID: "geosite-category-ip-geo-detect", Name: "IP 归属地检测", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
+	{ID: "geosite-category-ip-geo-detect", Name: "IP 归属地检测", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogNone},
 	{ID: "geosite-category-anticensorship", Name: "反审查站点", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-category-proxy-tunnels", Name: "代理隧道与中转", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-category-vpnservices", Name: "VPN 服务商", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "PROXY"},
-	{ID: "geosite-category-stun", Name: "STUN / TURN 服务", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT"},
+	{ID: "geosite-category-stun", Name: "STUN / TURN 服务", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "REJECT", AppLog: appLogNone},
 	{ID: "geosite-category-ipfs", Name: "IPFS 节点", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-openai", Name: "OpenAI / ChatGPT", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both", Policy: "PROXY"},
 	{ID: "geosite-anthropic", Name: "Anthropic / Claude", Dir: "geosite", Behavior: "domain", Group: "AI 服务", Cores: "both", Policy: "PROXY"},
@@ -163,7 +190,7 @@ var ruleCatalog = []ruleSetDef{
 	{ID: "geosite-category-food-cn", Name: "国内餐饮外卖", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both", Policy: "DIRECT"},
 	{ID: "geosite-category-logistics-cn", Name: "国内物流", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both", Policy: "DIRECT"},
 	{ID: "geosite-category-blog-cn", Name: "国内博客", Dir: "geosite", Behavior: "domain", Group: "生活服务", Cores: "both", Policy: "DIRECT"},
-	{ID: "geosite-category-porn", Name: "成人内容（拦截用）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "mihomo", Policy: "REJECT"},
+	{ID: "geosite-category-porn", Name: "成人内容（拦截用）", Dir: "geosite", Behavior: "domain", Group: "广告与隐私", Cores: "mihomo", Policy: "REJECT", AppLog: appLogNone},
 }
 
 var ruleSetIndex = func() map[string]ruleSetDef {
@@ -1076,9 +1103,9 @@ func describeCustomNotes(line string, notes []string) []string {
 //
 // 两种写法语法合法、内核不报错、日志里也看不出异常，只有「没效果」：
 //
-//	1. 前置通配符：DOMAIN-SUFFIX 本身就是按点边界做后缀匹配，`*.foo.com` 的
-//	   第一个字符是 `*`，它只能匹配叫 `*.foo.com` 的域名——现实中不存在。
-//	2. DOMAIN 带通配符：DOMAIN 是完整相等匹配，同上，永远匹配不上。
+//  1. 前置通配符：DOMAIN-SUFFIX 本身就是按点边界做后缀匹配，`*.foo.com` 的
+//     第一个字符是 `*`，它只能匹配叫 `*.foo.com` 的域名——现实中不存在。
+//  2. DOMAIN 带通配符：DOMAIN 是完整相等匹配，同上，永远匹配不上。
 //
 // 这类错误只能靠解析阶段发现，所以在这里纠正并把说明带回去，而不是丢弃。
 func normalizeDomainValue(typ, val string) (string, string, []string, string) {
@@ -1229,9 +1256,10 @@ var fakeIPFilter = []string{
 //     rtlog{N}-applog，序号随时会变，逐条列举必然漏。
 //
 // ── 什么时候整份不生效 ──
-// 用户显式勾了「遥测 / 数据上报」规则集并设为 REJECT 时，一条都不插（见
-// blockExemptNeeded）：「隐私优先」预设就是这种意图，那边放行埋点等于违背
-// 用户的选择。这条判据把「顺手拦广告」与「明确要拦上报」区分开。
+// 用户显式勾了「遥测 / 数据上报」这类**本身就是拦上报**的规则集并设为 REJECT 时，
+// 一条都不插（见 blockExemptDecision）：「隐私优先」「纯净拦截」预设就是这种意图，
+// 那边放行埋点等于违背用户的选择。但「不插」不等于「不说」——那种配置下 App 首屏
+// 会卡，所以照样给提示，见 explicitBlockWarn。
 var blockExemptRules = []string{
 	// 字节系应用日志上报。注意 log5-applog 里的 log5-applog 是**一个 DNS
 	// 标签**，连字符不是分隔符，所以 DOMAIN-SUFFIX,applog.fqnovel.com 永远
@@ -1247,143 +1275,65 @@ var blockExemptRules = []string{
 // 和「不想要时怎么办」，而不是一句「已自动处理」。
 const blockExemptWarn = "广告拦截已放行应用日志域名（applog / zijieapi.com）：" +
 	"拦掉它们会让部分 App 首屏卡死，而它们不是广告内容。" +
-	"要连埋点一起拦，请改用「隐私优先」预设；" +
+	"要连埋点一起拦，请改用「遥测 / 数据上报」规则集；" +
 	"另有 App 卡首屏时，把它上报用的日志域名加成 DOMAIN-KEYWORD 自定义规则即可。"
 
-// blockExemptNeeded 判断本次生成是否需要插入拦截豁免。
+// explicitBlockWarn 是「用户明确要拦上报」时不插豁免的说明。
 //
-// 只有「勾了全量广告规则集并设为 REJECT」才有误杀可言；没开拦截就不需要。
-// 而一旦用户明确勾了遥测规则集并 REJECT，说明他要的就是连埋点一起拦——此时
-// 不插入，把选择权留给他。
-func blockExemptNeeded(sets []normSet) bool {
-	adBlocked, telemetryBlocked := false, false
+// 这段提示存在的理由：不插豁免是正确决定，但**用户看不到后果**。他勾的是
+// 「遥测 / 数据上报」，看到的是「配置生成成功」，第二天发现红果卡在首屏，
+// 只会怀疑分流或节点。配置合法、内核不报错、日志干净——又是这个仓库最怕的形状。
+func explicitBlockWarn(setName string) string {
+	return "你勾了「" + setName + "」并设为拒绝：应用自己的日志 / 埋点上报也在里面。" +
+		"被拒后部分 App 的埋点 SDK 会一直重试，表现是首屏卡住不动（我实测红果短剧如此）。" +
+		"这是你明确要的效果，所以没有自动放行；想恢复正常，把它改成「走代理」或取消勾选。"
+}
+
+// blockExemptPlan 是「这次生成要不要插豁免、要不要给提示」的结论。
+type blockExemptPlan struct {
+	Insert bool   // 插 blockExemptRules
+	Warn   string // 常驻提示；空 = 不提示
+}
+
+// blockExemptDecision 判断本次生成要不要插拦截豁免。
+//
+// 判据来自规则集目录里的 AppLog 字段，而不是在这里列举集合 ID：
+// 「广告域名（精简）」上游同样带着 log.zijieapi.com，按 ID 列举时它被漏在外面，
+// 选了它照样 RST、豁免一条不插——和当初红果那次一模一样，只是换了个勾选框。
+// 现在新增任何广告类集合，只需在目录里填 AppLog 一行，这个函数不用改。
+func blockExemptDecision(sets []normSet) blockExemptPlan {
+	var mixed, explicit string
 	for _, s := range sets {
 		if s.Policy != "REJECT" {
-			continue
+			continue // 没设成拒绝就没有误杀可言
 		}
-		switch s.Tag {
-		case "geosite-category-ads-all":
-			adBlocked = true
-		case "geosite-category-telemetry":
-			telemetryBlocked = true
+		def, ok := ruleSetIndex[s.Tag]
+		if !ok {
+			continue // 自定义规则集没有目录条目，无从判断
+		}
+		switch def.AppLog {
+		case appLogMixed:
+			if mixed == "" {
+				mixed = def.Name
+			}
+		case appLogExplicit:
+			if explicit == "" {
+				explicit = def.Name
+			}
 		}
 	}
-	return adBlocked && !telemetryBlocked
+	switch {
+	case explicit != "":
+		// 明确要拦上报：把选择权留给用户，但后果要说清。
+		return blockExemptPlan{Warn: explicitBlockWarn(explicit)}
+	case mixed != "":
+		return blockExemptPlan{Insert: true, Warn: blockExemptWarn}
+	}
+	return blockExemptPlan{}
 }
 
-// systemDirectRules 是「走代理就会功能失效」的域名，无条件直连。
-//
-// ── 准入判据（新增条目必须同时满足，缺一条就不该放进来）──
-//  1. 走代理后服务**功能失效或必然失败**，而不是「只是慢一点」；
-//  2. 失效原因是出口 IP 地域判定、TLS 证书固定（pinning）、QUIC，或该服务只认本地网络；
-//  3. 只收「系统 / 更新 / 激活 / 认证」这类基础服务，**不收内容服务**——
-//     App Store 下载、Apple Music、Office 内容、OneDrive 文件同步、Windows Store
-//     应用内容都不属于「走代理必坏」，内容走不走代理是用户的选择，强制直连属越权。
-//
-// 之所以内置成硬编码而不是让用户勾规则集：
-//   - 上游 geosite-apple / geosite-microsoft 是**大类**，会连带把内容服务一起直连；
-//   - 用户什么规则集都不勾时，这些域名会落到 MATCH,PROXY / final:PROXY，照样坏。
-//
-// 清单来源：v2fly/domain-list-community 的 apple-update / microsoft / onedrive
-// 三个分类，逐条核对过原文，不是凭记忆写的。
-//
-// 每条是 clash 语法（TYPE,VALUE,POLICY），mihomo 与 sing-box 共用 parseCustomRule。
-// **只允许 DOMAIN / DOMAIN-SUFFIX**：DNS 与 fake-ip 的派生只认这两种类型，
-// 写别的类型会在 sing-box 侧静默失效（有 TestSystemListsUseSupportedRuleTypes 兜着）。
-var systemDirectRules = []string{
-	// ── 类 1：Apple 系统更新 / 恢复 / 激活 ──
-	// 全量取自 apple-update 分类（21 条，见 https://support.apple.com/HT210060）。
-	// 走代理后按出口地域取 CDN，更新会「转圈」或下到一半校验失败；软恢复直接不可用。
-	"DOMAIN,mesu.apple.com,DIRECT",
-	"DOMAIN,swscan.apple.com,DIRECT",
-	"DOMAIN,swdist.apple.com,DIRECT",
-	"DOMAIN,swdownload.apple.com,DIRECT",
-	"DOMAIN,swcdn.apple.com,DIRECT",
-	"DOMAIN,appldnld.apple.com,DIRECT",
-	"DOMAIN,oscdn.apple.com,DIRECT",
-	"DOMAIN,osrecovery.apple.com,DIRECT",
-	"DOMAIN,gdmf.apple.com,DIRECT",
-	"DOMAIN,gdmf-ados.apple.com,DIRECT",
-	"DOMAIN,gs.apple.com,DIRECT",
-	"DOMAIN,gsra.apple.com,DIRECT",
-	"DOMAIN,gg.apple.com,DIRECT",
-	"DOMAIN,ig.apple.com,DIRECT",
-	"DOMAIN,skl.apple.com,DIRECT",
-	"DOMAIN,wkms-public.apple.com,DIRECT",
-	"DOMAIN,configuration.apple.com,DIRECT",
-	"DOMAIN,xp.apple.com,DIRECT",
-	"DOMAIN,captive.apple.com,DIRECT", // Wi-Fi 热点 / 网络接入检测
-	// 更新与 Apple ID 共用的 CDN（updates / updates-http / fcs-keys-pub-prod /
-	// appleid.cdn-apple 全在这条后缀下）。上游新增 CDN 主机名时无需再逐条补。
-	"DOMAIN-SUFFIX,cdn-apple.com,DIRECT",
-
-	// OCSP 证书吊销校验：装 App、跑更新、首次打开签名应用时，系统都要向它
-	// 问一句「这张证书还有效吗」。走代理后节点一抖或对 POST 返回非预期状态，
-	// 系统就把证书当成不可信——表现是卡在「正在验证」或直接报「无法验证」，
-	// 用户根本看不出是代理的问题。ocsp2 是新域名，老配置只收 ocsp 会漏。
-	"DOMAIN,ocsp.apple.com,DIRECT",
-	"DOMAIN,ocsp2.apple.com,DIRECT",
-
-	// ── 类 2：定位与区域判定 ──
-	// 这几个主机回报的是「设备大致在哪」。走代理等于告诉 Apple 你在节点所在国，
-	// 于是「查找我的」定位漂到海外、时区自动设置错乱、App Store 与 Apple ID
-	// 的区域判定跟着变。不是「慢」的问题，是答案本身就错了。
-	"DOMAIN,gs-loc.apple.com,DIRECT",    // 定位主入口
-	"DOMAIN-SUFFIX,ls.apple.com,DIRECT", // 定位服务后端（gsp-ssl.ls 等）
-	"DOMAIN-SUFFIX,ls-apple.com,DIRECT", // 地区变体
-
-	// ── 类 3：Apple ID 登录与激活 ──
-	// 登录走代理会被判异地 → 二次验证 / 锁账号；页面资源还做了证书固定。
-	"DOMAIN,appleid.apple.com,DIRECT",
-	"DOMAIN,idmsa.apple.com,DIRECT",
-	"DOMAIN,amp-api.apps.apple.com,DIRECT",
-
-	// ── 类 4：Microsoft 账号登录与认证 ──
-	// OneDrive / Office / Windows / Teams 的登录都过这条链路；走代理出口 IP 触发风控。
-	"DOMAIN,login.microsoftonline.com,DIRECT",
-	"DOMAIN,login.live.com,DIRECT",
-	"DOMAIN,login.microsoft.com,DIRECT",
-	"DOMAIN,login.windows.net,DIRECT",
-	"DOMAIN,account.live.com,DIRECT",
-	"DOMAIN,account.microsoft.com,DIRECT",
-	"DOMAIN-SUFFIX,microsoftonline.com,DIRECT", // 各国后缀与 -p 变体
-	"DOMAIN-SUFFIX,msftauth.net,DIRECT",        // 登录页脚本与资源 CDN
-	"DOMAIN-SUFFIX,msauth.net,DIRECT",
-	"DOMAIN-SUFFIX,msftauthimages.net,DIRECT", // 登录页图形验证码
-
-	// ── 类 5：Windows 更新 / 激活 / 授权 ──
-	// 更新由 Microsoft CDN 按地域就近下发，走代理等于绕到远端节点再回源，
-	// 轻则龟速、重则 0x8024402c 一类报错；激活与授权走代理会被判「异常环境」。
-	// 注意：**不含** mp.microsoft.com 的应用内容分发（Store 应用下载属于内容服务，
-	// 由用户勾选的规则集决定），只收操作系统更新与激活。
-	"DOMAIN-SUFFIX,windowsupdate.com,DIRECT",            // download./ctldl./au.download. 全在内
-	"DOMAIN-SUFFIX,update.microsoft.com,DIRECT",         // 旧版更新端点
-	"DOMAIN-SUFFIX,activation.sls.microsoft.com,DIRECT", // 激活
-	"DOMAIN-SUFFIX,licensing.mp.microsoft.com,DIRECT",   // 授权
-
-	// ── 类 6：系统连通性检测（NCSI / 热点探测）──
-	// 走代理一旦节点抖一下，系统就判定「无网络」，随后反复重连、弹网络异常、
-	// 甚至把 Wi-Fi 标记为「已连接但无法访问 Internet」。
-	"DOMAIN-SUFFIX,msftconnecttest.com,DIRECT",
-	"DOMAIN-SUFFIX,msftncsi.com,DIRECT",
-
-	// ── 类 7：明确要求直连的站点（用户指定）──
-	// MediaFire：站点与下载节点都在 mediafire.com 后缀下（download####.mediafire.com）。
-	// 刻意不加 IP 规则：它全站挂在 Cloudflare 共享段上（实测
-	// download.mediafire.com → 104.18.213.225 / 104.18.214.225），
-	// 按 IP 放行会把同一片 CF 上的成千上万个站点一起拉成直连。
-	"DOMAIN-SUFFIX,mediafire.com,DIRECT",
-
-	// ── 类 8：Apple 推送（APNs）──
-	// 推送不是「用的时候才连」，而是设备常连的长连接（courier.push.apple.com:5223）。
-	// 走代理后每次交互都要多绕一个海外 RTT，链路一抖就断线重连；实测开着代理时
-	// iPhone / iPad 待机耗电明显加快，而安卓不走这条通道，所以只有苹果设备中招。
-	// 只按域名放行：设备若直接拿 IP 连（没有 SNI）仍会落进 MATCH,PROXY。要彻底覆盖
-	// 得加 Apple 的 17.0.0.0/8，但那会把 iCloud 等海外服务一起拉成直连，暂不默认开启。
-	// 这条规则成立的前提是 sniffer 嗅探 `TLS 5223`（见下面的 sniffer 段）——少了它
-	// 域名匹配永远不命中，规则就是摆设。
-	"DOMAIN-SUFFIX,push.apple.com,DIRECT",
-}
+// blockExemptNeeded 只关心「插不插」的调用方（测试）用这个。
+func blockExemptNeeded(sets []normSet) bool { return blockExemptDecision(sets).Insert }
 
 // systemDirectPorts 是「按端口判断、拿不到域名」的必须直连流量。
 //
@@ -1394,31 +1344,14 @@ var systemDirectRules = []string{
 // 时间同步必须走本地网络，这里按端口兜底，不依赖域名嗅探。
 var systemDirectPorts = []int{123}
 
-// systemProxyDomains / systemProxyCIDRs 是「走直连必然不稳」的境外关键服务，
-// 无条件走代理——与 systemDirectRules 正好相反：那份是「走代理会坏」，这份是
-// 「直连会坏」。
+// systemProxyCIDRs 与 github 类的域名规则配套：域名部分覆盖 HTTPS（按 SNI 嗅探
+// 出的域名匹配），这些 IP 段覆盖**没有域名**的裸 TCP，主要是 git over SSH——
+// SSH 走 22 端口、没有 SNI，域名规则对它完全无效，只能按目标 IP 匹配。
 //
-// 为什么必须做（2026-11-17 实测，广州联通千兆）：直连 https://github.com
-// 握手阶段就超时（5s 无任何响应），而 raw.githubusercontent.com 同刻可达。
-// 也就是说 GitHub 的可达性是「按端点/按时间抖动」的，靠兜底规则碰运气不行。
-//
-// 域名部分覆盖 HTTPS（按 SNI 嗅探出的域名匹配）；IP 段覆盖没有域名的裸 TCP，
-// 主要是 git over SSH——SSH 走 22 端口、没有 SNI，域名规则对它完全无效，
-// 只能按目标 IP 匹配。IP 段取自 GitHub 官方 https://api.github.com/meta
-// 的 git 列表，只保留 GitHub 自有/独占段，不取大块 Azure 段（会误伤同机房服务）。
-var systemProxyDomains = []string{
-	// 主站 / gist / api / codeload / ssh.github.com 全在这条后缀下
-	"DOMAIN-SUFFIX,github.com,PROXY",
-	// raw / objects / avatars / camo / user-images / private-user-images
-	"DOMAIN-SUFFIX,githubusercontent.com,PROXY",
-	// github.githubassets.com：页面 CSS/JS，掉它就白屏
-	"DOMAIN-SUFFIX,githubassets.com,PROXY",
-	"DOMAIN-SUFFIX,github.io,PROXY",  // Pages
-	"DOMAIN-SUFFIX,github.dev,PROXY", // 网页版 VSCode
-	"DOMAIN-SUFFIX,ghcr.io,PROXY",    // 容器镜像
-	"DOMAIN-SUFFIX,githubapp.com,PROXY",
-}
-
+// 段取自 GitHub 官方 https://api.github.com/meta 的 git 列表，只保留 GitHub 自有 /
+// 独占段，不取大块 Azure 段（会误伤同机房服务）。上游那份列表现在是 111 条，这里
+// 只收常用的几条——漏一条的后果是该连接落回 MATCH,PROXY，方向与这些规则一致，
+// 所以不必把 111 条全抄进来，更不必为「新出现的段」改动代码。
 var systemProxyCIDRs = []string{
 	"192.30.252.0/22",   // GitHub 传统段（web/git/api/pages/hooks 都有）
 	"185.199.108.0/22",  // Pages / raw / githubassets 的 CDN 段
@@ -1549,7 +1482,9 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 	// 广告拦截豁免：必须排在**所有规则集之前**——ads-all 的 RULE-SET 一旦先
 	// 命中，这些应用日志域名就被 RST 了，App 首屏卡死，而配置看起来毫无问题。
 	// 排在自定义规则之后：用户仍可用自定义 REJECT 主动覆盖（那是他的显式选择）。
-	if blockExemptNeeded(sets) {
+	// 不插也要说：显式拦遥测时 plan.Warn 会给出一句「首屏会卡」的说明。
+	exempt := blockExemptDecision(sets)
+	if exempt.Insert {
 		for _, line := range blockExemptRules {
 			typ, val, pol, ok := parseCustomRule(line)
 			if !ok {
@@ -1557,7 +1492,9 @@ func genMihomo(target string, nodes []*link.Node, sets []normSet, customRules []
 			}
 			rules = append(rules, fmt.Sprintf("%s,%s,%s", typ, val, pol))
 		}
-		*warns = append(*warns, blockExemptWarn)
+	}
+	if exempt.Warn != "" {
+		*warns = append(*warns, exempt.Warn)
 	}
 	// 系统关键服务强制直连：必须在所有规则集之前——geosite-microsoft / onedrive
 	// 被设成 PROXY 时，若不前置，登录域名会先被 PROXY 规则吃掉（用户反馈的
@@ -1908,9 +1845,12 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 	}
 	// 广告拦截豁免：与 mihomo 同一份清单、同一位置（规则集之前）。sing-box 的
 	// 规则是顺序匹配，放进 rule_set 之后等于没写——REJECT 先命中就 RST 了。
-	if blockExemptNeeded(sets) {
+	sbExempt := blockExemptDecision(sets)
+	if sbExempt.Insert {
 		applyBuiltin(blockExemptRules)
-		*warns = append(*warns, blockExemptWarn)
+	}
+	if sbExempt.Warn != "" {
+		*warns = append(*warns, sbExempt.Warn)
 	}
 	applyBuiltin(systemDirectRules)
 	applyBuiltin(systemProxyDomains)
