@@ -172,6 +172,16 @@ html[data-boot-sect="maintain"] #set_sect_seg button[data-sect="maintain"]{
 ::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
 ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 ::-webkit-scrollbar-track{background:transparent}
+/* 圆角浮层里，滚动条默认从 0 画到 100%：一根直条把上下两个圆角一起穿过去，
+   看着像滚动条长到了边框外面（版本列表、入站编辑这些内容长的弹窗最明显）。
+   轨道两端各留出一个圆角的高度，滑块就只在直边段里走。
+   只作用在带圆角的浮层上（弹窗 / 抽屉 / 说明气泡，以及弹窗内部能滚的说明框
+   和日志框）——页面与侧栏的滚动条不缩进，横向滚动条也不动，否则表格横滑条
+   会被推离底边。 */
+.modal::-webkit-scrollbar-track,
+.modal ::-webkit-scrollbar-track,
+.more-panel::-webkit-scrollbar-track,
+.tpop::-webkit-scrollbar-track{margin:12px 0}
 
 /* ============ 登录页 ============ */
 /* 与主界面同一套悬浮玻璃：登录卡片待在左半区正中，右侧是一整块同材质的
