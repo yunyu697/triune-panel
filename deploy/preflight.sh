@@ -265,6 +265,18 @@ else
 	fail "有 e2e 脚本入库却没进 CI 清单（或进了清单却没放行）"
 fi
 
+# ============ 12. 命令与文档 ============
+# tp 的命令表在 tp.go，说明在 docs/cli.md，两处各改一处不算谁的错。
+# tp ui 从 v1.5.0 起就只在 tp.go 里存在——升级完浏览器还是旧界面时，
+# 用户没有任何地方能查到这条命令，而它正是那种时候唯一有用的东西。
+step "命令与文档（表里的命令都得写进 docs/cli.md）"
+if CLI_OUT="$(python3 "${SELF_DIR}/check-cli-docs.py" 2>&1)"; then
+	pass "命令表与 docs/cli.md 对得上"
+else
+	printf '%s\n' "$CLI_OUT" | sed 's/^/  /' >&2
+	fail "有命令能用却查不到（或隐藏旧名泄进了文档）"
+fi
+
 # ============ 汇总 ============
 printf '\n'
 if [[ ${#WARNS[@]} -gt 0 ]]; then

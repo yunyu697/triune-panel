@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 四个静态检查器（演示页路由 / 换进程接口 / 对外文档口吻 / e2e 登记）的回归。
+# 五个静态检查器（演示页路由 / 换进程接口 / 对外文档口吻 / e2e 登记 / 命令与文档）的回归。
 #
 # 为什么要有这个文件：检查器只在 preflight 里跑一次，而 preflight 只看
 # 「这一项绿不绿」。哪天有人把正则放松了、把跳过注释的逻辑写宽了，检查器
@@ -22,14 +22,17 @@ bad() { printf '  \033[31m✗\033[0m %s\n' "$1"; FAILED=$((FAILED + 1)); }
 # new_case <名字>：准备一个干净目录，复制检查器要读的文件
 new_case() {
 	CASE="$TMP/$1"
-	mkdir -p "$CASE/internal/api" "$CASE/internal/webui" "$CASE/deploy" "$CASE/.github/workflows"
+	mkdir -p "$CASE/internal/api" "$CASE/internal/webui" "$CASE/deploy" "$CASE/docs" "$CASE/cmd/server" "$CASE/.github/workflows"
 	cp "$ROOT/internal/api/api.go" "$CASE/internal/api/"
 	cp "$ROOT/internal/webui/app.js" "$CASE/internal/webui/"
 	cp "$ROOT/CHANGELOG.md" "$ROOT/README.md" "$CASE/"
+	cp "$ROOT/docs/cli.md" "$CASE/docs/"
+	cp "$ROOT/cmd/server/tp.go" "$CASE/cmd/server/"
 	cp "$ROOT/.gitignore" "$CASE/"
 	cp "$ROOT/.github/workflows/ci.yml" "$CASE/.github/workflows/"
 	cp "$ROOT/deploy/check-mock-routes.py" "$ROOT/deploy/check-restart-entry.py" \
-		"$ROOT/deploy/check-docs-voice.py" "$ROOT/deploy/check-e2e-registry.py" "$CASE/deploy/"
+		"$ROOT/deploy/check-docs-voice.py" "$ROOT/deploy/check-e2e-registry.py" \
+		"$ROOT/deploy/check-cli-docs.py" "$CASE/deploy/"
 }
 
 # run <期望 0|1> <说明> <命令...>：在 $CASE 里跑，比对退出码
@@ -50,7 +53,7 @@ run() {
 # edit <相对 $CASE 的路径> <老串> <新串>：精确替换一次，找不到就报错
 # （避免变异悄悄没生效，把「该红」测成「绿」而看不出原因）
 #
-# 路径一律拼上 $CASE：`run` 的 cd 只在子 shell 里生效，早先这里用相对路径，
+# 路径一律拼上 $CASE 指向的目录：`run` 的 cd 只在子 shell 里生效，早先这里用相对路径，
 # 变异全打在了工作区的真实文件上——自测把仓库改坏，还顺带让后面的用例互相污染。
 edit() {
 	local file="$CASE/$1" old="$2" new="$3"
@@ -138,6 +141,18 @@ run 1 "入库但 CI 不跑会红" python3 deploy/check-e2e-registry.py
 new_case e2e-missing
 edit .gitignore '!.e2e/toast.js' '' || true
 run 1 "CI 要跑但没放行会红" python3 deploy/check-e2e-registry.py
+
+echo "→ 命令与文档（check-cli-docs.py）"
+new_case cli
+run 0 "真实文档通过" python3 deploy/check-cli-docs.py
+edit cmd/server/tp.go 'name: "status", desc:' \
+	'name: "news", desc: "新加的命令，文档没写", run: cmdStatus}, {name: "status", desc:' || true
+run 1 "新命令没进文档会红" python3 deploy/check-cli-docs.py
+
+new_case cli-leak
+edit cmd/server/tp.go '{name: "reset-password", run: cmdResetPassword, hidden: true},' \
+	'{name: "reset-password", run: cmdResetPassword},' || true
+run 1 "隐藏旧名漏了 hidden 标志会红" python3 deploy/check-cli-docs.py
 
 echo
 if [[ "$FAILED" -gt 0 ]]; then
