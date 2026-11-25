@@ -556,19 +556,32 @@ func (a *Server) handlePanelRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = os.Chmod(staged, 0o755)
-	if v, err := update.BinaryVersion(staged, update.VersionArgs["panel"]); err != nil {
+	targetVer, verr := update.BinaryVersion(staged, update.VersionArgs["panel"])
+	if verr != nil {
 		os.Remove(staged)
-		fail(w, 422, "备份文件不可执行（已取消）: "+err.Error())
+		fail(w, 422, "备份文件不可执行（已取消）: "+verr.Error())
 		return
-	} else {
-		_ = v
 	}
 	if err := os.Rename(staged, exe); err != nil {
 		os.Remove(staged)
 		fail(w, 500, "替换失败: "+err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "msg": "回滚完成，正在重启..."})
+	// 回滚和自更新一样是 exec 换进程，内存里的会话表照样清空。签发口径必须
+	// 与 handleSelfUpdate 一致，否则「回滚完掉回登录页」就是必然——这正是
+	// 只给一条路开窄口子时会漏掉的那一半。
+	resumeTok, rerr := a.issueUpdateResume(a.currentUser(r))
+	if rerr != nil {
+		log.Printf("[rollback] 签发接力凭证失败（回滚照常进行，重启后需重新登录）: %v", rerr)
+	}
+	out := map[string]any{
+		"ok": true, "msg": "回滚完成，正在重启...",
+		"new_version": targetVer,   // 前端据此判定「新进程回来了」
+	}
+	if resumeTok != "" {
+		out["resume_token"] = resumeTok
+	}
+	writeJSON(w, 200, out)
 	a.auditOK(r, AuditUpdate, "panel", "面板回滚到备份 "+req.Backup)
 	// 与自更新共用同一套重启逻辑：exec 失败必须留下痕迹，不能静默继续跑旧映像
 	go a.restartSelf(exe, "回滚到 "+strings.TrimSuffix(req.Backup, ".bak"))

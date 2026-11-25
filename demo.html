@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.2.0 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.2.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -6497,6 +6497,11 @@ async function mockRoute(path, opts) {
   // 因为调用方几乎都 `catch(e){}`，症状是「演示页某块永远空白」，很难查。
   const mt = path.match(/\/api\/([^/?]*)(.*)?/) || [];
   const api = mt[1] || "", rest = mt[2] || "";
+  // api 只到**第一个**斜杠为止：/api/panel/rollback -> api="panel"、rest="/rollback"。
+  // 所以子路径一律判断 rest；写成 api === "panel/rollback" 会永远不命中，而
+  // mock 走不到分支只是 return {}，症状是「演示页那块一直空着」，很难查。
+  // 这类死分支曾真实存在五条，现由 .e2e/panel-update.js 与
+  // deploy/check-mock-routes.py 一起盯着。
   const q = Object.fromEntries(new URLSearchParams(path.split("?")[1] || ""));
   if (api === "login") {
     // 演示 TOTP 两步登录：任意账密 → 返回 need_2fa，输入 123456 放行
@@ -6637,8 +6642,8 @@ async function mockRoute(path, opts) {
     const total=t.up+t.down, quota=c.quota_gb*1073741824, pct=quota>0?total/quota*100:0;
     return {id:c.id,name:c.name,up:t.up,down:t.down,total,quota_gb:c.quota_gb,enabled:c.enabled,
       exceeded:quota>0&&total>=quota, warn:quota>0&&total<quota&&pct>=80, pct}; });
-  if (api === "traffic/daily") { const n=+q.days||30; return MDB.daily.slice(-n); }
-  if (api === "traffic/live") return {up_bps:Math.round(2.1e5+Math.random()*9e4), down_bps:Math.round(1.9e6+Math.random()*8e5), interval:30, updated_at:new Date().toISOString().slice(0,19)};
+  if (api === "traffic" && rest.startsWith("/daily")) { const n=+q.days||30; return MDB.daily.slice(-n); }
+  if (api === "traffic" && rest.startsWith("/live")) return {up_bps:Math.round(2.1e5+Math.random()*9e4), down_bps:Math.round(1.9e6+Math.random()*8e5), interval:30, updated_at:new Date().toISOString().slice(0,19)};
   if (api === "revisions") return MDB.revisions;
   if (api === "logs") return {logs:["2026-10-31 03:40:11 INFO sing-box started (1.9.7)","2026-10-31 03:40:11 INFO inbound/hk-01-reality: tcp://:443 started","2026-10-31 03:40:12 INFO inbound/jp-01-ws: ws://:8443 started"]};
   if (api === "notify" && rest.includes("/test")) {
@@ -6846,7 +6851,7 @@ async function mockRoute(path, opts) {
         paths("node.example.com"))
     ];
   }
-  if (api === "certs/issue") return {ok:1, msg:"已触发签发检查（演示）"};
+  if (api === "certs" && rest.startsWith("/issue")) return {ok:1, msg:"已触发签发检查（演示）"};
   if (api === "audit" && m === "DELETE") return {ok:1};
   if (api === "audit") {
     const t = n => new Date(Date.now() - n * 60000).toISOString().slice(0, 19).replace("T", " ");
@@ -6925,8 +6930,14 @@ async function mockRoute(path, opts) {
     if (installed) MDB.settings["bin_"+c] = "/opt/triune-panel/data/bin/"+c+"/"+(c==="singbox"?"sing-box":c);
     return {ok:1,component:c,version:c+" version 9.9.9 (demo)",sha256:"demo",backup:"20261031-053500.bak",target:MDB.settings["bin_"+c],installed,restarted:!installed,was_running:!installed}; }
   if (api.startsWith("cores/") && api.endsWith("/rollback")) { const c=api.split("/")[1]; return {ok:1,restored:"1.9.5-20261001-120000.bak",component:c}; }
-  if (api === "panel/backups") return {current_version:"v0.5.0-demo",executable:"/opt/triune-panel/triune-panel",backups:["v0.4.0-20261015-090000.bak","v0.3.0-20261002-180000.bak"],bak_exists:true};
-  if (api === "panel/rollback") { await new Promise(r=>setTimeout(r,600)); return {ok:1,msg:"回滚完成，正在重启..."}; }
+  if (api === "panel" && rest.startsWith("/backups")) return {current_version:"v0.5.0-demo",executable:"/opt/triune-panel/triune-panel",backups:["v0.4.0-20261015-090000.bak","v0.3.0-20261002-180000.bak"],bak_exists:true};
+  if (api === "panel" && rest.startsWith("/rollback")) {
+    await new Promise(r=>setTimeout(r,600));
+    // 与真后端同形：回滚也返回目标版本与接力凭证，否则演示页会演成
+    // 「回滚完必然掉登录」——那正是这次要修掉的毛病
+    return { ok:1, msg:"回滚完成，正在重启...", new_version:"v2.0.0-demo",
+             resume_token: (window.__demoUpdate === "no-ticket") ? "" : "demo-ticket" };
+  }
   /* 自更新与接力换票：演示页没有真进程可 exec，但状态机要走真的。
      分支用 window.__demoUpdate 指定（ok / no-ticket / resume-fail /
      restart-fail / timeout），e2e 靠它把四种结局都跑一遍。 */
@@ -13302,7 +13313,7 @@ async function submitHTTPS() {
      4. 起不来看得出原因：exec 失败会被后端记成 restart_failed，直接摊开说
 
    UPD 只描述「现在停在哪一步」，所有 DOM 只在 upd* 函数里改，便于 e2e 断言。 */
-const UPD = { on: false, old: "", expect: "", ticket: "", t0: 0, timer: null };
+const UPD = { on: false, kind: "update", old: "", expect: "", ticket: "", t0: 0, timer: null };
 
 /* 重启判定的总预算。exec 正常 1~3 秒；90 秒是给「机器很慢 + 内核起得慢」的余量，
    再长就只是让用户盯着一个不动的圈。演示模式要能在 e2e 里跑完，单独放短。 */
@@ -13357,6 +13368,8 @@ function updHide() {
 function updStop(kind, title, sub, hint, opts) {
   UPD.on = false;
   stopUpdPoll();
+  // 已经有结论了（成功换票/需要重登/等不到），下次载入不该再被等待层拦住
+  clearUpdRun();
   const o = opts || {};
   UPD.goReload = !!o.reload;
   $("upwait").classList.add(kind);   // done / fail，只影响圆环颜色
@@ -13409,7 +13422,9 @@ function demoProbeVersion() {
   DEMO_UPD_TICKS++;
   const old = "v2.1.8-demo";
   if (mode === "restart-fail" || mode === "timeout") return old;  // 进程始终没换
-  return DEMO_UPD_TICKS >= 2 ? "v9.9.9-demo" : old;
+  // 回滚的目标版本与更新不同，判据得跟着操作类型走
+  const nv = UPD.kind === "rollback" ? "v2.0.0-demo" : "v9.9.9-demo";
+  return DEMO_UPD_TICKS >= 2 ? nv : old;
 }
 
 async function selfUpdate() {
@@ -13417,21 +13432,53 @@ async function selfUpdate() {
   const url = ($("up_url").value || "").trim();
   if (!DEMO && !url) { toast("先填新版本二进制的下载地址", "err"); return; }
   if (!(await ask("面板自更新", "下载新版本并重启面板？更新自动备份旧文件为 *.bak，数据与配置不受影响。"))) return;
+  await runPanelOp("update", { url, sha256: ($("up_sha").value || "").trim() });
+}
 
+/* 「会让面板换进程」的操作统一入口：更新、回滚，都是这一条。
+ *
+ * 为什么必须收敛成一个函数：v2.1.9 只把等待层接在「面板自更新」卡片上，
+ * 版本列表弹窗那条路还在 setTimeout(reload, 5000) 猜——而用户点的是
+ * 版本列表。只覆盖一半的「修好」等于没修，而且比没修更难发现：另一条路
+ * 看着是好的。
+ *
+ * 判据不是「有没有等待层」，而是**谁负责收尾**：只要这个请求会让进程消失，
+ * 就必须由这里收尾（挂层 → 拿票 → 轮询 → 换票 → reload）。新加一个重启
+ * 入口时只要调它，就不会再漏。e2e 里每个入口各有一条用例钉着。
+ *
+ * 顺带在**发请求之前**写 sessionStorage.updRun：那时还什么都没有发生，
+ * 但接下来这一两秒页面可能被刷新、被浏览器丢掉、或用户手快按了 F5。
+ * 有了这个标记，下次载入能自己把等待层接回去，而不是停在旧界面乱点、
+ * 或者干脆掉到登录页。 */
+async function runPanelOp(kind, body) {
+  const isRollback = kind === "rollback";
+  const path  = isRollback ? "/api/panel/rollback" : "/api/self-update";
+  const title = isRollback ? "正在回滚面板" : "正在更新面板";
+  const sub   = isRollback
+    ? "正在用备份替换二进制，随后面板会重启。"
+    : "正在下载并校验新版本，这一步可能要几十秒…";
+
+  UPD.kind = kind;
   UPD.old = ($("curver").textContent || "").trim();
-  UPD.expect = ""; UPD.ticket = "";
+  UPD.expect = ""; UPD.ticket = ""; UPD.goReload = false;
   demoUpdateReset();
   try { sessionStorage.removeItem("updResume"); } catch (_) {}
-  updShow("正在更新面板", "正在下载并校验新版本，这一步可能要几十秒…");
+  setUpdRun({ kind, t0: Date.now(), old: UPD.old, expect: "" });
+
+  updShow(title, sub);
   updStep(1);
   if (UPD.old) $("upwait_ver").textContent = "当前版本 " + UPD.old;
 
-  const r = await updCall("/api/self-update", { url, sha256: ($("up_sha").value || "").trim() });
+  const r = await updCall(path, body);
   if (r.status !== 200) {
-    // 下载失败 / sha256 不符 / 新二进制跑不起来，全在这里，进程一步都没动
+    // 下载失败 / sha256 不符 / 新二进制跑不起来 / 备份不可执行，全在这里，
+    // 进程一步都没动 —— 所以标记也要撤掉，否则刷新会误以为还在更新
+    clearUpdRun();
     const why = (r.body && r.body.error) || (r.status === 0 ? "连接中断" : "HTTP " + r.status);
-    updStop("fail", "更新没有开始", why,
-      "现有版本还在跑，什么都没变。核对下载地址与 sha256 后可以重试。",
+    updStop("fail", isRollback ? "回滚没有开始" : "更新没有开始", why,
+      isRollback
+        ? "现有版本还在跑，什么都没变。可以换一个备份再试。"
+        : "现有版本还在跑，什么都没变。核对下载地址与 sha256 后可以重试。",
       { goLabel: "知道了", retry: false });
     return;
   }
@@ -13439,14 +13486,56 @@ async function selfUpdate() {
   UPD.expect = normVer((r.body && r.body.new_version) || "");
   UPD.ticket = (r.body && r.body.resume_token) || "";
   if (UPD.ticket) { try { sessionStorage.setItem("updResume", UPD.ticket); } catch (_) {} }
+  setUpdRun({ kind, t0: Date.now(), old: UPD.old, expect: UPD.expect });
 
   updStep(2, "替换二进制并重启");
   updMsg("正在重启面板", "面板会换一个新进程，这几秒页面连不上是正常的。");
   $("upwait_ver").textContent = UPD.old
-    ? UPD.old + " → " + (UPD.expect || "新版本")
+    ? UPD.old + " → " + (isRollback ? (UPD.expect || "备份版本") : (UPD.expect || "新版本"))
     : (UPD.expect || "");
   UPD.t0 = Date.now();
   await updWatch();
+}
+
+/* 更新/回滚在途标记。写在 sessionStorage 而不是内存：这个标记要能活过
+   「页面被刷新/被丢掉」，那正是它唯一的用途。 */
+const UPD_RUN_KEY = "updRun";
+const UPD_RUN_WINDOW = 10 * 60 * 1000;   // 超过这么久就不再试图接回去
+function setUpdRun(st) {
+  try { sessionStorage.setItem(UPD_RUN_KEY, JSON.stringify(st)); } catch (_) {}
+}
+function clearUpdRun() {
+  try { sessionStorage.removeItem(UPD_RUN_KEY); } catch (_) {}
+}
+function readUpdRun() {
+  try {
+    const st = JSON.parse(sessionStorage.getItem(UPD_RUN_KEY) || "null");
+    if (!st || !st.t0) return null;
+    if (Date.now() - st.t0 > UPD_RUN_WINDOW) { clearUpdRun(); return null; }
+    return st;
+  } catch (_) { return null; }
+}
+
+/* 页面重新载入时，如果上一次更新还没走完，就把等待层接回去。
+   返回 true 表示由等待层接管，调用方不要再画主界面、也不要跑那次
+   会踢人的 /api/status 复核。 */
+function resumeUpdWait() {
+  const st = readUpdRun();
+  if (!st) return false;
+  UPD.kind = st.kind || "update";
+  UPD.old = st.old || "";
+  UPD.expect = st.expect || "";
+  UPD.t0 = st.t0;
+  try { UPD.ticket = sessionStorage.getItem("updResume") || ""; } catch (_) { UPD.ticket = ""; }
+  demoUpdateReset();
+
+  updShow(UPD.kind === "rollback" ? "正在回滚面板" : "正在更新面板",
+    "页面刚才被重新载入，正在接着等面板回来…");
+  updStep(2, "替换二进制并重启");
+  if (UPD.old) $("upwait_ver").textContent = UPD.old +
+    (UPD.expect ? " → " + UPD.expect : " → 新版本");
+  updWatch();
+  return true;
 }
 
 /* 轮询直到「新进程起来了」。判据是版本号匹配期望值；期望值丢失时
@@ -13501,6 +13590,7 @@ async function updBackOnline(v) {
   } catch (_) {}
 
   UPD.on = false;
+  clearUpdRun();   // 马上要 reload，新页面不能被等待层再拦一次
   $("upwait").classList.add("done");
   $("upwait_title").textContent = "更新完成";
   $("upwait_sub").textContent = "已更新到 " + v + "，正在回到原来的页面…";
@@ -14252,10 +14342,11 @@ async function confirmVersionUpdate() {
   toast(verInstallMode ? "下载与安装中，请稍候…" : "下载与更新中，请稍候（视网络可能需要 1-3 分钟）…", "info");
   try {
     if (isPanel) {
-      await req("/api/self-update", { method:"POST", body:{ url, sha256:$("vs_sha").value, mirror } });
+      // 走和「面板自更新」卡片同一个入口：等待层、接力凭证、轮询判活都在那儿。
+      // v2.1.9 这里是 setTimeout(reload, 5000)，于是这条路上的用户既看不到
+      // 等待界面，也必然被踢回登录页。
       closeModal("mVersions");
-      toast("更新完成，面板重启中，5 秒后刷新页面");
-      setTimeout(() => location.reload(), 5000);
+      await runPanelOp("update", { url, sha256:$("vs_sha").value, mirror });
     } else {
       const j = await req("/api/cores/" + comp + "/update", { method:"POST", body:{ version: url ? "" : ver, url, sha256:$("vs_sha").value, mirror } });
       closeModal("mVersions");
@@ -14288,10 +14379,9 @@ async function doPanelRollback() {
       toast("最近备份请通过恢复 exe.bak 的方式手动还原，或选择版本化备份", "warn");
       return;
     }
-    await req("/api/panel/rollback", { method:"POST", body:{ backup:b } });
+    // 回滚同样是 exec 换进程，之前也是 setTimeout 猜 5 秒 + 必然掉登录
     closeModal("mRollback");
-    toast("回滚完成，面板重启中，5 秒后刷新页面");
-    setTimeout(() => location.reload(), 5000);
+    await runPanelOp("rollback", { backup:b });
   } catch(e){ toast(e.message, "err"); }
 }
 
@@ -14867,6 +14957,13 @@ async function clearAudit() {
 })();
 
 /* ================= 启动 ================= */
+/* 上一次更新没走完（页面被刷新 / 标签页被回收 / 浏览器崩了）：由等待层接管。
+ *
+ * 这一句**必须在分支之前**判定一次。写成「演示模式里一份、登录态里一份」的话，
+ * e2e 走的是演示那份，线上跑的是另一份——两边各写一遍，等于线上那条没人盯。
+ * 这条教训是真实踩到的：恢复逻辑写完，把登录分支里的调用删掉，e2e 依然全绿。 */
+const UPD_HANDOFF = resumeUpdWait();
+
 if (DEMO) {
   // 演示模式：直接进入主界面，无需登录（演示的是超级管理员视角）
   ROLE = "owner"; ME = { user: "admin", role: "owner" };
@@ -14878,13 +14975,18 @@ if (DEMO) {
      立刻套上本地角色（只读账号不该闪一下管理员按钮）并开始拉数据。 */
   applyRole();
   showApp();
-  /* 会话可能在别的设备上被吊销、或面板重启后 token 失效：后台复核一次，
-     只有明确的 401 才回登录页。网络暂时不通（面板正在重启、断网重连）不踢人，
-     否则一次抖动就变成「刷新一下要重新登录」。 */
-  fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
-    .then(r => { if (r.status === 401) { dropSession(); showLogin(); } })
-    .catch(() => {});
-} else showLogin();
+  /* 上一次更新还没走完（用户手快 F5 / 浏览器把标签页丢了 / 更新入口漏了接
+     等待层）：由等待层接管，并且**不跑**下面那次复核——那一刻 401 是预期的，
+     跑它只会把刚要换回来的会话自己扔掉。 */
+  if (!UPD_HANDOFF) {
+    /* 会话可能在别的设备上被吊销、或面板重启后 token 失效：后台复核一次，
+       只有明确的 401 才回登录页。网络暂时不通（面板正在重启、断网重连）不踢人，
+       否则一次抖动就变成「刷新一下要重新登录」。 */
+    fetch("/api/status", { headers:{ Authorization:"Bearer "+TOKEN } })
+      .then(r => { if (r.status === 401) { dropSession(); showLogin(); } })
+      .catch(() => {});
+  }
+} else if (!UPD_HANDOFF) showLogin();
 </script>
 </body>
 </html>

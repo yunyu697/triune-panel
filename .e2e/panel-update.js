@@ -6,7 +6,11 @@
  *   3. 失败时能不能说清是「没下载下来」「没重启成功」还是「还没回来」
  *
  * 演示页没有真进程可以 exec，所以用 window.__demoUpdate 指定结局，
- * 前端走的是与线上完全相同的状态机（见 app.js 的 selfUpdate / updWatch）。
+ * 前端走的是与线上完全相同的状态机（见 app.js 的 runPanelOp / updWatch）。
+ *
+ * 覆盖三条**都会换进程**的入口：面板自更新卡片、版本列表弹窗、面板回滚。
+ * v2.1.9 只接了第一条，用户点第二条时既没等待层也掉了登录——所以每个入口
+ * 各留一条用例，漏一个就红。
  */
 const { launch } = require("./browser");
 const path = require("path");
@@ -175,6 +179,109 @@ const waitTitle = (page, text, timeout = 6000) =>
       UPD.on = false;
       return kicked;
     }));
+    ck("没有页面异常", 0, errors.length);
+    if (errors.length) console.log(errors.join("\n"));
+    await page.close();
+  }
+
+  /* ---- 8. 版本列表弹窗里的「更新」也必须走等待层 ----
+     v2.1.9 只接了「面板自更新」卡片那条路，用户实际点的是这里，
+     于是既看不到等待界面、也必然掉登录。这条用例就是那次漏接的门闩。 */
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const errors = [];
+    page.on("pageerror", e => errors.push(e.message));
+    await page.goto(URL);
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      window.__demoUpdate = "ok";
+      window.__updBudgetMs = 2200;
+      verList = [{ tag: "v9.9.9-demo" }];
+      const sel = document.getElementById("vs_select");
+      sel.innerHTML = '<option>v9.9.9-demo</option>';
+      sel.value = "0";
+      document.getElementById("vs_component").textContent = "panel";
+      document.getElementById("vs_url").value = "";
+      document.getElementById("vs_sha").value = "";
+      document.getElementById("vs_mirror").value = "";
+      confirmVersionUpdate();
+    });
+    await page.waitForTimeout(150);
+    await page.click("#cf_ok");
+    await page.waitForTimeout(300);
+    ck("版本弹窗更新也会挂等待层", false,
+      await page.evaluate(() => document.getElementById("upwait").classList.contains("hide")));
+    ck("版本弹窗更新：等待层盖住整页", "upwait",
+      await page.evaluate(() => {
+        const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+        return (el && el.closest("#upwait")) ? "upwait" : "other";
+      }));
+    await waitTitle(page, "更新完成");
+    ck("版本弹窗更新：换到新会话，不用重登", "demo-resumed-token",
+      await page.evaluate(() => localStorage.getItem("triune_token")));
+    ck("没有页面异常", 0, errors.length);
+    if (errors.length) console.log(errors.join("\n"));
+    await page.close();
+  }
+
+  /* ---- 9. 面板回滚同样是换进程，同样要给等待层与接力凭证 ---- */
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const errors = [];
+    page.on("pageerror", e => errors.push(e.message));
+    await page.goto(URL);
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      window.__demoUpdate = "ok";
+      window.__updBudgetMs = 2200;
+      const sel = document.getElementById("rb_select");
+      sel.innerHTML = '<option value="v2.0.0-20260101-000000.bak">b</option>';
+      sel.value = "v2.0.0-20260101-000000.bak";
+      doPanelRollback();
+    });
+    await page.waitForTimeout(150);
+    await page.click("#cf_ok");
+    await page.waitForTimeout(300);
+    ck("回滚也挂等待层", false,
+      await page.evaluate(() => document.getElementById("upwait").classList.contains("hide")));
+    ck("回滚的标题说的是回滚", "正在回滚面板",
+      await page.evaluate($txt("upwait_title")));
+    await waitTitle(page, "更新完成");
+    ck("回滚完也不用重登", "demo-resumed-token",
+      await page.evaluate(() => localStorage.getItem("triune_token")));
+    ck("没有页面异常", 0, errors.length);
+    if (errors.length) console.log(errors.join("\n"));
+    await page.close();
+  }
+
+  /* ---- 10. 更新中途页面被刷新：等待层要自己接回去 ----
+     这条是兜底：用户手快按了 F5、浏览器把标签页回收、或将来新加的入口
+     只写了请求没写等待层——只要请求经过了 runPanelOp，标记就在，
+     重新载入时不能再画一遍旧界面然后 401 掉到登录页。 */
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const errors = [];
+    page.on("pageerror", e => errors.push(e.message));
+    await page.goto(URL);
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      sessionStorage.setItem("updRun", JSON.stringify({
+        kind: "update", t0: Date.now(), old: "v2.1.8-demo", expect: "v9.9.9-demo"
+      }));
+      sessionStorage.setItem("updResume", "demo-ticket");
+      window.__updBudgetMs = 2200;
+    });
+    await page.reload();
+    await page.waitForTimeout(400);
+    ck("刷新后等待层自己接回来", false,
+      await page.evaluate(() => document.getElementById("upwait").classList.contains("hide")));
+    ck("接回来时说明是「接着等」", true,
+      await page.evaluate(() => document.getElementById("upwait_sub").textContent.includes("重新载入")));
+    await waitTitle(page, "更新完成");
+    ck("接回来后照样换到会话", "demo-resumed-token",
+      await page.evaluate(() => localStorage.getItem("triune_token")));
+    ck("在途标记用完即清", null,
+      await page.evaluate(() => sessionStorage.getItem("updRun")));
     ck("没有页面异常", 0, errors.length);
     if (errors.length) console.log(errors.join("\n"));
     await page.close();

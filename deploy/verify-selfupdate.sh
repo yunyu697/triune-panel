@@ -6,11 +6,13 @@
 # 同属真机回归资产），不进 CI、也不进 preflight。改过下列任何一处之后手动跑一次：
 #   internal/api/panelresume.go   (签发 / 换票)
 #   internal/api/ops.go           (handleSelfUpdate 里签发的那一步)
+#   internal/api/update.go        (handlePanelRollback —— 回滚是同一形状的第二个入口)
 #   cmd/server/main.go            (serve 的启动参数)
 #
 # 它证明的是单测和离线 e2e 都证不了的那一段：
 #   exec 换掉进程映像之后，**新进程**还能从同一个 SQLite 里认出那张票，
 #   换出一张能用的会话；而旧 token 确实已经失效。
+#   自更新与回滚各跑一遍：两条入口都是 exec 换进程，都该有票。
 #
 # 用法：deploy/verify-selfupdate.sh [监听端口] [文件服务端口]
 set -uo pipefail
@@ -93,6 +95,36 @@ ck "同一张票重放被拒" 401 "$(code -X POST "$BASE/api/session/resume" \
   -H 'Content-Type: application/json' -d "{\"token\":\"$RESUME\"}")"
 ck "库里已无待恢复会话" 401 "$(code -X POST "$BASE/api/session/resume" \
   -H 'Content-Type: application/json' -d '{"token":"whatever"}')"
+
+# ---- 回滚：同样换进程，同样必须给出接力凭证 ----
+# 只给自更新那条路签票、忘了回滚，是同一形状的第二个实例（v2.2.0 之前的真实状态）。
+# 这里用刚被自更新挤下来的那份备份滚回去，证明两条路一个口径。
+echo "→ 回滚到自更新留下的备份"
+BKS="$(curl -s --noproxy '*' --max-time 5 -H "Authorization: Bearer $NEWTOK" "$BASE/api/panel/backups")"
+BK="$(printf '%s' "$BKS" | python3 -c 'import sys,json;b=json.load(sys.stdin).get("backups") or [];print(b[0] if b else "")')"
+ck "自更新留下了可回滚的备份" 1 "$([[ -n "$BK" ]] && echo 1 || echo 0)"
+
+RB="$(curl -s --noproxy '*' --max-time 60 -X POST "$BASE/api/panel/rollback" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $NEWTOK" \
+  -d "{\"backup\":\"$BK\"}")"
+RTK="$(printf '%s' "$RB" | jget resume_token)"
+ck "回滚响应带回接力凭证（64 位）" 64 "${#RTK}"
+ck "回滚响应给出目标版本" 1 "$(printf '%s' "$RB" | grep -c '0\.0\.1' || true)"
+
+echo "→ 等回滚后的进程"
+VER2=""
+for _ in $(seq 1 80); do
+  sleep 0.5
+  V="$(curl -s --noproxy '*' --max-time 2 "$BASE/api/public/info" 2>/dev/null)"
+  if printf '%s' "$V" | grep -q 'v0\.0\.1-under-test'; then VER2="$V"; break; fi
+done
+ck "回滚后跑的是备份版本" '{"version":"v0.0.1-under-test"}' "$VER2"
+ck "回滚同样清了会话表" 401 "$(code -H "Authorization: Bearer $NEWTOK" "$BASE/api/me")"
+
+RV="$(curl -s --noproxy '*' --max-time 5 -X POST "$BASE/api/session/resume" \
+  -H 'Content-Type: application/json' -d "{\"token\":\"$RTK\"}")"
+RTOK="$(printf '%s' "$RV" | jget token)"
+ck "回滚后也能换到会话（不回登录页）" 200 "$(code -H "Authorization: Bearer $RTOK" "$BASE/api/me")"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

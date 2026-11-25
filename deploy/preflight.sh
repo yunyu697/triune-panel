@@ -216,6 +216,18 @@ else
 	fi
 fi
 
+# ============ 8. 演示页路由 ============
+# mockRoute 把 /api/panel/rollback 切成 api="panel" + rest="/rollback"，
+# 写成 api === "panel/rollback" 的分支永不命中；走不到只是 return {}，
+# 不报错也不告警，症状是「演示页那块一直空着」。曾真实存在五条。
+step "演示页路由（mock 分支必须真的能命中）"
+if MOCK_OUT="$(python3 "${SELF_DIR}/check-mock-routes.py" internal/webui/app.js 2>&1)"; then
+	pass "mock 分支没有带斜杠的 api 常量比较"
+else
+	printf '%s\n' "$MOCK_OUT" | sed 's/^/  /' >&2
+	fail "演示页存在永不命中的 mock 分支（api 只到第一个斜杠，子路径要用 rest.startsWith）"
+fi
+
 # ============ 汇总 ============
 printf '\n'
 if [[ ${#WARNS[@]} -gt 0 ]]; then
