@@ -57,7 +57,11 @@ func cmdUIStatus(args []string) {
 
 	dir := resolveDataDir(*dataDir)
 	path := filepath.Join(dir, "web", "index.html")
-	page, custom := webui.ServedPage(dir)
+	// 谁在服务页面由 ServedPage 一处判定（API 层同源）；这里只要那个结论，
+	// 页面正文不在这里用——曾经把它的长度当成「内嵌页面」的体积打出来，
+	// 自定义界面在用时会显示成磁盘页的大小（217 KB 变成 49 B）。
+	_, custom := webui.ServedPage(dir)
+	embedded := webui.EmbeddedPage()
 
 	rep := uiReport{
 		Version:  Version,
@@ -96,7 +100,7 @@ func cmdUIStatus(args []string) {
 
 	fmt.Printf("版本      %s\n", rep.Version)
 	fmt.Printf("数据目录  %s\n", rep.DataDir)
-	fmt.Printf("内嵌页面  %s · %s\n", uiOrDash(rep.Embedded), uiBytes(int64(len(page))))
+	fmt.Printf("内嵌页面  %s · %s\n", uiOrDash(rep.Embedded), uiBytes(int64(len(embedded))))
 	if !rep.DiskPresent {
 		fmt.Printf("磁盘页面  （不存在）\n")
 	} else {
