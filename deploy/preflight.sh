@@ -277,6 +277,27 @@ else
 	fail "有命令能用却查不到（或隐藏旧名泄进了文档）"
 fi
 
+# ============ 13. 发布链离线回归 ============
+# deploy/tests/*.sh 是检查器与发布脚本自己的回归：该红的变异必须真红，
+# 该绿的对照不许误伤。CI 一直在跑这一组，本地门禁却没跑 —— v2.2.3 发布时
+# 就这么撞了一次：文档口吻那条变异的锚点写在小节正文上，这版正文一换，
+# 替换静默落空，本地 19 项全绿，CI 的 shellcheck job 红。
+# 同一件事不能只有一边在查。
+step "发布链离线回归（deploy/tests）"
+TESTS_BROKEN=0
+for t in "${SELF_DIR}"/tests/*.sh; do
+	if ! T_OUT="$(bash "$t" 2>&1)"; then
+		TESTS_BROKEN=$((TESTS_BROKEN + 1))
+		printf '  %s\n' "$(basename "$t")" >&2
+		printf '%s\n' "$T_OUT" | tail -8 | sed 's/^/    /' >&2
+	fi
+done
+if [[ "$TESTS_BROKEN" -eq 0 ]]; then
+	pass "deploy/tests 全部通过"
+else
+	fail "${TESTS_BROKEN} 个离线回归失败"
+fi
+
 # ============ 汇总 ============
 printf '\n'
 if [[ ${#WARNS[@]} -gt 0 ]]; then

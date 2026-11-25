@@ -117,19 +117,52 @@ edit internal/api/api.go '	"/api/panel/rollback",
 }' || true
 run 1 "清单里多一条不存在的路径会红" python3 deploy/check-restart-entry.py
 
+# inject_after_heading <相对路径> <第几个 ## v 小节> <要插入的一段>
+#
+# 变异锚点不能用小节正文：第一节每次发版都换，锚点一过期，替换什么都落不到
+# 文件上，变异就静默落空——该红的用例变成绿，看上去还是「全部通过」。
+# 这里按「第 N 个 ## vX.Y.Z 标题」定位，发版换正文也不影响。
+inject_after_heading() {
+	local file="$CASE/$1" nth="$2" text="$3"
+	case "$file" in
+	"$TMP"/*) ;;
+	*)
+		printf '  \033[31m✗\033[0m 拒绝写临时目录之外的文件：%s\n' "$file"
+		FAILED=$((FAILED + 1))
+		return 1
+		;;
+	esac
+	python3 - "$file" "$nth" "$text" <<'PY'
+import re, sys
+path, nth, text = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+lines = open(path, encoding="utf-8").read().split("\n")
+seen = 0
+for i, ln in enumerate(lines):
+    if re.match(r"^## v\d", ln):
+        seen += 1
+        if seen == nth:
+            lines.insert(i + 1, "\n" + text)
+            break
+else:
+    print(f"MUTATION NOT APPLIED: 文件里只有 {seen} 个 ## v 小节", file=sys.stderr)
+    sys.exit(3)
+open(path, "w", encoding="utf-8").write("\n".join(lines))
+PY
+	if [[ $? -ne 0 ]]; then
+		printf '  \033[31m✗\033[0m 变异没落到文件上：%s\n' "$file"
+		FAILED=$((FAILED + 1))
+		return 1
+	fi
+}
+
 echo "→ 对外文档口吻（check-docs-voice.py）"
 new_case voice
 run 0 "真实文档通过" python3 deploy/check-docs-voice.py
-edit CHANGELOG.md '### 更新的时候，看到的是一层模糊遮罩' \
-	'### 更新的时候，看到的是一层模糊遮罩
-
-**我是怎么验的**：八组变异全部转红。' || true
+inject_after_heading CHANGELOG.md 1 '**我是怎么验的**：八组变异全部转红。' || true
 run 1 "当次小节混入开发过程会红" python3 deploy/check-docs-voice.py
 
 new_case voice-history
-edit CHANGELOG.md '## v2.1.9' '## v2.1.9
-
-历史遗留措辞：我是怎么验的、五组变异。' || true
+inject_after_heading CHANGELOG.md 2 '历史遗留措辞：我是怎么验的、五组变异。' || true
 run 0 "历史小节不误伤（只查当次发布）" python3 deploy/check-docs-voice.py
 
 echo "→ e2e 登记（check-e2e-registry.py）"
