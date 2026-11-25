@@ -250,7 +250,7 @@ if VOICE_OUT="$(python3 "${SELF_DIR}/check-docs-voice.py" 2>&1)"; then
 	pass "当次发布的文档没有内部视角"
 else
 	printf '%s\n' "$VOICE_OUT" | sed 's/^/  /' >&2
-	fail "对外文档出现内部视角（“我”= 作者本人，读者是“你”；规则见 AGENTS.md A3）"
+	fail "对外文档出现内部视角（规则见 AGENTS.md A3：「我」是作者本人，读者是「你」）"
 fi
 
 # ============ 汇总 ============
