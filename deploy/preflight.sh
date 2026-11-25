@@ -253,6 +253,18 @@ else
 	fail "对外文档出现内部视角（规则见 AGENTS.md A3：「我」是作者本人，读者是「你」）"
 fi
 
+# ============ 11. e2e 脚本的登记 ============
+# 放行（.gitignore 白名单）和开跑（ci.yml 的清单）是两处独立的手工操作。
+# android-scroll / android-compat 从 v1.6.0 起就对着改过名的 .topbar 断言，
+# 因为只放行、没进清单，两年里谁都没发现；同一个目录下还有十几个同样躺着。
+step "e2e 登记（入库的都要真的跑）"
+if REG_OUT="$(python3 "${SELF_DIR}/check-e2e-registry.py" 2>&1)"; then
+	pass "入库的 e2e 脚本都在 CI 清单里"
+else
+	printf '%s\n' "$REG_OUT" | sed 's/^/  /' >&2
+	fail "有 e2e 脚本入库却没进 CI 清单（或进了清单却没放行）"
+fi
+
 # ============ 汇总 ============
 printf '\n'
 if [[ ${#WARNS[@]} -gt 0 ]]; then

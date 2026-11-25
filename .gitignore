@@ -38,6 +38,12 @@ design-preview/
 !.e2e/theme-contrast.js
 !.e2e/view-restore.js
 !.e2e/workbench-command.js
+!.e2e/actions.js
+!.e2e/android-compat.js
+!.e2e/android-scroll.js
+!.e2e/modal.js
+!.e2e/sni-ui.js
+!.e2e/toast.js
 
 # Python 字节码（deploy 下的辅助脚本）
 __pycache__/
