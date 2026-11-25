@@ -73,6 +73,26 @@ func New(s *store.Store, pipe *core.PipelineManager, pm *proc.Manager, dataDir s
 	}
 }
 
+// RestartEndpoints 是「会让面板进程消失」的接口 —— 它们会替换正在运行的
+// 二进制并重启，请求返回时页面已经连不上了。
+//
+// 为什么单列一张表：这类接口的收尾不能各写各的。挂等待层、拿接力凭证、
+// 轮询判活、换票、reload，任何一步照抄一份就会漂移；漏掉等待层的那个入口
+// 看起来一样能更新，只是中途把用户甩到登录页（v2.1.9 只接了三个入口里的
+// 一个，用户点的是另外两个）。前端因此只允许在 app.js 的 runPanelOp 里
+// 出现这些路径，deploy/check-restart-entry.py 在发版前核对这一点。
+//
+// 新增这类接口时改这里，别只改路由：清单是前端检查器的唯一来源。
+//
+// 这张表只收「前端点得动」的路径。同一个 restartSelf 还有一个后台调用方
+// ——watch 守望者发现磁盘上的二进制变了会自己 exec（见 watch.go），那次
+// 换进程没有前端请求可以挂等待层，只能靠页面重载时自己接回（KL-16）。
+// 它不在这张表里，不代表它不会踢人。
+var RestartEndpoints = []string{
+	"/api/self-update",
+	"/api/panel/rollback",
+}
+
 func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 

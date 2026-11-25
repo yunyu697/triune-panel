@@ -72,6 +72,15 @@ const waitTitle = (page, text, timeout = 6000) =>
       }));
     ck("等待层没有关闭按钮", 0,
       await page.evaluate(() => document.querySelectorAll('#upwait [data-act="closeModal"]').length));
+    // 遮罩要的是「毛玻璃」，不是把页面涂死：能看出底下是面板，但不能操作
+    ck("遮罩是高斯模糊而非实底", true,
+      await page.evaluate(() => {
+        const s = getComputedStyle(document.getElementById("upwait"));
+        return /blur\(/.test(s.backdropFilter || s.webkitBackdropFilter || "");
+      }));
+    // inert 管的是键盘：只有全屏覆盖的话，Tab 还能跑到下面的按钮上
+    ck("底下页面被 inert", true,
+      await page.evaluate(() => document.getElementById("app").hasAttribute("inert")));
 
     await waitTitle(page, "更新完成");
     ck("换到了新会话 token", "demo-resumed-token",
@@ -99,6 +108,8 @@ const waitTitle = (page, text, timeout = 6000) =>
     await page.waitForTimeout(150);
     ck("点「去登录」后等待层撤掉", true,
       await page.evaluate(() => document.getElementById("upwait").classList.contains("hide")));
+    ck("撤层后 inert 一起撤掉", false,
+      await page.evaluate(() => document.getElementById("login").hasAttribute("inert")));
     ck("没有页面异常", 0, errors.length);
     if (errors.length) console.log(errors.join("\n"));
     await page.close();
@@ -246,7 +257,10 @@ const waitTitle = (page, text, timeout = 6000) =>
       await page.evaluate(() => document.getElementById("upwait").classList.contains("hide")));
     ck("回滚的标题说的是回滚", "正在回滚面板",
       await page.evaluate($txt("upwait_title")));
-    await waitTitle(page, "更新完成");
+    // 回滚和更新在视觉上要能分开（琥珀色 + 回退箭头），否则用户以为在升级
+    ck("回滚有独立的遮罩状态", true,
+      await page.evaluate(() => document.getElementById("upwait").classList.contains("rollback")));
+    await waitTitle(page, "回滚完成");
     ck("回滚完也不用重登", "demo-resumed-token",
       await page.evaluate(() => localStorage.getItem("triune_token")));
     ck("没有页面异常", 0, errors.length);

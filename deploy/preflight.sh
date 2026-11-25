@@ -228,6 +228,19 @@ else
 	fail "演示页存在永不命中的 mock 分支（api 只到第一个斜杠，子路径要用 rest.startsWith）"
 fi
 
+# ============ 9. 换进程接口的调用点 ============
+# 请求返回时进程已经没了，收尾只能是「挂层→拿票→轮询→换票→reload」。
+# v2.1.9 只把等待层接在三条入口中的一条上，另外两条还是 setTimeout 猜，
+# 用户点的正是那两条。所以判据写成结构约束：这些路径只允许出现在
+# runPanelOp 里，每个恰好一次；清单以 api.go 的 RestartEndpoints 为准。
+step "换进程接口（只能有一条调用路径）"
+if ENTRY_OUT="$(python3 "${SELF_DIR}/check-restart-entry.py" 2>&1)"; then
+	pass "换进程接口各只有一处调用，都在统一收尾函数内"
+else
+	printf '%s\n' "$ENTRY_OUT" | sed 's/^/  /' >&2
+	fail "换进程接口出现了第二条调用路径（漏等待层/接力凭证的那个入口看着也是好的）"
+fi
+
 # ============ 汇总 ============
 printf '\n'
 if [[ ${#WARNS[@]} -gt 0 ]]; then

@@ -8038,6 +8038,10 @@ async function submitHTTPS() {
    UPD 只描述「现在停在哪一步」，所有 DOM 只在 upd* 函数里改，便于 e2e 断言。 */
 const UPD = { on: false, kind: "update", old: "", expect: "", ticket: "", t0: 0, timer: null };
 
+/* 三步的默认文案（与 index.html 里的 li 一致）。回退时第 1 步会被换成
+   「校验备份并准备替换」，所以每次开新任务都按这张表复位。 */
+const UPD_STEP_TEXT = ["下载并校验新版本", "替换二进制并重启", "等待面板回来"];
+
 /* 重启判定的总预算。exec 正常 1~3 秒；90 秒是给「机器很慢 + 内核起得慢」的余量，
    再长就只是让用户盯着一个不动的圈。演示模式要能在 e2e 里跑完，单独放短。 */
 function updBudget() {
@@ -8049,19 +8053,37 @@ function stopUpdPoll() {
   if (UPD.timer) { clearTimeout(UPD.timer); UPD.timer = null; }
 }
 
+/* 遮罩挡得住鼠标，挡不住 Tab 键。inert 让底下整页不可聚焦、不可点，
+   比逐个禁用控件可靠。老内核没有 inert 就退化成纯视觉遮挡（遮罩仍然
+   全屏覆盖，点击落到遮罩上不会穿透）。 */
+function setUpdInert(on) {
+  for (const el of document.body.children) {
+    if (!el || el.id === "upwait") continue;
+    if (el.tagName === "SCRIPT" || el.tagName === "STYLE") continue;
+    if (on) el.setAttribute("inert", ""); else el.removeAttribute("inert");
+  }
+}
+
 function updShow(title, sub) {
   UPD.on = true;
   const box = $("upwait");
-  box.classList.remove("hide", "done", "fail");
+  box.classList.remove("hide", "done", "fail", "rollback");
+  if (UPD.kind === "rollback") box.classList.add("rollback");
   $("upwait_act").classList.add("hide");
   $("upwait_hint").classList.add("hide");
   $("upwait_hint").innerHTML = "";
   $("upwait_title").textContent = title;
   $("upwait_sub").textContent = sub;
   $("upwait_ver").textContent = "";
-  for (const li of $("upwait_steps").children) li.className = "";
+  // 步骤文字会被上一次操作改过（回退的第 1 步和更新不同），这里恢复默认
+  for (const li of $("upwait_steps").children) {
+    li.className = "";
+    const d = UPD_STEP_TEXT[+li.dataset.step - 1];
+    if (d) li.textContent = d;
+  }
   // 等待层自己在最顶层；同时把页面滚动按住，别让底下的内容跟着滑
   document.documentElement.classList.add("upwaiting");
+  setUpdInert(true);
 }
 
 function updMsg(title, sub) {
@@ -8082,7 +8104,9 @@ function updHide() {
   UPD.on = false;
   stopUpdPoll();
   $("upwait").classList.add("hide");
+  $("upwait").classList.remove("rollback");
   document.documentElement.classList.remove("upwaiting");
+  setUpdInert(false);
 }
 
 /* 判定结束但没成：标题说结论，副标题说原因，hint 给下一步动作。
@@ -8095,7 +8119,7 @@ function updStop(kind, title, sub, hint, opts) {
   clearUpdRun();
   const o = opts || {};
   UPD.goReload = !!o.reload;
-  $("upwait").classList.add(kind);   // done / fail，只影响圆环颜色
+  $("upwait").classList.add(kind);   // done / fail：环色、对勾/叉、进度条走完
   updMsg(title, sub);
   const h = $("upwait_hint");
   if (hint) { h.innerHTML = hint; h.classList.remove("hide"); } else { h.classList.add("hide"); }
@@ -8189,7 +8213,7 @@ async function runPanelOp(kind, body) {
   setUpdRun({ kind, t0: Date.now(), old: UPD.old, expect: "" });
 
   updShow(title, sub);
-  updStep(1);
+  updStep(1, isRollback ? "校验备份并准备替换" : "");
   if (UPD.old) $("upwait_ver").textContent = "当前版本 " + UPD.old;
 
   const r = await updCall(path, body);
@@ -8314,11 +8338,12 @@ async function updBackOnline(v) {
 
   UPD.on = false;
   clearUpdRun();   // 马上要 reload，新页面不能被等待层再拦一次
+  const rb = UPD.kind === "rollback";
   $("upwait").classList.add("done");
-  $("upwait_title").textContent = "更新完成";
-  $("upwait_sub").textContent = "已更新到 " + v + "，正在回到原来的页面…";
+  $("upwait_title").textContent = rb ? "回滚完成" : "更新完成";
+  $("upwait_sub").textContent = (rb ? "已回滚到 " : "已更新到 ") + v + "，正在回到原来的页面…";
   updStep(4);
-  setTimeout(() => location.reload(), 700);
+  setTimeout(() => location.reload(), 900);
 }
 
 /* 更新完成但会话没能接上：把登录页准备好，再让用户自己按「去登录」。
@@ -8327,7 +8352,8 @@ function updNeedLogin(why, hint) {
   dropSession();
   showLogin();
   $("upwait").classList.add("done");
-  updStop("done", "更新完成，请重新登录", why || "面板重启后需要重新登录一次。",
+  updStop("done", (UPD.kind === "rollback" ? "回滚完成" : "更新完成") + "，请重新登录",
+    why || "面板重启后需要重新登录一次。",
     hint || "", { goLabel: "去登录", retry: false });
 }
 
@@ -8346,7 +8372,7 @@ async function updGiveUp() {
     } catch (_) {}
   }
   if (failed) {
-    updStop("fail", "更新没有完成", failed,
+    updStop("fail", updWord() + "没有完成", failed,
       "配置与数据都没受影响。回滚：命令行跑 <code>tp update --rollback</code>，" +
       "或用「设置 → 运维 → 面板自更新」里的回滚入口。",
       { goLabel: "刷新页面", reload: true, retry: false });
@@ -8358,13 +8384,19 @@ async function updGiveUp() {
     { goLabel: "刷新页面", reload: true, retry: true });
 }
 
+/* 当前操作的说法：回退与更新在文案上必须分开，否则用户会以为「回滚」把
+   面板升到了某个版本。 */
+function updWord() { return UPD.kind === "rollback" ? "回滚" : "更新"; }
+
 /* 等待层上的两个按钮。做成具名函数是因为动作分发按 window[name] 找。 */
 function upwaitGo() {
   if (UPD.goReload) { location.reload(); return; }
   updHide();
 }
 function upwaitRetry() {
-  $("upwait").classList.remove("fail");
+  const box = $("upwait");
+  box.classList.remove("fail", "done");
+  if (UPD.kind === "rollback") box.classList.add("rollback");
   updMsg("继续等待面板", "正在重新确认进程状态…");
   $("upwait_act").classList.add("hide");
   $("upwait_hint").classList.add("hide");

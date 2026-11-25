@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- triune-panel-web/v2.2.1 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
+<!-- triune-panel-web/v2.2.2 内置界面，随二进制发布；要长期自定义请见 README 的「自定义界面」一节 -->
 <html lang="zh-CN" data-mode="light" data-scheme="azure">
 <head>
 <meta charset="utf-8">
@@ -1213,31 +1213,86 @@ canvas{display:block;width:100%}
 }
 
 /* ==================================================================
-   面板自更新等待层（见 app.js 的 selfUpdate）
-   - **不透明**底色，不是毛玻璃：更新期间它下面可能是登录表单，也可能是
-     已经过期的旧页面，两者都不该被看见，更不该被点到
+   面板自更新等待层（见 app.js 的 runPanelOp / updWatch）
+
+   遮罩是高斯模糊，不是不透明实底：底下可能是登录表单，也可能是已经
+   过期的旧页面。模糊而不涂死，是为了让「页面还在原地、只是面板换了
+   个进程」这件事看得见；真正挡住操作靠的是全屏覆盖 + inert（见
+   app.js:setUpdInert），不是靠把内容遮住。
+
+   - 手机（≤960px）半径降到 10px：全屏 backdrop-filter 在 Android 上很贵，
+     遮罩期间页面已锁住不滚动，静态模糊可以接受，18px 会掉帧。
+   - X5 等没有 backdrop-filter 的内核：压暗层从 .58 提到 .95，文字照样可读。
    - 没有关闭按钮是刻意的：那几秒面板确实什么都做不了，给个「关闭」只会
-     让人关掉之后再撞一次 401
-   - 只在「下载中 / 重启中 / 失败」出现；更新一完成就整层撤掉
+     让人关掉之后再撞一次 401。
+   - 状态只有四个类：进行中（无）、.rollback、.done、.fail。圆环、图标、
+     进度条都只认这四个类，DOM 只在 upd* 函数里改，e2e 才好断言。
    ================================================================== */
 .upwait{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9000;display:flex;
-  align-items:center;justify-content:center;padding:20px;background:var(--bg);overflow:auto}
+  align-items:center;justify-content:center;padding:20px;overflow:auto;user-select:none;
+  -webkit-backdrop-filter:blur(18px) saturate(165%) brightness(.96);
+  backdrop-filter:blur(18px) saturate(165%) brightness(.96)}
+/* 压在模糊层上的主题色薄片：不用给 8 套配色各加一个变量。
+   浅色主题下 --bg 本身就亮，压暗层太重会把底下糊成一片白，所以只到 .46。 */
+.upwait::before{content:"";position:absolute;top:0;right:0;bottom:0;left:0;
+  background:var(--bg);opacity:.46;pointer-events:none;transition:opacity var(--t)}
+.upwait.done::before,.upwait.fail::before{opacity:.64}
+@media (max-width:960px){
+  .upwait{-webkit-backdrop-filter:blur(10px) saturate(150%) brightness(.97);
+    backdrop-filter:blur(10px) saturate(150%) brightness(.97)}
+}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .upwait::before{opacity:.95}
+}
 /* 等待层在时把底下页面按住：手机上滑动会穿透到 .main 的滚动容器 */
-html.upwaiting body{overflow:hidden}
-.upwait-card{width:100%;max-width:430px;text-align:center;background:var(--card);
-  border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);
-  padding:30px 26px 22px}
-.upwait-ring{width:44px;height:44px;margin:0 auto 18px;position:relative}
+html.upwaiting body{overflow:hidden;overscroll-behavior:none}
+
+.upwait-card{position:relative;z-index:1;overflow:hidden;width:100%;max-width:430px;text-align:center;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--shadow-lg);padding:30px 26px 22px;
+  animation:upwaitRise .38s cubic-bezier(.16,1,.3,1) both}
+@keyframes upwaitRise{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+
+/* 圆环：转＝正在动；对勾／叉／回退箭头＝结果 */
+.upwait-ring{width:54px;height:54px;margin:0 auto 18px;position:relative}
 .upwait-ring::before,.upwait-ring::after{content:"";position:absolute;
   top:0;right:0;bottom:0;left:0;border-radius:50%}
-.upwait-ring::before{border:3px solid var(--line)}
-.upwait-ring::after{border:3px solid transparent;border-top-color:var(--acc);
+.upwait-ring::before{border:3px solid var(--line);transition:border-color var(--t),opacity var(--t)}
+.upwait-ring::after{border:3px solid transparent;border-top-color:var(--acc);border-right-color:var(--acc);
   animation:upwaitSpin .9s linear infinite}
-.upwait.done .upwait-ring::after{border-color:var(--ok);animation:none}
-.upwait.fail .upwait-ring::after{border-color:var(--err);animation:none}
+.upwait.rollback .upwait-ring::after{border-top-color:var(--warn);border-right-color:var(--warn)}
+.upwait.done .upwait-ring::after,.upwait.fail .upwait-ring::after{animation:none;border-color:transparent}
+.upwait.done .upwait-ring::before{border-color:var(--ok);opacity:.55}
+.upwait.fail .upwait-ring::before{border-color:var(--err);opacity:.55}
 @keyframes upwaitSpin{to{transform:rotate(360deg)}}
-.upwait-card h3{font-size:16.5px;margin-bottom:6px;color:var(--text)}
-.upwait-sub{color:var(--muted);font-size:13px;min-height:21px}
+
+.upwait-ico{position:absolute;top:0;right:0;bottom:0;left:0;margin:auto;width:26px;height:26px;
+  opacity:0;transform:scale(.55);transition:opacity var(--t),transform .34s cubic-bezier(.16,1,.3,1)}
+/* pathLength="1" 归一化，描边动画不用猜每个图标的路径长度 */
+.upwait-ico path{opacity:0;stroke-dasharray:1;stroke-dashoffset:1;
+  transition:opacity .12s,stroke-dashoffset .5s ease .08s}
+.upwait.done .upwait-ico,.upwait.fail .upwait-ico,.upwait.rollback .upwait-ico{opacity:1;transform:scale(1)}
+.upwait.done .upwait-ico{color:var(--ok)}
+.upwait.fail .upwait-ico{color:var(--err)}
+.upwait.rollback .upwait-ico{color:var(--warn)}
+.upwait.done .i-ok,.upwait.fail .i-fail,.upwait.rollback .i-back{opacity:1;stroke-dashoffset:0}
+.upwait.fail .upwait-ico{animation:upwaitShake .42s .18s}
+@keyframes upwaitShake{0%,100%{transform:scale(1) translateX(0)}18%{transform:scale(1) translateX(-6px)}
+  36%{transform:scale(1) translateX(5px)}54%{transform:scale(1) translateX(-3px)}72%{transform:scale(1) translateX(2px)}}
+
+/* 不确定进度：贴在卡片顶边上的一道扫光。放在文字中间会被读成一条分割线，
+   贴在边上才是「这块正在加载」。有结果时淡出——那时该看的是对勾/叉。 */
+.upwait-bar{position:absolute;top:0;left:0;right:0;height:2px;background:transparent;
+  overflow:hidden;transition:opacity .3s}
+.upwait-bar i{display:block;height:100%;width:38%;
+  background:linear-gradient(90deg,transparent,var(--acc) 30%,var(--acc) 70%,transparent);
+  animation:upwaitFlow 1.5s ease-in-out infinite}
+.upwait.rollback .upwait-bar i{background:linear-gradient(90deg,transparent,var(--warn) 30%,var(--warn) 70%,transparent)}
+.upwait.done .upwait-bar,.upwait.fail .upwait-bar{opacity:0}
+@keyframes upwaitFlow{0%{transform:translateX(-105%)}100%{transform:translateX(300%)}}
+
+.upwait-card h3{font-size:17.5px;margin-bottom:6px;color:var(--text)}
+.upwait-sub{color:var(--muted);font-size:13px;min-height:21px;text-wrap:balance}
 .upwait-ver{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px}
 .upwait-steps{list-style:none;margin:18px 0 0;padding:0;text-align:left}
 .upwait-steps li{position:relative;padding:6px 0 6px 26px;font-size:12.5px;
@@ -1245,8 +1300,10 @@ html.upwaiting body{overflow:hidden}
 .upwait-steps li::before{content:"";position:absolute;left:4px;top:12px;width:9px;height:9px;
   border:2px solid var(--line);border-radius:50%;transition:background var(--t-fast),border-color var(--t-fast)}
 .upwait-steps li.on{color:var(--text)}
-.upwait-steps li.on::before{border-color:var(--acc);background:var(--acc)}
+.upwait-steps li.on::before{border-color:var(--acc);background:var(--acc);
+  animation:upwaitDot 1.3s ease-in-out infinite}
 .upwait-steps li.ok::before{border-color:var(--ok);background:var(--ok)}
+@keyframes upwaitDot{0%,100%{box-shadow:0 0 0 0 var(--acc-soft)}60%{box-shadow:0 0 0 5px transparent}}
 .upwait-act{margin-top:18px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .upwait-hint{margin-top:14px;font-size:12px;color:var(--muted);line-height:1.75;text-align:left}
 .upwait-hint code{font-family:var(--mono);font-size:11.5px;background:var(--hover);
@@ -2844,9 +2901,17 @@ html.upwaiting body{overflow:hidden}
      文案与状态由 app.js 的 selfUpdate / updWatch 驱动。 -->
 <div id="upwait" class="upwait hide" role="alertdialog" aria-modal="true" aria-labelledby="upwait_title">
   <div class="upwait-card">
-    <div class="upwait-ring" aria-hidden="true"></div>
+    <div class="upwait-ring" aria-hidden="true">
+      <svg class="upwait-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path class="i-ok" pathLength="1" d="M4.8 12.6l4.7 4.7L19.2 7.6"/>
+        <path class="i-fail" pathLength="1" d="M6.6 6.6l10.8 10.8M17.4 6.6L6.6 17.4"/>
+        <path class="i-back" pathLength="1" d="M4.2 9.8a8 8 0 1 1 1.9 9.3M4.2 4.6v5.4h5.4"/>
+      </svg>
+    </div>
     <h3 id="upwait_title">正在更新面板</h3>
     <p class="upwait-sub" id="upwait_sub">正在下载新版本…</p>
+    <div class="upwait-bar" aria-hidden="true"><i></i></div>
     <div class="upwait-ver" id="upwait_ver"></div>
     <ol class="upwait-steps" id="upwait_steps">
       <li data-step="1">下载并校验新版本</li>
