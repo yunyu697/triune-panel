@@ -45,7 +45,6 @@ type Collector struct {
 	liveUp    float64                   // 实时上行速率（字节/秒）
 	liveDown  float64                   // 实时下行速率（字节/秒）
 	liveAt    time.Time                 // 最近一次速率更新时间
-	stopCh    chan struct{}
 }
 
 func NewCollector(st *store.Store, pipe *core.PipelineManager) *Collector {
@@ -58,24 +57,20 @@ func NewCollector(st *store.Store, pipe *core.PipelineManager) *Collector {
 		totalLast: map[string][2]int64{},
 		disabled:  map[int64]bool{},
 		notified:  map[int64]int{},
-		stopCh:    make(chan struct{}),
 	}
 }
 
-func (c *Collector) Stop() { close(c.stopCh) }
-
 // Run 阻塞运行；每 tick 采样流量 + 巡检到期/配额。
+//
+// 没有 Stop：它是进程级单例（main 里一个 go coll.Run()），面板没有优雅关闭
+// 流程，systemd 直接结束进程。留一个没人调、也等不到调用的停止通道，只会
+// 让人以为存在「关掉采集器」的能力。
 func (c *Collector) Run() {
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		case <-ticker.C:
-			c.sampleAll()
-			c.enforceLimits()
-		}
+	for range ticker.C {
+		c.sampleAll()
+		c.enforceLimits()
 	}
 }
 

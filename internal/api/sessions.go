@@ -171,20 +171,6 @@ func (s *sessionStore) DeleteOthers(uid int64, keep string) int {
 	return n
 }
 
-// DeleteBySID 按对外标识吊销会话，返回被删的会话与是否找到。
-func (s *sessionStore) DeleteBySID(sid string) (session, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for tok, sess := range s.m {
-		if sess.SID == sid {
-			cp := *sess
-			delete(s.m, tok)
-			return cp, true
-		}
-	}
-	return session{}, false
-}
-
 // ---- 设备描述 ----
 
 // describeUA 把 User-Agent 压成「浏览器 · 系统」这种一眼能看懂的形式。

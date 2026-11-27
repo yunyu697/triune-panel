@@ -124,15 +124,6 @@ func keyPath(key string) string {
 	return ""
 }
 
-func keyLabel(key string) string {
-	for _, p := range managedParams() {
-		if p.Key == key {
-			return p.Label
-		}
-	}
-	return key
-}
-
 // value 返回某个键在该方案下的目标值（写入 /proc/sys 的原始文本）。
 func (t Tune) value(key string) string {
 	switch key {

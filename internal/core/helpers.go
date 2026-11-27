@@ -3,15 +3,11 @@ package core
 import (
 	"encoding/json"
 	"net"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"triune/internal/model"
 )
-
-// ExecCmdOf 构造命令（供各内核实现 ValidateCmd 使用）。
-func ExecCmdOf(bin string, args []string) *exec.Cmd { return exec.Command(bin, args...) }
 
 // TagOf 生成入站 tag：优先用户指定，否则 in-<id>。
 func TagOf(in *model.Inbound) string {

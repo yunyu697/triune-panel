@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -23,8 +22,6 @@ import (
 	"triune/internal/certmgr"
 	"triune/internal/update"
 )
-
-func execCmd(bin string, args ...string) *exec.Cmd { return exec.Command(bin, args...) }
 
 // ---- traffic ----
 

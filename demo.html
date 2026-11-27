@@ -6386,7 +6386,6 @@ function demoText(path) {
   ].join("\n");
 }
 
-
 /* -------- 演示模式 mock 数据 -------- */
 let MDB, REV_N = 3;
 if (DEMO) {
@@ -11010,7 +11009,6 @@ async function cfgBatchDownload() {
   } catch(e){ toast(e.message, "err"); }
 }
 
-
 async function downloadConfig(id) {
   const c = SAVED_CFGS.find(x => x.id === id);
   if (!c) return;
@@ -12520,48 +12518,6 @@ async function loadDaily() {
   } catch(e){}
 }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
-function drawDailyChart(points) {
-  const cv = $("tr_chart"), dpr = window.devicePixelRatio || 1;
-  const W = cv.clientWidth || 900, H = 230;
-  cv.width = W * dpr; cv.height = H * dpr;
-  const ctx = cv.getContext("2d");
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
-  if (!points || !points.length) return;
-  const pad = { l:54, r:8, t:12, b:26 };
-  const maxV = Math.max(1, ...points.map(p => p.up + p.down));
-  const niceMax = niceCeil(maxV);
-  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
-  const n = points.length;
-  const step = cw / n;
-  const bw = Math.max(2, Math.min(30, step * 0.6));
-  const cUp = cssVar("--chart-up") || "#3b82f6", cDown = cssVar("--chart-down") || "#22c55e";
-  const cLine = cssVar("--line") || "#e5e9ef", cText = cssVar("--muted") || "#6b7280";
-  const cFont = "11px " + (cssVar("--font") || "sans-serif");
-  ctx.font = cFont;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.t + ch - ch * i / 4;
-    ctx.strokeStyle = cLine; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    ctx.fillStyle = cText; ctx.textAlign = "right";
-    ctx.fillText(fmtBytes(niceMax * i / 4), pad.l - 8, y + 4);
-  }
-  points.forEach((p, i) => {
-    const x = pad.l + step * i + (step - bw) / 2;
-    const hDown = ch * p.down / niceMax, hUp = ch * p.up / niceMax;
-    const yBase = pad.t + ch;
-    if (p.down > 0) { ctx.fillStyle = cDown; ctx.beginPath();
-      ctx.roundRect(x, yBase - hDown, bw, hDown, [2,2,0,0]); ctx.fill(); }
-    if (p.up > 0) { ctx.fillStyle = cUp; ctx.beginPath();
-      ctx.roundRect(x, yBase - hDown - hUp, bw, hUp, [2,2,0,0]); ctx.fill(); }
-    if (n <= 8 || i === 0 || i === n - 1 || i % Math.ceil(n / 8) === 0) {
-      ctx.fillStyle = cText; ctx.textAlign = "center";
-      ctx.fillText(p.day.slice(5), x + bw / 2, H - 8);
-    }
-  });
-  const total = points.reduce((s, p) => s + p.up + p.down, 0);
-  $("tr_total").textContent = "区间合计: " + fmtBytes(total);
-}
 function niceCeil(v) {
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   for (const m of [1,2,5,10]) if (v <= m * p) return m * p;

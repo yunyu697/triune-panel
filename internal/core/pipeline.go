@@ -140,9 +140,6 @@ func (m *PipelineManager) ConfigPath(name string) (string, error) {
 	return filepath.Join(m.coreDir(name), c.FileName()), nil
 }
 
-// RenderOpts 导出给 API 层复用（渲染预览等场景）。
-func (m *PipelineManager) RenderOpts() RenderOpts { return m.renderOpts() }
-
 // RenderOptsFor 带上该内核独有的全局段（导入的 DNS / 路由）。
 func (m *PipelineManager) RenderOptsFor(name string) RenderOpts {
 	o := m.renderOpts()

@@ -592,11 +592,6 @@ func cmdUserSet(args []string) {
 	}
 }
 
-// requireUser 按名字取用户，取不到就退出。
-func requireUser(st *store.Store, name string) *model.Client {
-	return findUser(st, name)
-}
-
 // resolveInboundRefs 把 "1,主力节点" 这样的写法解析成 id 列表。
 //
 // 同时认 id 和名称：脚本里用 id 稳定，人手上敲名称更自然。
