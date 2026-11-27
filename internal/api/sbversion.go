@@ -35,6 +35,11 @@ type sbCaps struct {
 	DomainResolver bool
 	// TunStack 1.10–1.14 写 tun.stack；1.15 起废弃、1.17 移除。
 	TunStack bool
+	// HTTPClient 1.14+：规则集下载用 http_client（引顶层 http_clients 的
+	// tag）。1.14 起 download_detour 废弃、1.16 移除，移除后写了是
+	// unknown field → FATAL；而 1.13 及以前不认识 http_clients。所以这里
+	// 是按版本二选一，不是「新字段可加可不加」。
+	HTTPClient bool
 }
 
 // sbVersion 只比较主次版本：补丁版从不改变配置 schema。
@@ -105,6 +110,7 @@ func capsFor(v sbVersion) sbCaps {
 		NewDNSFormat:   v.atLeast(1, 12),
 		DomainResolver: v.atLeast(1, 12),
 		TunStack:       !v.atLeast(1, 15),
+		HTTPClient:     v.atLeast(1, 14),
 	}
 }
 

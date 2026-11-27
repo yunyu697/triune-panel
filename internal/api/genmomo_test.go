@@ -160,7 +160,19 @@ func TestMomoRouteRules(t *testing.T) {
 		t.Fatal("规则集为空")
 	}
 	for _, s := range sets {
-		if s.(map[string]any)["download_detour"] != "direct" {
+		m := s.(map[string]any)
+		// 1.14+ 用 http_client（download_detour 废弃、1.16 移除）；
+		// 1.13 及以前只认 download_detour。两种都必须指向直连。
+		if hc, ok := m["http_client"]; ok {
+			if hc != sbDirectHTTPClientTag {
+				t.Errorf("规则集下载应走直连客户端 %q，实际 %v", sbDirectHTTPClientTag, hc)
+			}
+			if _, deprecated := m["download_detour"]; deprecated {
+				t.Errorf("1.14+ 不应同时写已废弃的 download_detour: %v", m)
+			}
+			continue
+		}
+		if m["download_detour"] != "direct" {
 			t.Errorf("规则集必须直连下载: %v", s)
 		}
 	}

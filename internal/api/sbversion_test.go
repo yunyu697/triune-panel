@@ -181,18 +181,29 @@ func TestGenSingboxTunStack(t *testing.T) {
 	}
 }
 
-// TestGenSingboxSameAcrossPatchVersions 1.12/1.13/1.14 生成的配置必须逐字节相同。
+// TestGenSingboxSameAcrossPatchVersions 落进同一个能力档的版本，产物必须逐字节相同。
 //
-// 这条是给「每个版本都不一样」这个直觉踩刹车的：实测 1.12.25、1.13.21、1.14.4
-// 对同一份 JSON 全部 check 通过，配置没有任何差别。将来若真的出现新断点，
-// 这个测试会先失败，提醒去更新 capsFor 而不是靠人记。
+// 这条是给「每个版本都不一样」这个直觉踩刹车的：补丁版从不改 schema，同一档里
+// 生成的配置一个字都不该差。档位边界由 capsFor 定：1.12–1.13（旧规则集下载字段）、
+// 1.14（http_client + tun.stack）、1.15+（不写 tun.stack）。v2.2.4 加
+// http_clients 时 1.14 成了新断点，这条测试先红了一次——它就是干这个用的。
 func TestGenSingboxSameAcrossPatchVersions(t *testing.T) {
-	a := genSBRaw(t, "1.12", "main-router")
-	for _, ver := range []string{"1.13", "1.14"} {
-		b := genSBRaw(t, ver, "main-router")
-		if !bytes.Equal(a, b) {
-			t.Errorf("1.12 与 %s 生成的配置应完全一致，实际不同", ver)
+	for _, group := range [][]string{
+		{"1.12", "1.13"},
+		{"1.14"},
+		{"1.15", "1.16"},
+	} {
+		base := genSBRaw(t, group[0], "main-router")
+		for _, ver := range group[1:] {
+			if b := genSBRaw(t, ver, "main-router"); !bytes.Equal(base, b) {
+				t.Errorf("%s 与 %s 同档，生成的配置应完全一致，实际不同", group[0], ver)
+			}
 		}
+	}
+	// 断点必须真的存在：1.13 与 1.14 的规则集下载字段不同（download_detour →
+	// http_client）。这条防的是「有人把两个分支写成一个，测试照样绿」。
+	if bytes.Equal(genSBRaw(t, "1.13", "client"), genSBRaw(t, "1.14", "client")) {
+		t.Error("1.13 与 1.14 的产物应在本版出现断点（规则集下载字段），实际完全相同")
 	}
 }
 

@@ -1933,6 +1933,10 @@ func sbLANServer(caps sbCaps, lan lanResolver) map[string]any {
 	return map[string]any{"tag": "lan", "address": addr, "detour": "direct"}
 }
 
+// sbDirectHTTPClientTag 是「规则集下载走直连」这个 HTTP 客户端的标签。
+// sing-box 1.14+ 用 http_client 引用它，取代已废弃的 download_detour。
+const sbDirectHTTPClientTag = "ruleset-direct"
+
 func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet, customRules []string, warns *[]string, opts genOpts) *generator {
 	router := target != "client"
 	caps := capsFor(ver)
@@ -2073,10 +2077,20 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 
 	ruleSets := []any{}
 	for _, s := range sets {
-		ruleSets = append(ruleSets, map[string]any{
+		rs := map[string]any{
 			"type": "remote", "tag": s.Tag, "format": s.Format,
-			"url": s.URL, "download_detour": "direct", "update_interval": fmt.Sprintf("%ds", s.Interval),
-		})
+			"url": s.URL, "update_interval": fmt.Sprintf("%ds", s.Interval),
+		}
+		// 规则集必须直连下载：走节点会在首启（节点还没就绪）先失败一轮。
+		// 表达这件事的字段在 1.14 换了：download_detour 废弃、1.16 移除，
+		// 之后写了是 unknown field 直接 FATAL；而 1.13 及以前不认识
+		// http_clients。所以按版本二选一，不能只写新的。
+		if caps.HTTPClient {
+			rs["http_client"] = sbDirectHTTPClientTag
+		} else {
+			rs["download_detour"] = "direct"
+		}
+		ruleSets = append(ruleSets, rs)
 	}
 
 	// DNS：节点域名必须走本地解析。否则它落到 final:remote（经代理的 DoH），
@@ -2172,6 +2186,14 @@ func genSingbox(target string, ver sbVersion, nodes []*link.Node, sets []normSet
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route":     route,
+	}
+	// 1.14+ 的规则集下载走这个客户端。**不写 detour**：写了 `detour: "direct"`
+	// 会直接 FATAL（`detour to an empty direct outbound makes no sense`——
+	// 内置 direct 出站没有字段，detour 到它等于没 detour）。不写 detour
+	// 的客户端是直连，正是我们要的：走路由的话 final 是 PROXY，节点没就绪时
+	// 首启就会下载失败。
+	if caps.HTTPClient {
+		doc["http_clients"] = []any{map[string]any{"tag": sbDirectHTTPClientTag}}
 	}
 
 	// JSON 无注释；说明放 UI 提示与 README
