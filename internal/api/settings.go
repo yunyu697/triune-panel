@@ -135,7 +135,7 @@ func (a *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		"public_host": true, "stats_enabled": true, "stats_secret": true,
 		// 服务器公网 IP：只用于「新建入站 → 节点地址」的预填与选择。
 		// 弹性 IP / NAT 的机器上默认路由探测到的是内网地址，这时靠它兜底。
-		"server_ip": true,
+		"server_ip":      true,
 		"quota_warn_pct": true,
 		// Prometheus 指标令牌：写空字符串即关闭 /metrics
 		MetricsTokenSetting: true,

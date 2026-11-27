@@ -26,6 +26,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # 格式不查就一定会漂：v2.2.4 排查时发现 10 个文件没 gofmt，而 CI 与
+      # 发布门禁都不看。gofmt 的版本跟着 go.mod 的工具链走，两边一致。
+      - name: gofmt
+        run: |
+          out=$(gofmt -l cmd internal)
+          if [ -n "$out" ]; then
+            echo "以下文件未 gofmt，跑 gofmt -w cmd internal 后重试："
+            echo "$out"
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
 

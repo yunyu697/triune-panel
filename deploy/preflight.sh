@@ -76,6 +76,14 @@ fi
 
 # ============ 4. 全量单测 ============
 step "单测"
+# 格式不查就一定会漂：这一轮排查发现 10 个文件没 gofmt，而 CI 与门禁都不看。
+FMT_OUT="$(gofmt -l cmd internal)"
+if [ -z "$FMT_OUT" ]; then
+	pass "gofmt"
+else
+	printf '%s\n' "$FMT_OUT" >&2
+	fail "有文件未 gofmt（跑 gofmt -w cmd internal 后重试）"
+fi
 if go vet ./... >/dev/null 2>&1; then
 	pass "go vet"
 else

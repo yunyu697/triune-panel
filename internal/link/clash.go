@@ -14,9 +14,9 @@ import (
 func FromClash(m map[string]any) (*Node, error) {
 	typ := str(m["type"])
 	n := &Node{
-		Name:   str(m["name"]),
-		Host:   str(m["server"]),
-		Extra:  map[string]any{},
+		Name:  str(m["name"]),
+		Host:  str(m["server"]),
+		Extra: map[string]any{},
 	}
 	if n.Host == "" {
 		return nil, fmt.Errorf("缺少 server 字段")

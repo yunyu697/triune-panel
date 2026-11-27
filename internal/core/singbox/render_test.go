@@ -107,7 +107,8 @@ func TestRenderQUICProtocolsCompat(t *testing.T) {
 }
 
 // socks/mixed 的 user 只有 username/password，多余 name 会导致严格校验失败。
-func TestRenderSocksUsersNoNameField(t *testing.T) {	s := &SingBox{}
+func TestRenderSocksUsersNoNameField(t *testing.T) {
+	s := &SingBox{}
 	in := &model.Inbound{Name: "socks", Core: "singbox", Protocol: "socks", Port: 1080, Transport: "tcp"}
 	obj, err := s.renderInbound(core.InboundWithClients{Inbound: in,
 		Clients: []*model.Client{{Name: "u1", Credential: "p1", Enabled: true}}})

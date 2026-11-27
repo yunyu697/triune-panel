@@ -18,12 +18,12 @@ const (
 // Settings 中的 JSON 键在渲染时按内核透传，面板不理解的字段原样保留，
 // 升级面板不会丢弃这些字段。
 type Inbound struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Core      string    `json:"core"`     // singbox | xray | mihomo
-	Protocol  string    `json:"protocol"` // vless/vmess/trojan/shadowsocks/hysteria2/tuic/mixed/socks...
-	Listen    string    `json:"listen"`
-	Port      int       `json:"port"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Core     string `json:"core"`     // singbox | xray | mihomo
+	Protocol string `json:"protocol"` // vless/vmess/trojan/shadowsocks/hysteria2/tuic/mixed/socks...
+	Listen   string `json:"listen"`
+	Port     int    `json:"port"`
 	// NodeHost 是**客户端连接用**的地址（IP 或域名），只影响导出的节点 /
 	// 订阅里的 server，与 Listen 完全无关：Listen 是内核 bind 在哪块网卡。
 	//

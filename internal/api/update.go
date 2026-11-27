@@ -576,7 +576,7 @@ func (a *Server) handlePanelRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{
 		"ok": true, "msg": "回滚完成，正在重启...",
-		"new_version": targetVer,   // 前端据此判定「新进程回来了」
+		"new_version": targetVer, // 前端据此判定「新进程回来了」
 	}
 	if resumeTok != "" {
 		out["resume_token"] = resumeTok

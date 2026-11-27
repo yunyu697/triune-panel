@@ -22,7 +22,7 @@ const healNote = "auto: 面板版本变化后重新渲染"
 //
 // 为什么需要它：内核是面板的子进程，而 systemd 默认的 KillMode=control-group
 // 会把整个 cgroup 一起杀掉。所以 `systemctl restart triune-panel`
-//（以及 `tp restart`、走 systemd 的 `tp update`）会把三个内核一并带走；
+// （以及 `tp restart`、走 systemd 的 `tp update`）会把三个内核一并带走；
 // 服务器重启更是全断。而内核的运行状态只存在 proc.Manager 的内存里，
 // 没有任何地方做「开机自启」——不主动恢复的话，重启后节点会一直断到
 // 有人进面板手动点一次「应用配置」。

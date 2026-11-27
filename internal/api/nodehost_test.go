@@ -17,10 +17,10 @@ func TestParseNodeHost(t *testing.T) {
 		{"", ""},
 		{"   ", ""},
 		{"1.2.3.4", "1.2.3.4"},
-		{"1.2.3.4:443", "1.2.3.4"},          // 端口由入站决定，剥掉
-		{"https://node.example.com/", "node.example.com"},       // 粘网址的常见形态
+		{"1.2.3.4:443", "1.2.3.4"}, // 端口由入站决定，剥掉
+		{"https://node.example.com/", "node.example.com"}, // 粘网址的常见形态
 		{"https://node.example.com:443/x?y=1", "node.example.com"},
-		{"Node.Example.COM", "node.example.com"}, // 域名大小写不敏感
+		{"Node.Example.COM", "node.example.com"},  // 域名大小写不敏感
 		{"node.example.com.", "node.example.com"}, // FQDN 尾点
 		{"2001:db8::1", "2001:db8::1"},
 		{"[2001:db8::1]", "2001:db8::1"},
@@ -39,11 +39,11 @@ func TestParseNodeHost(t *testing.T) {
 	}
 
 	bad := []struct{ in, wantSub string }{
-		{"0.0.0.0", "监听"},              // 监听地址，客户端连不上
+		{"0.0.0.0", "监听"}, // 监听地址，客户端连不上
 		{"::", "监听"},
-		{"a b.com", "空格"},              // 空格多半是粘了半句话
+		{"a b.com", "空格"}, // 空格多半是粘了半句话
 		{"1.2.3.4 5.6.7.8", "空格"},
-		{"node/x.com", "非法字符"},        // 没带协议却有斜杠 = 笔误，不能剥成 node
+		{"node/x.com", "非法字符"}, // 没带协议却有斜杠 = 笔误，不能剥成 node
 		{"bad_host.example.com", "非法字符"},
 		{"-bad.example.com", "开头或结尾"},
 		{"bad-.example.com", "开头或结尾"},

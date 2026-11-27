@@ -257,10 +257,12 @@ func blend(c [3]float64, white [3]float64, t float64) [3]float64 {
 
 // 令牌对了不等于用对了：这一版的两处「换主题后看不清」都不是配色表的问题，
 // 而是 CSS 用错了令牌。
-//   · 实心品牌面写死 color:#fff —— 暗色方案的 --on-acc 是深色，白字压浅色
-//     渐变只剩 1.7:1；
-//   · .todo-row 是 <button>，没写 color 就被 UA 样式表钉成 buttontext（黑），
-//     暗色主题下待办标题成了黑字压深底。
+//
+//	· 实心品牌面写死 color:#fff —— 暗色方案的 --on-acc 是深色，白字压浅色
+//	  渐变只剩 1.7:1；
+//	· .todo-row 是 <button>，没写 color 就被 UA 样式表钉成 buttontext（黑），
+//	  暗色主题下待办标题成了黑字压深底。
+//
 // 这两条只有浏览器量得到，令牌测试全绿也照样出事，所以在这里用静态断言兜住。
 func TestBrandFillsUseOnAccInk(t *testing.T) {
 	b, err := os.ReadFile("index.html")

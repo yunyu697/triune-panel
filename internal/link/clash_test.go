@@ -7,7 +7,7 @@ func TestFromClashVlessReality(t *testing.T) {
 		"name": "hk-01", "type": "vless", "server": "1.2.3.4", "port": "443",
 		"uuid": "8f2b1c3d-1111-2222-3333-444455556666", "flow": "xtls-rprx-vision",
 		"tls": true, "servername": "www.apple.com", "network": "tcp",
-		"reality-opts": map[string]any{"public-key": "PBK123", "short-id": "ab12"},
+		"reality-opts":       map[string]any{"public-key": "PBK123", "short-id": "ab12"},
 		"client-fingerprint": "chrome",
 	}
 	n, err := FromClash(m)
