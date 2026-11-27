@@ -204,7 +204,14 @@ var migrations = []string{
 }
 
 func Open(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	// 数据目录只给运行面板的账号：库里存着密码哈希、TOTP 密钥、订阅令牌、
+	// SMTP 与 ACME 凭据。0755 意味着同机任何账号都能读走这些（共享主机 /
+	// VPS 上很常见）。MkdirAll 不会改已有目录的权限，所以紧跟着显式 chmod，
+	// 老安装升级上来也一起收紧。
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", filepath.Join(dataDir, "triune.db")+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
@@ -216,6 +223,11 @@ func Open(dataDir string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// 纵深防御：目录已经是 0700，这里再把库文件本体收紧。WAL/SHM 在运行中
+	// 会随 checkpoint 重建、权限回落到 umask，但那时目录已经进不去了。
+	for _, f := range []string{"triune.db", "triune.db-wal", "triune.db-shm"} {
+		_ = os.Chmod(filepath.Join(dataDir, f), 0o600)
 	}
 	return s, nil
 }

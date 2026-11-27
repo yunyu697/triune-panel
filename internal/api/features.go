@@ -51,6 +51,12 @@ func (a *Server) resetSubToken(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/external-nodes/import-url {"url":"...","prefix":""}
+//
+// 这里**不**走 guardOutboundHost（规则集镜像走的那个）：自建 subconverter
+// 在内网是常见用法，拒绝私网地址会把这条功能直接废掉。代价是 admin 能让
+// 面板去请求任意地址；面板是单用户自托管工具，admin 本来就能改出站与内核，
+// 威胁模型上不增加新能力。给不信任的人开 admin 之前要知道这一点（README
+// 「管理员与角色」里写了）。
 func (a *Server) importSubURL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL    string `json:"url"`

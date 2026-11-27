@@ -302,8 +302,9 @@ func (a *Server) Handler() http.Handler {
 		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(data))
 	})
 	// 安全响应头包在最外层：连 401/404 这类错误响应也要带上，
-	// 否则错误页仍可能被浏览器按 HTML 嗅探执行。
-	return a.securityHeaders(mux)
+	// 否则错误页仍可能被浏览器按 HTML 嗅探执行。请求体上限再往外套一层：
+	// 它管的是入站数据，与响应头无关，但要覆盖所有路由（含免认证的登录）。
+	return a.bodyLimit(a.securityHeaders(mux))
 }
 
 // ---- helpers ----

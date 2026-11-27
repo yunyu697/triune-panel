@@ -89,6 +89,26 @@ func htmlNeedsInlineScript(b []byte) bool {
 // （进了浏览器内置列表就很难撤），自托管面板不该替用户做这种决定。
 const hstsMaxAge = "max-age=15552000" // 180 天
 
+// maxRequestBody 是所有请求体的统一上限。
+//
+// 大多数 handler 直接 json.NewDecoder(r.Body).Decode，没有自己的限长；
+// 合法请求里最大的是导入 3x-ui 全量 JSON（8 MB）。统一上限取 12 MB：
+// 比最大的合法请求高一点，同时挡住「发一个无限大的 body 占住连接与内存」。
+// 个别接口内部还有更小的 MaxBytesReader（4 MB 配置、64 KB 设置），
+// 那两个先生效，行为不变。
+const maxRequestBody = 12 << 20
+
+// bodyLimit 是最外层的一层闸：没有它，37 个 handler 的请求体没有上限。
+// 放在 securityHeaders 外面，连错误响应也一起管。
+func (a *Server) bodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // securityHeaders 给所有响应加安全头，并按需下发 HSTS。
 func (a *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

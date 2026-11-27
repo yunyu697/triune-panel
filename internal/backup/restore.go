@@ -54,7 +54,7 @@ func Restore(opts RestoreOptions) (*RestoreResult, error) {
 	tmpDir := filepath.Join(opts.DataDir, ".restore-"+stamp)
 	oldDir := filepath.Join(opts.DataDir, ".pre-restore-"+stamp)
 
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tmpDir)
@@ -68,7 +68,7 @@ func Restore(opts RestoreOptions) (*RestoreResult, error) {
 	}
 
 	// 把现有内容（除 backups/ 与临时目录）移到 .pre-restore-<ts>
-	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
 		return nil, err
 	}
 	if _, err := moveEntries(opts.DataDir, oldDir, true); err != nil {
@@ -84,6 +84,11 @@ func Restore(opts RestoreOptions) (*RestoreResult, error) {
 		return nil, fmt.Errorf("写入新数据失败，已回滚到恢复前状态: %w", err)
 	}
 	_ = os.RemoveAll(oldDir)
+	// 数据目录本身也收紧：恢复常被用来「把旧机器的数据搬过来」，那些安装
+	// 目录多半是 0755；不收紧的话，前面逐文件 0600 全白做（目录能进就能列）。
+	if err := os.Chmod(opts.DataDir, 0o700); err != nil {
+		return nil, err
+	}
 
 	preserved := 0
 	if entries, err := os.ReadDir(filepath.Join(opts.DataDir, "backups")); err == nil {
@@ -128,16 +133,19 @@ func extract(archive, dst, passphrase string) (int, error) {
 		if !strings.HasPrefix(target, filepath.Clean(dst)+string(os.PathSeparator)) {
 			return count, fmt.Errorf("归档条目越界: %s", hdr.Name)
 		}
+		// 归档里的 mode 不可信：它可能是从 0644 的旧安装打出来的，而这棵树
+		// 里有数据库（密码哈希、TOTP 密钥、订阅令牌）与证书私钥。恢复时统一
+		// 收紧到只有运行面板的账号能读写——与 store.Open 建目录的权限一致。
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o700); err != nil {
 				return count, err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return count, err
 			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				return count, err
 			}
